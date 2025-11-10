@@ -1,0 +1,8 @@
+{
+  "android": {
+    "package": "com.anonymous.fun"
+  },
+  "ios": {
+    "bundleIdentifier": "com.anonymous.fun"
+  }
+}
