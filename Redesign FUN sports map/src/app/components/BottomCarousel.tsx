@@ -1,5 +1,5 @@
-import React from "react";
-import { motion } from "motion/react";
+import React, { useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   Flame,
   MapPin,
@@ -54,6 +54,7 @@ export const BottomCarousel = ({
   onCreateGame,
 }: BottomCarouselProps) => {
   const isMobile = useIsMobile();
+  const [radialMenuOpen, setRadialMenuOpen] = useState(false);
 
   return (
     <div className="absolute bottom-0 left-0 right-0 z-40 pb-6 pt-12 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/80 to-transparent pointer-events-none flex flex-col justify-end">
@@ -188,40 +189,74 @@ export const BottomCarousel = ({
         </>
       )}
 
-      {/* Mobile only: circular nav a little above bottom */}
+      {/* Mobile only: circular nav — center Map button reveals four others on press */}
       {isMobile && (
-        <div className="flex justify-center mt-4 mb-4 pointer-events-auto">
+        <div className="flex justify-center mt-4 mb-4 pointer-events-auto relative z-[50]">
           <div className="relative w-28 h-28">
-            {/* Center = Map (active) */}
-            <button
+            {/* Backdrop: tap to close radial menu */}
+            <AnimatePresence>
+              {radialMenuOpen && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="fixed inset-0 z-[45]"
+                  aria-hidden
+                  onClick={() => setRadialMenuOpen(false)}
+                />
+              )}
+            </AnimatePresence>
+
+            {/* Center = Map (active); press to open/close radial menu */}
+            <motion.button
               type="button"
               className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-14 rounded-full bg-slate-800/95 border-2 border-emerald-500/50 shadow-xl flex items-center justify-center text-emerald-400 hover:border-emerald-500 transition-colors z-10"
-              aria-label="Map"
+              aria-label={radialMenuOpen ? "Close menu" : "Map"}
+              onClick={() => setRadialMenuOpen((v) => !v)}
+              whileTap={{ scale: 0.95 }}
             >
               <MapPin className="w-6 h-6 drop-shadow-[0_0_6px_rgba(16,185,129,0.6)]" />
-            </button>
-            {/* Four items on circle around center */}
-            {NAV_ITEMS.filter((i) => i.id !== "map").map(({ id, label, Icon }, i) => {
-              const angle = (i / 4) * 360 - 90;
-              const r = 44;
-              const x = Math.cos((angle * Math.PI) / 180) * r;
-              const y = Math.sin((angle * Math.PI) / 180) * r;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  className="absolute w-11 h-11 rounded-full bg-slate-800/95 border border-slate-600 shadow-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors z-10"
-                  style={{
-                    left: `calc(50% + ${x}px)`,
-                    top: `calc(50% + ${y}px)`,
-                    transform: "translate(-50%, -50%)",
-                  }}
-                  title={label}
-                >
-                  <Icon className="w-5 h-5" />
-                </button>
-              );
-            })}
+            </motion.button>
+
+            {/* Four items: hidden until center is pressed; wrapper handles position so motion doesn't override translate */}
+            <AnimatePresence>
+              {radialMenuOpen &&
+                NAV_ITEMS.filter((i) => i.id !== "map").map(({ id, label, Icon }, i) => {
+                  const angle = (i / 4) * 360 - 90;
+                  const r = 44;
+                  const x = Math.cos((angle * Math.PI) / 180) * r;
+                  const y = Math.sin((angle * Math.PI) / 180) * r;
+                  return (
+                    <div
+                      key={id}
+                      className="absolute w-11 h-11 flex items-center justify-center z-10"
+                      style={{
+                        left: `calc(50% + ${x}px)`,
+                        top: `calc(50% + ${y}px)`,
+                        transform: "translate(-50%, -50%)",
+                      }}
+                    >
+                      <motion.button
+                        type="button"
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
+                        transition={{
+                          type: "spring",
+                          stiffness: 400,
+                          damping: 24,
+                          delay: 0.03 * i,
+                        }}
+                        className="w-11 h-11 rounded-full bg-slate-800/95 border border-slate-600 shadow-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors"
+                        title={label}
+                      >
+                        <Icon className="w-5 h-5" />
+                      </motion.button>
+                    </div>
+                  );
+                })}
+            </AnimatePresence>
           </div>
         </div>
       )}

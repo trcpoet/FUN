@@ -94,8 +94,8 @@ export const TopNavigation = (props: TopNavigationProps) => {
           </motion.button>
         </div>
 
-        {/* Live Now — under search, top right; toggles carousel */}
-        <div className="relative">
+        {/* Live Now + Menu — aligned to the right; Menu button styled below */}
+        <div className="relative flex w-full justify-end items-center">
           <button
             type="button"
             onClick={onLiveNowToggle}
@@ -110,13 +110,18 @@ export const TopNavigation = (props: TopNavigationProps) => {
             Live Now
           </button>
 
-          {/* Web: nav modal under Live Now (dropdown) */}
+          {/* Web: nav modal under Live Now (dropdown) — same size as Live Now button */}
           {!isMobile && (
             <>
               <button
                 type="button"
                 onClick={() => setNavOpen((v) => !v)}
-                className="ml-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white border border-slate-600 hover:border-slate-500 bg-slate-800/60"
+                className={cn(
+                  "ml-2 flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors",
+                  navOpen
+                    ? "bg-slate-600/80 text-white border-slate-500"
+                    : "text-slate-400 hover:text-white border-slate-600 hover:border-slate-500 bg-slate-800/60"
+                )}
               >
                 Menu
               </button>
