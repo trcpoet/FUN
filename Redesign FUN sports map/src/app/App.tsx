@@ -94,6 +94,7 @@ export default function App() {
         }}
         enable3D={true}
         userAvatarUrl={null}
+        avatarGlbUrl={null}
       />
 
       {locationError && (
