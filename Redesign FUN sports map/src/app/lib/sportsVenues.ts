@@ -18,13 +18,36 @@ export type SportsVenueProperties = {
 export type SportsVenueFeature = Feature<Point, SportsVenueProperties>;
 export type SportsVenueGeoJSON = FeatureCollection<Point, SportsVenueProperties>;
 
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+// Primary; fallback if rate-limited (429)
+const OVERPASS_URLS = [
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass-api.de/api/interpreter",
+];
+
+let lastFetchTime = 0;
+const MIN_FETCH_INTERVAL_MS = 60_000; // 1 min between fetches
+
+const KM_TO_DEG_LAT = 1 / 111;
+const KM_TO_DEG_LNG = 1 / (111 * Math.cos((Math.PI * 40) / 180));
+
+/** Compute bbox for a circle of given radius (km) around center. */
+export function bboxFromCenterRadius(
+  centerLat: number,
+  centerLng: number,
+  radiusKm: number
+): { minLat: number; minLng: number; maxLat: number; maxLng: number } {
+  const dLat = radiusKm * KM_TO_DEG_LAT;
+  const dLng = radiusKm * KM_TO_DEG_LNG;
+  return {
+    minLat: centerLat - dLat,
+    maxLat: centerLat + dLat,
+    minLng: centerLng - dLng,
+    maxLng: centerLng + dLng,
+  };
+}
 
 /**
  * Fetch sports venues (pitches, sports centres) in a bounding box from OSM.
- * Stub: returns empty FeatureCollection; replace with real Overpass query when ready.
- * Example query for leisure=pitch and leisure=sports_centre:
- * [out:json]; node["leisure"="pitch"]({{bbox}}); node["leisure"="sports_centre"]({{bbox}}); out center;
  */
 export async function fetchSportsVenuesFromOverpass(bbox: {
   minLng: number;
@@ -46,13 +69,21 @@ export async function fetchSportsVenuesFromOverpass(bbox: {
     out center;
   `.replace(/\n\s+/g, " ");
 
-  try {
-    const res = await fetch(OVERPASS_URL, {
-      method: "POST",
-      body: query,
-      headers: { "Content-Type": "text/plain" },
-    });
-    if (!res.ok) return { type: "FeatureCollection", features: [] };
+  const now = Date.now();
+  if (now - lastFetchTime < MIN_FETCH_INTERVAL_MS) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  for (const OVERPASS_URL of OVERPASS_URLS) {
+    try {
+      const res = await fetch(OVERPASS_URL, {
+        method: "POST",
+        body: query,
+        headers: { "Content-Type": "text/plain" },
+      });
+      if (res.status === 429) continue; // try next server
+      if (!res.ok) return { type: "FeatureCollection", features: [] };
+      lastFetchTime = Date.now();
     const json = await res.json();
     const features: SportsVenueFeature[] = [];
     for (const el of json.elements || []) {
@@ -73,7 +104,9 @@ export async function fetchSportsVenuesFromOverpass(bbox: {
       });
     }
     return { type: "FeatureCollection", features };
-  } catch {
-    return { type: "FeatureCollection", features: [] };
+    } catch {
+      continue;
+    }
   }
+  return { type: "FeatureCollection", features: [] };
 }

@@ -1,9 +1,14 @@
+/// <reference types="vite/client" />
 import React, { useRef, useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { Flag } from "lucide-react";
 import type { GameRow } from "../../lib/supabase";
 import type { ProfileNearbyRow } from "../../lib/supabase";
 import { gamesToGeoJSON } from "../types/mapGeoJSON";
-import { fetchSportsVenuesFromOverpass } from "../lib/sportsVenues";
+import { fetchSportsVenuesFromOverpass, bboxFromCenterRadius } from "../lib/sportsVenues";
+import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
 import { Avatar3DOverlay } from "./Avatar3DOverlay";
+import { GameEventPopup } from "./GameEventPopup";
 
 const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined)?.trim() || undefined;
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?w=100&h=100&fit=crop";
@@ -23,9 +28,16 @@ type MapboxMapProps = {
   avatarGlbUrl?: string | null;
   /** true = 2D marker only; false = 3D avatar overlay when enable3D (default, no Mapbox GL conflict). */
   use2DAvatar?: boolean;
+  /** Called when user clicks Join in the event popup. */
+  onJoinGame?: (game: GameRow) => void;
+  /** Set of game ids the current user has joined (to show "Joined" in popup). */
+  joinedGameIds?: Set<string>;
   nearbyProfiles?: ProfileNearbyRow[];
   currentUserId?: string | null;
-  onMapDoubleClick?: (lat: number, lng: number) => void;
+  /** (lat, lng, viewportPoint) when user double-taps the map */
+  onMapDoubleClick?: (lat: number, lng: number, viewportPoint?: { x: number; y: number }) => void;
+  /** When this value changes, map flies to user location. */
+  centerOnUserTrigger?: number;
 };
 
 export function MapboxMap(props: MapboxMapProps) {
@@ -38,16 +50,24 @@ export function MapboxMap(props: MapboxMapProps) {
     userAvatarUrl = null,
     avatarGlbUrl = null,
     use2DAvatar = false,
+    onJoinGame,
+    joinedGameIds,
     nearbyProfiles = [],
     onMapDoubleClick,
+    centerOnUserTrigger,
   } = props;
   const currentUserId = props.currentUserId ?? null;
+  const joinedSet = joinedGameIds ?? new Set<string>();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("mapbox-gl").Map | null>(null);
   const playerMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
+  const gameMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
+  const venueMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
+  const venueRootsRef = useRef<ReturnType<typeof createRoot>[]>([]);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [eventPopup, setEventPopup] = useState<{ game: GameRow; point: { x: number; y: number } } | null>(null);
 
   // —— Map init: sports-first dark basemap, terrain, fog ———
   useEffect(() => {
@@ -62,7 +82,7 @@ export function MapboxMap(props: MapboxMapProps) {
           container: containerRef.current!,
           style: "mapbox://styles/mapbox/dark-v11",
           center: userCoords ? [userCoords.lng, userCoords.lat] : [-98, 40],
-          zoom: 13,
+          zoom: 15,
           pitch: enable3D ? 50 : 0,
           antialias: true,
         });
@@ -122,99 +142,103 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map || !mapLoaded || !userCoords) return;
     map.flyTo({
       center: [userCoords.lng, userCoords.lat],
-      zoom: 14,
+      zoom: 16,
       pitch: enable3D ? 50 : 0,
     });
   }, [mapLoaded, userCoords, enable3D]);
 
-  // —— Games as GeoJSON: glow (CircleLayer) + symbol (icon + roster text) ———
-  const gamesGeoJSON = React.useMemo(
-    () => gamesToGeoJSON(games, selectedGameId),
-    [games, selectedGameId]
-  );
-
+  // Center on user when "Center on me" is pressed (works without auth; uses browser geolocation)
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded) return;
+    if (!map || !mapLoaded || centerOnUserTrigger === undefined || centerOnUserTrigger < 1) return;
 
-    const sourceId = "fun-games";
-    const glowLayerId = "fun-games-glow";
-    const symbolLayerId = "fun-games-symbol";
+    const flyToCoords = (lat: number, lng: number) => {
+      map.flyTo({
+        center: [lng, lat],
+        zoom: 17,
+        pitch: enable3D ? 50 : 0,
+      });
+    };
 
-    if (!map.getSource(sourceId)) {
-      map.addSource(sourceId, {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-        promoteId: "id",
-      });
-      // Layer order: glow behind, symbol on top (sport emoji + roster text).
-      map.addLayer({
-        id: glowLayerId,
-        type: "circle",
-        source: sourceId,
-        paint: {
-          "circle-radius": 28,
-          "circle-blur": 0.6,
-          "circle-color": [
-            "match",
-            ["get", "status"],
-            "live",
-            "rgba(239, 68, 68, 0.75)",
-            "soon",
-            "rgba(249, 115, 22, 0.75)",
-            "rgba(34, 197, 94, 0.75)",
-          ],
-          "circle-stroke-width": 2,
-          "circle-stroke-color": [
-            "case",
-            ["==", ["get", "id"], selectedGameId ?? ""],
-            "rgba(255,255,255,0.95)",
-            "rgba(255,255,255,0.5)",
-          ],
-        },
-      });
-      map.addLayer({
-        id: symbolLayerId,
-        type: "symbol",
-        source: sourceId,
-        layout: {
-          "text-field": ["concat", ["get", "sport_emoji"], " ", ["get", "players_label"]],
-          "text-size": 14,
-          "text-anchor": "center",
-          "text-allow-overlap": true,
-        },
-        paint: {
-          "text-color": "#ffffff",
-          "text-halo-color": "rgba(0,0,0,0.8)",
-          "text-halo-width": 2,
-        },
-      });
+    if (userCoords) {
+      flyToCoords(userCoords.lat, userCoords.lng);
+      return;
     }
 
-    const source = map.getSource(sourceId) as import("mapbox-gl").GeoJSONSource;
-    if (source) source.setData(gamesGeoJSON);
+    if (!navigator?.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => flyToCoords(pos.coords.latitude, pos.coords.longitude),
+      () => {},
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  }, [mapLoaded, centerOnUserTrigger, userCoords, enable3D]);
 
-    return () => {};
-  }, [mapLoaded, gamesGeoJSON, selectedGameId]);
-
-  // Click on game: return feature id and resolve to GameRow
+  // —— Games as DOM markers: sport emoji only, roster count top-right ———
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
 
-    const handler = (e: { point: { x: number; y: number } }) => {
-      const features = map.queryRenderedFeatures(e.point, {
-        layers: ["fun-games-glow", "fun-games-symbol"],
+    gameMarkersRef.current.forEach((m) => m.remove());
+    gameMarkersRef.current = [];
+
+    const features = gamesToGeoJSON(games, selectedGameId).features;
+    if (features.length === 0) return;
+
+    import("mapbox-gl").then((mapboxgl) => {
+      features.forEach((f) => {
+        const id = f.properties?.id;
+        const game = games.find((g) => g.id === id);
+        if (!game || !f.geometry || f.geometry.type !== "Point") return;
+        const [lng, lat] = f.geometry.coordinates;
+
+        const wrap = document.createElement("div");
+        wrap.className = "game-marker-wrap";
+        wrap.dataset.gameId = id;
+        wrap.style.cssText =
+          "position:relative;cursor:pointer;display:flex;align-items:center;justify-content:center;width:36px;height:36px;";
+        const emojiWrap = document.createElement("div");
+        emojiWrap.style.cssText =
+          "width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:22px;line-height:1;text-shadow:0 0 4px rgba(0,0,0,0.8),0 1px 2px rgba(0,0,0,0.9);background:rgba(15,23,42,0.9);border-radius:8px;border:2px solid rgba(251,191,36,0.5);";
+        emojiWrap.textContent = f.properties?.sport_emoji ?? "🎯";
+        wrap.appendChild(emojiWrap);
+        const roster = document.createElement("div");
+        roster.style.cssText =
+          "position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;font-size:10px;font-weight:600;color:#e2e8f0;background:rgba(251,191,36,0.9);border-radius:9px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.5);";
+        roster.textContent = f.properties?.players_label ?? "";
+        wrap.appendChild(roster);
+
+        wrap.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          onSelectGame(game);
+          const rect = wrap.getBoundingClientRect();
+          const container = map.getContainer().getBoundingClientRect();
+          setEventPopup({
+            game,
+            point: { x: rect.left - container.left + rect.width / 2, y: rect.top - container.top },
+          });
+        });
+
+        const marker = new mapboxgl.default.Marker({ element: wrap, offset: [0, 0] })
+          .setLngLat([lng, lat])
+          .addTo(map);
+        gameMarkersRef.current.push(marker);
       });
-      const fid = features[0]?.properties?.id;
-      if (fid) {
-        const game = games.find((g) => g.id === fid) ?? null;
-        onSelectGame(game);
-      }
+    });
+
+    return () => {
+      gameMarkersRef.current.forEach((m) => m.remove());
+      gameMarkersRef.current = [];
     };
+  }, [mapLoaded, games, selectedGameId, onSelectGame]);
+
+  // Map click (not on marker) closes popup
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    const handler = () => setEventPopup(null);
     map.on("click", handler);
-    return () => map.off("click", handler);
-  }, [mapLoaded, games, onSelectGame]);
+    return () => { map.off("click", handler); };
+  }, [mapLoaded]);
 
   const glbUrl = avatarGlbUrl ?? userAvatarUrl ?? DEFAULT_AVATAR_GLB;
   const use3DOverlay = enable3D && !!userCoords && !!glbUrl && !use2DAvatar;
@@ -300,62 +324,71 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [mapLoaded, nearbyProfiles, currentUserId]);
 
-  // —— Sports venue emphasis: OSM Overpass (parks, pitches, sports centres) ———
+  // —— Sports venues: 5km radius, Lucide Flag icon (small, no white bg) ———
+  const venueFetchKey = userCoords ? `${userCoords.lat.toFixed(4)},${userCoords.lng.toFixed(4)}` : null;
+
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded) return;
+    if (!map || !mapLoaded || !userCoords || !venueFetchKey) return;
 
-    const sourceId = "fun-sports-venues";
-    const layerId = "fun-sports-venues-dots";
+    const addVenueMarkers = (geojson: SportsVenueGeoJSON) => {
+      venueMarkersRef.current.forEach((m) => m.remove());
+      venueMarkersRef.current = [];
+      venueRootsRef.current.forEach((r) => r.unmount());
+      venueRootsRef.current = [];
 
-    const fetchAndAdd = () => {
-      const b = map.getBounds();
-      if (!b) return;
-      const bbox = {
-        minLng: b.getWest(),
-        minLat: b.getSouth(),
-        maxLng: b.getEast(),
-        maxLat: b.getNorth(),
-      };
-      fetchSportsVenuesFromOverpass(bbox).then((geojson) => {
-        if (!map.getSource(sourceId)) {
-          map.addSource(sourceId, { type: "geojson", data: geojson });
-          const layerSpec = {
-            id: layerId,
-            type: "circle" as const,
-            source: sourceId,
-            paint: {
-              "circle-radius": 6,
-              "circle-color": "rgba(34, 197, 94, 0.4)",
-              "circle-stroke-width": 1,
-              "circle-stroke-color": "rgba(34, 197, 94, 0.8)",
-            },
-          };
-          if (map.getLayer("fun-games-glow")) {
-            map.addLayer(layerSpec, "fun-games-glow");
-          } else {
-            map.addLayer(layerSpec);
-          }
-        } else {
-          (map.getSource(sourceId) as import("mapbox-gl").GeoJSONSource).setData(geojson);
-        }
+      import("mapbox-gl").then((mapboxgl) => {
+        geojson.features.forEach((f) => {
+          if (!f.geometry || f.geometry.type !== "Point") return;
+          const [lng, lat] = f.geometry.coordinates;
+
+          const wrap = document.createElement("div");
+          wrap.style.cssText =
+            "display:flex;align-items:center;justify-content:center;width:20px;height:20px;color:#fbbf24;";
+          const root = createRoot(wrap);
+          root.render(
+            React.createElement(Flag, {
+              size: 18,
+              strokeWidth: 2.5,
+              style: { filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.6))" },
+            })
+          );
+          venueRootsRef.current.push(root);
+
+          const marker = new mapboxgl.default.Marker({ element: wrap })
+            .setLngLat([lng, lat])
+            .addTo(map);
+          venueMarkersRef.current.push(marker);
+        });
       });
     };
 
-    if (!map.getSource(sourceId)) fetchAndAdd();
-    map.on("moveend", fetchAndAdd);
-    return () => map.off("moveend", fetchAndAdd);
-  }, [mapLoaded]);
+    const bbox = bboxFromCenterRadius(userCoords.lat, userCoords.lng, 5);
+    fetchSportsVenuesFromOverpass(bbox).then(addVenueMarkers);
 
-  // Double-click: create game at location
+    return () => {
+      venueMarkersRef.current.forEach((m) => m.remove());
+      venueMarkersRef.current = [];
+      venueRootsRef.current.forEach((r) => r.unmount());
+      venueRootsRef.current = [];
+    };
+  }, [mapLoaded, venueFetchKey]);
+
+  // Double-click/double-tap: create game at location; pass viewport point so modal can open next to it
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || !onMapDoubleClick) return;
-    const handler = (e: { lngLat: { lat: number; lng: number } }) => {
-      onMapDoubleClick(e.lngLat.lat, e.lngLat.lng);
+    map.doubleClickZoom.disable();
+    const handler = (e: { lngLat: { lat: number; lng: number }; point: { x: number; y: number } }) => {
+      const rect = map.getContainer().getBoundingClientRect();
+      const viewportPoint = { x: rect.left + e.point.x, y: rect.top + e.point.y };
+      onMapDoubleClick(e.lngLat.lat, e.lngLat.lng, viewportPoint);
     };
     map.on("dblclick", handler);
-    return () => map.off("dblclick", handler);
+    return () => {
+      map.off("dblclick", handler);
+      map.doubleClickZoom.enable();
+    };
   }, [mapLoaded, onMapDoubleClick]);
 
   if (!MAPBOX_TOKEN || mapError) {
@@ -381,6 +414,21 @@ export function MapboxMap(props: MapboxMapProps) {
         className={`absolute inset-0 w-full h-full ${!mapLoaded ? "pointer-events-none" : ""}`}
         style={{ minHeight: "100%" }}
       />
+      {eventPopup && containerRef.current && (
+        <div className="absolute inset-0 pointer-events-none">
+          <div
+            className="absolute pointer-events-auto"
+            style={{ left: eventPopup.point.x, top: eventPopup.point.y }}
+          >
+            <GameEventPopup
+              game={eventPopup.game}
+              onClose={() => setEventPopup(null)}
+              onJoin={onJoinGame}
+              joined={joinedSet.has(eventPopup.game.id)}
+            />
+          </div>
+        </div>
+      )}
       {mapLoaded && use3DOverlay && userCoords && mapRef.current && (
         <Avatar3DOverlay
           map={mapRef.current}

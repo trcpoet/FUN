@@ -10,7 +10,6 @@ import {
   Settings,
   MessageCircle,
   X,
-  Plus,
 } from "lucide-react";
 import { cn } from "./MapCanvas";
 import { useIsMobile } from "./ui/use-mobile";
@@ -39,7 +38,6 @@ export type BottomCarouselProps = {
   chatOpenForGameId: string | null;
   onCloseChat: () => void;
   liveNowOpen?: boolean;
-  onCreateGame?: () => void;
 };
 
 export const BottomCarousel = ({
@@ -51,7 +49,6 @@ export const BottomCarousel = ({
   chatOpenForGameId,
   onCloseChat,
   liveNowOpen = false,
-  onCreateGame,
 }: BottomCarouselProps) => {
   const isMobile = useIsMobile();
   const [radialMenuOpen, setRadialMenuOpen] = useState(false);
@@ -170,21 +167,6 @@ export const BottomCarousel = ({
           );
         })}
 
-            {/* Start a Game card (inside Live Now carousel) */}
-            <motion.div
-              initial={{ y: 50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.2, type: "spring", stiffness: 200, damping: 20 }}
-              onClick={() => onCreateGame?.()}
-              className="relative min-w-[200px] w-[60vw] h-[160px] rounded-3xl overflow-hidden snap-center shrink-0 border-2 border-dashed border-slate-700/50 flex flex-col items-center justify-center bg-slate-800/40 backdrop-blur-md cursor-pointer hover:bg-slate-800/60 transition-colors group pointer-events-auto"
-            >
-              <div className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 group-hover:text-emerald-400 group-hover:border-emerald-500/50 flex items-center justify-center mb-3 transition-colors border border-slate-700">
-                <Plus className="w-6 h-6" />
-              </div>
-              <p className="text-sm font-bold text-slate-300 group-hover:text-white transition-colors">
-                Start a Game
-              </p>
-            </motion.div>
           </div>
         </>
       )}

@@ -6,6 +6,7 @@
    - In the dashboard: **SQL Editor** → **New query**
    - Paste the contents of `schema.sql`
    - Click **Run**
+   - Then run the migration: open **New query**, paste the contents of `migrations/20250315000000_gamification_avatars_notifications.sql`, click **Run**
 
 3. **Get your keys**
    - **Settings** → **API**: copy **Project URL** and **anon public** key.

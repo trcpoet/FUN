@@ -117,14 +117,14 @@ export function CreateGameSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="bg-slate-900 border-slate-700 text-white rounded-t-3xl max-h-[85vh] flex flex-col"
+        className="bg-slate-900 border-slate-700 text-white rounded-t-2xl max-h-[70vh] flex flex-col p-4"
         aria-describedby="create-game-desc"
       >
         <SheetDescription id="create-game-desc" className="sr-only">
           Create a new pickup game. Choose sport, players, and name.
         </SheetDescription>
-        <SheetHeader className="text-left pb-2 border-b border-slate-700/50">
-          <div className="flex items-center gap-2 text-slate-400 text-sm">
+        <SheetHeader className="text-left pb-1.5 border-b border-slate-700/50 px-0">
+          <div className="flex items-center gap-1.5 text-slate-400 text-xs">
             {STEPS.map((s, i) => (
               <span key={s.key}>
                 {i > 0 && " → "}
@@ -134,13 +134,13 @@ export function CreateGameSheet({
               </span>
             ))}
           </div>
-          <SheetTitle className="text-white text-xl flex items-center gap-2">
-            {React.createElement(STEPS[step]?.icon ?? Trophy, { className: "w-6 h-6 text-emerald-400" })}
+          <SheetTitle className="text-white text-base flex items-center gap-1.5 pt-0.5">
+            {React.createElement(STEPS[step]?.icon ?? Trophy, { className: "w-4 h-4 text-emerald-400 shrink-0" })}
             {currentStepTitle}
           </SheetTitle>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto py-6 px-1">
+        <div className="flex-1 overflow-y-auto py-3 px-0 min-h-0">
           <AnimatePresence mode="wait">
             {stepKey === "sport" && (
               <motion.div
@@ -149,21 +149,21 @@ export function CreateGameSheet({
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
-                className="grid grid-cols-2 sm:grid-cols-3 gap-3"
+                className="grid grid-cols-3 sm:grid-cols-4 gap-2"
               >
                 {SPORTS.map((s) => (
                   <button
                     key={s.id}
                     type="button"
                     onClick={() => setSport(s.id)}
-                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all font-semibold ${
+                    className={`flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-xl border-2 transition-all font-medium ${
                       sport === s.id
-                        ? "border-emerald-500 bg-emerald-500/20 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.2)]"
+                        ? "border-emerald-500 bg-emerald-500/20 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
                         : "border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-600 hover:bg-slate-800"
                     }`}
                   >
-                    <span className="text-3xl">{s.icon}</span>
-                    <span className="text-sm">{s.label}</span>
+                    <span className="text-xl">{s.icon}</span>
+                    <span className="text-xs">{s.label}</span>
                   </button>
                 ))}
               </motion.div>
@@ -176,14 +176,14 @@ export function CreateGameSheet({
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
-                className="flex flex-wrap justify-center gap-3"
+                className="flex flex-wrap justify-center gap-2"
               >
                 {SPOT_OPTIONS.map((n) => (
                   <button
                     key={n}
                     type="button"
                     onClick={() => setSpots(n)}
-                    className={`w-14 h-14 rounded-2xl border-2 flex items-center justify-center text-lg font-bold transition-all ${
+                    className={`w-11 h-11 rounded-xl border-2 flex items-center justify-center text-sm font-bold transition-all ${
                       spots === n
                         ? "border-emerald-500 bg-emerald-500/20 text-emerald-400"
                         : "border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-600"
@@ -192,7 +192,7 @@ export function CreateGameSheet({
                     {n}
                   </button>
                 ))}
-                <p className="w-full text-center text-slate-400 text-sm mt-2">Spots needed</p>
+                <p className="w-full text-center text-slate-400 text-xs mt-1.5">Spots needed</p>
               </motion.div>
             )}
 
@@ -208,9 +208,9 @@ export function CreateGameSheet({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="e.g. Friday Night Lights"
-                  className="h-14 text-lg bg-slate-800 border-slate-600 text-white placeholder-slate-500 rounded-2xl"
+                  className="h-11 text-base bg-slate-800 border-slate-600 text-white placeholder-slate-500 rounded-xl"
                 />
-                <p className="text-slate-400 text-sm mt-2">Optional — or leave blank for &quot;Pickup game&quot;</p>
+                <p className="text-slate-400 text-xs mt-1.5">Optional — or leave blank for &quot;Pickup game&quot;</p>
               </motion.div>
             )}
 
@@ -221,17 +221,15 @@ export function CreateGameSheet({
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
-                className="rounded-2xl border border-slate-700 bg-slate-800/60 p-4 space-y-2"
+                className="rounded-xl border border-slate-700 bg-slate-800/60 p-3 space-y-1"
               >
-                <p className="flex items-center gap-2 text-slate-300">
-                  <span className="text-2xl">{SPORTS.find((s) => s.id === sport)?.icon ?? "🎯"}</span>
-                  <span className="font-semibold text-white">{sport}</span>
+                <p className="flex items-center gap-1.5 text-slate-300">
+                  <span className="text-xl">{SPORTS.find((s) => s.id === sport)?.icon ?? "🎯"}</span>
+                  <span className="font-semibold text-white text-sm">{sport}</span>
                 </p>
-                <p className="text-slate-400">
+                <p className="text-slate-400 text-xs">
                   <span className="text-white font-medium">{spots}</span> spots
-                </p>
-                <p className="text-slate-400">
-                  <span className="text-white font-medium">{title.trim() || "Pickup game"}</span>
+                  · <span className="text-white font-medium">{title.trim() || "Pickup game"}</span>
                 </p>
               </motion.div>
             )}
@@ -244,13 +242,13 @@ export function CreateGameSheet({
           </p>
         )}
 
-        <SheetFooter className="flex-row gap-2 border-t border-slate-700/50 pt-4">
+        <SheetFooter className="flex-row gap-2 border-t border-slate-700/50 pt-3 mt-auto">
           {step > 0 ? (
             <Button
               type="button"
               variant="outline"
               onClick={handleBack}
-              className="border-slate-600 text-slate-300 hover:bg-slate-800"
+              className="border-slate-600 text-slate-300 hover:bg-slate-800 h-9 text-sm rounded-lg"
             >
               Back
             </Button>
@@ -261,10 +259,10 @@ export function CreateGameSheet({
             type="button"
             onClick={handleNext}
             disabled={!canNext || loading}
-            className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white h-12 text-base font-semibold rounded-xl"
+            className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white h-9 text-sm font-semibold rounded-lg"
           >
             {loading ? "Creating…" : stepKey === "confirm" ? "Create game" : "Next"}
-            {stepKey !== "confirm" && <ChevronRight className="w-5 h-5 ml-1" />}
+            {stepKey !== "confirm" && <ChevronRight className="w-4 h-4 ml-0.5" />}
           </Button>
         </SheetFooter>
       </SheetContent>

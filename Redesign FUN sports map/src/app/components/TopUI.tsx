@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Filter, MapPin, Activity, Calendar, Users, Settings } from 'lucide-react';
+import { Search, Filter, MapPin, Activity, Calendar, Users, Settings, Navigation } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useIsMobile } from './ui/use-mobile';
 
@@ -14,10 +14,11 @@ const NAV_ITEMS = [
 export type TopNavigationProps = {
   liveNowOpen?: boolean;
   onLiveNowToggle?: () => void;
+  onCenterOnUser?: () => void;
 };
 
 export const TopNavigation = (props: TopNavigationProps) => {
-  const { liveNowOpen = false, onLiveNowToggle } = props;
+  const { liveNowOpen = false, onLiveNowToggle, onCenterOnUser } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const searchWrapRef = useRef<HTMLDivElement>(null);
@@ -76,15 +77,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
             </AnimatePresence>
           </div>
 
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            className="relative w-12 h-12 rounded-full border-2 border-slate-700/50 bg-slate-800/80 backdrop-blur-md overflow-hidden shrink-0 flex items-center justify-center shadow-lg"
-          >
-            <img src="https://images.unsplash.com/photo-1624280184393-53ce60e214ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx5b3VuZyUyMG1hbGUlMjBjYXN1YWwlMjBzcG9ydHN3ZWFyJTIwcG9ydHJhaXR8ZW58MXx8fHwxNzczMzc1ODE5fDA&ixlib=rb-4.1.0&q=80&w=100" alt="Profile" className="w-full h-full object-cover" />
-            <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-slate-800" />
-          </motion.button>
-
-          {/* Filter button (was sun/weather) */}
+          {/* Filter button */}
           <motion.button
             whileTap={{ scale: 0.95 }}
             className="w-12 h-12 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-md shrink-0 flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors shadow-lg"
@@ -94,63 +87,78 @@ export const TopNavigation = (props: TopNavigationProps) => {
           </motion.button>
         </div>
 
-        {/* Live Now + Menu — aligned to the right; Menu button styled below */}
-        <div className="relative flex w-full justify-end items-center">
-          <button
-            type="button"
-            onClick={onLiveNowToggle}
-            className={cn(
-              "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors",
-              liveNowOpen
-                ? "bg-orange-500/30 text-orange-300 border-orange-500 shadow-orange-500/20"
-                : "bg-orange-500/20 text-orange-400 border-orange-500/50 shadow-orange-500/20"
-            )}
-          >
-            <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
-            Live Now
-          </button>
-
-          {/* Web: nav modal under Live Now (dropdown) — same size as Live Now button */}
-          {!isMobile && (
-            <>
-              <button
-                type="button"
-                onClick={() => setNavOpen((v) => !v)}
-                className={cn(
-                  "ml-2 flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors",
-                  navOpen
-                    ? "bg-slate-600/80 text-white border-slate-500"
-                    : "text-slate-400 hover:text-white border-slate-600 hover:border-slate-500 bg-slate-800/60"
-                )}
-              >
-                Menu
-              </button>
-              {navOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-[55]"
-                    aria-hidden
-                    onClick={() => setNavOpen(false)}
-                  />
-                  <div className="absolute top-full right-0 mt-2 w-52 rounded-xl bg-slate-800/95 border border-slate-600 shadow-xl py-2 z-[60] pointer-events-auto backdrop-blur-md">
-                    {NAV_ITEMS.map(({ id, label, Icon, active }) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setNavOpen(false)}
-                        className={cn(
-                          "w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors first:rounded-t-lg last:rounded-b-lg",
-                          active ? "text-emerald-400 bg-emerald-500/10" : "text-slate-300 hover:text-white hover:bg-slate-700/50"
-                        )}
-                      >
-                        <Icon className="w-4 h-4 shrink-0" />
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </>
+        {/* Row 1: Live Now + Menu (one line). Row 2: Location icon under them. */}
+        <div className="relative flex flex-col items-end gap-1.5 w-full">
+          {/* One line: Live Now + Menu */}
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onLiveNowToggle}
+              className={cn(
+                "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors",
+                liveNowOpen
+                  ? "bg-orange-500/30 text-orange-300 border-orange-500 shadow-orange-500/20"
+                  : "bg-orange-500/20 text-orange-400 border-orange-500/50 shadow-orange-500/20"
               )}
-            </>
+            >
+              <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+              Live Now
+            </button>
+
+            {!isMobile && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setNavOpen((v) => !v)}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors",
+                    navOpen
+                      ? "bg-slate-600/80 text-white border-slate-500"
+                      : "text-slate-400 hover:text-white border-slate-600 hover:border-slate-500 bg-slate-800/60"
+                  )}
+                >
+                  Menu
+                </button>
+                {navOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-[55]"
+                      aria-hidden
+                      onClick={() => setNavOpen(false)}
+                    />
+                    <div className="absolute top-full right-0 mt-2 w-52 rounded-xl bg-slate-800/95 border border-slate-600 shadow-xl py-2 z-[60] pointer-events-auto backdrop-blur-md">
+                      {NAV_ITEMS.map(({ id, label, Icon, active }) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setNavOpen(false)}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors first:rounded-t-lg last:rounded-b-lg",
+                            active ? "text-emerald-400 bg-emerald-500/10" : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+                          )}
+                        >
+                          <Icon className="w-4 h-4 shrink-0" />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Location icon under Live Now + Menu */}
+          {onCenterOnUser && (
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.95 }}
+              onClick={onCenterOnUser}
+              className="w-10 h-10 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-md flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors shadow-lg"
+              aria-label="Center map on my location"
+            >
+              <Navigation className="w-5 h-5" />
+            </motion.button>
           )}
         </div>
       </div>
