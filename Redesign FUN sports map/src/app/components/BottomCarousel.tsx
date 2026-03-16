@@ -10,7 +10,9 @@ import {
   Settings,
   MessageCircle,
   X,
+  Clock,
 } from "lucide-react";
+import { format } from "date-fns";
 import { cn } from "./MapCanvas";
 import { useIsMobile } from "./ui/use-mobile";
 import type { GameRow } from "../../lib/supabase";
@@ -130,9 +132,23 @@ export const BottomCarousel = ({
                 <h3 className="text-lg font-black text-white mb-0.5 leading-tight tracking-tight drop-shadow-md">
                   {game.title}
                 </h3>
-                <p className="text-sm text-slate-300 font-medium mb-3 drop-shadow-md">
+                <p className="text-sm text-slate-300 font-medium mb-1 drop-shadow-md">
                   {game.sport} • {game.spots_needed} spots left
                 </p>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-400 mb-3">
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {game.starts_at
+                      ? format(new Date(game.starts_at), "MMM d, h:mm a")
+                      : "Time TBD"}
+                  </span>
+                  {typeof game.lat === "number" && typeof game.lng === "number" && (
+                    <span className="flex items-center gap-1">
+                      <MapPin className="w-3 h-3" />
+                      {game.lat.toFixed(2)}°, {game.lng.toFixed(2)}°
+                    </span>
+                  )}
+                </div>
 
                 <div className="flex items-center justify-between">
                   <div className="flex items-center -space-x-2 drop-shadow-lg">

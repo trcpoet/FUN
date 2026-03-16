@@ -9,6 +9,7 @@ import { fetchSportsVenuesFromOverpass, bboxFromCenterRadius } from "../lib/spor
 import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
 import { Avatar3DOverlay } from "./Avatar3DOverlay";
 import { GameEventPopup } from "./GameEventPopup";
+import { useIsMobile } from "./ui/use-mobile";
 
 const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined)?.trim() || undefined;
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?w=100&h=100&fit=crop";
@@ -68,6 +69,7 @@ export function MapboxMap(props: MapboxMapProps) {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [eventPopup, setEventPopup] = useState<{ game: GameRow; point: { x: number; y: number } } | null>(null);
+  const isMobile = useIsMobile();
 
   // —— Map init: sports-first dark basemap, terrain, fog ———
   useEffect(() => {
@@ -109,6 +111,10 @@ export function MapboxMap(props: MapboxMapProps) {
             map!.setTerrain({ source: "fun-terrain", exaggeration: 1.2 });
           } catch (_) {}
         }
+        // Disable default double-click zoom so we can use double-tap/double-click to open "Create game"
+        try {
+          map!.doubleClickZoom?.disable();
+        } catch (_) {}
         // Fog for depth perception (Mapbox GL JS v3)
         try {
           map!.setFog({
@@ -231,14 +237,82 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [mapLoaded, games, selectedGameId, onSelectGame]);
 
-  // Map click (not on marker) closes popup
+  // Map click:
+  // - On desktop: close popup only.
+  // - On mobile: use single tap to center map and open Create Game modal.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-    const handler = () => setEventPopup(null);
+    const handler = (e: { lngLat: { lat: number; lng: number }; point: { x: number; y: number } }) => {
+      if (isMobile && onMapDoubleClick) {
+        const container = map.getContainer();
+        const rect = container.getBoundingClientRect();
+
+        // Use the tap's geographic location for the game,
+        // but recenter the map so the modal appears in a stable spot.
+        const tapLat = e.lngLat.lat;
+        const tapLng = e.lngLat.lng;
+
+        map.easeTo({
+          center: [tapLng, tapLat],
+          duration: 300,
+        });
+
+        // Anchor modal to viewport center so it never goes off-screen,
+        // regardless of where the tap happened.
+        const centerPoint = { x: rect.width / 2, y: rect.height / 2 };
+        const viewportPoint = {
+          x: rect.left + centerPoint.x,
+          y: rect.top + centerPoint.y,
+        };
+
+        onMapDoubleClick(tapLat, tapLng, viewportPoint);
+        return;
+      }
+
+      // Desktop: normal click just closes any open popup
+      setEventPopup(null);
+    };
     map.on("click", handler);
-    return () => { map.off("click", handler); };
-  }, [mapLoaded]);
+    return () => {
+      map.off("click", handler);
+    };
+  }, [mapLoaded, isMobile, onMapDoubleClick]);
+
+  // Map double-click / double-tap (desktop only): center map and open Create Game modal via callback
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !onMapDoubleClick || isMobile) return;
+
+    const handler = (e: { lngLat: { lat: number; lng: number }; point: { x: number; y: number } }) => {
+      const container = map.getContainer();
+      const rect = container.getBoundingClientRect();
+
+      // Use the visual center of the map viewport as the game location,
+      // so even if the tap is at the bottom, we recentre the map first.
+      const centerPoint = { x: rect.width / 2, y: rect.height / 2 };
+      const centerLngLat = map.unproject(centerPoint);
+
+      // Center the map on this point (keeping current zoom/pitch)
+      map.easeTo({
+        center: [centerLngLat.lng, centerLngLat.lat],
+        duration: 300,
+      });
+
+      // Anchor the modal to the viewport center so it never goes off-screen
+      const viewportPoint = {
+        x: rect.left + centerPoint.x,
+        y: rect.top + centerPoint.y,
+      };
+
+      onMapDoubleClick(centerLngLat.lat, centerLngLat.lng, viewportPoint);
+    };
+
+    map.on("dblclick", handler);
+    return () => {
+      map.off("dblclick", handler);
+    };
+  }, [mapLoaded, onMapDoubleClick, isMobile]);
 
   const glbUrl = avatarGlbUrl ?? userAvatarUrl ?? DEFAULT_AVATAR_GLB;
   const use3DOverlay = enable3D && !!userCoords && !!glbUrl && !use2DAvatar;
@@ -374,23 +448,6 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [mapLoaded, venueFetchKey]);
 
-  // Double-click/double-tap: create game at location; pass viewport point so modal can open next to it
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded || !onMapDoubleClick) return;
-    map.doubleClickZoom.disable();
-    const handler = (e: { lngLat: { lat: number; lng: number }; point: { x: number; y: number } }) => {
-      const rect = map.getContainer().getBoundingClientRect();
-      const viewportPoint = { x: rect.left + e.point.x, y: rect.top + e.point.y };
-      onMapDoubleClick(e.lngLat.lat, e.lngLat.lng, viewportPoint);
-    };
-    map.on("dblclick", handler);
-    return () => {
-      map.off("dblclick", handler);
-      map.doubleClickZoom.enable();
-    };
-  }, [mapLoaded, onMapDoubleClick]);
-
   if (!MAPBOX_TOKEN || mapError) {
     return (
       <div className="absolute inset-0 bg-[#0A0F1C] flex flex-col items-center justify-center gap-2 px-4 text-slate-400 text-sm text-center">
@@ -415,10 +472,14 @@ export function MapboxMap(props: MapboxMapProps) {
         style={{ minHeight: "100%" }}
       />
       {eventPopup && containerRef.current && (
-        <div className="absolute inset-0 pointer-events-none">
+        <div
+          className="absolute inset-0 pointer-events-auto"
+          onClick={() => setEventPopup(null)}
+        >
           <div
-            className="absolute pointer-events-auto"
+            className="absolute"
             style={{ left: eventPopup.point.x, top: eventPopup.point.y }}
+            onClick={(e) => e.stopPropagation()}
           >
             <GameEventPopup
               game={eventPopup.game}

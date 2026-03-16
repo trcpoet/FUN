@@ -1,6 +1,13 @@
 import React from "react";
 import type { GameRow } from "../../lib/supabase";
 import { format } from "date-fns";
+import { MapPin, Clock } from "lucide-react";
+
+function formatCoords(lat: number, lng: number): string {
+  const latStr = Math.abs(lat).toFixed(2) + (lat >= 0 ? "°N" : "°S");
+  const lngStr = Math.abs(lng).toFixed(2) + (lng >= 0 ? "°E" : "°W");
+  return `${latStr}, ${lngStr}`;
+}
 
 type GameEventPopupProps = {
   game: GameRow;
@@ -11,6 +18,8 @@ type GameEventPopupProps = {
 };
 
 export function GameEventPopup({ game, onClose, onJoin, joined }: GameEventPopupProps) {
+  const hasCoords = typeof game.lat === "number" && typeof game.lng === "number";
+
   return (
     <div
       className="absolute z-[1000] w-56 rounded-xl border border-slate-600 bg-slate-900/95 shadow-xl backdrop-blur-sm"
@@ -19,28 +28,27 @@ export function GameEventPopup({ game, onClose, onJoin, joined }: GameEventPopup
       }}
     >
       <div className="p-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-white truncate">
-              {game.title || "Pickup game"}
-            </p>
-            <p className="text-slate-400 text-sm mt-0.5">
-              {game.sport} · {game.spots_needed} spots
-            </p>
-            {game.starts_at && (
-              <p className="text-slate-500 text-xs mt-1">
-                {format(new Date(game.starts_at), "MMM d, h:mm a")}
-              </p>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-white truncate">
+            {game.title || "Pickup game"}
+          </p>
+          <p className="text-slate-400 text-sm mt-0.5">
+            {game.sport} · {game.spots_needed} spots
+          </p>
+          <div className="flex flex-col gap-0.5 mt-1.5 text-slate-500 text-xs">
+            <span className="flex items-center gap-1.5">
+              <Clock className="w-3 h-3 shrink-0 text-slate-500" />
+              {game.starts_at
+                ? format(new Date(game.starts_at), "MMM d, h:mm a")
+                : "Time TBD"}
+            </span>
+            {hasCoords && (
+              <span className="flex items-center gap-1.5">
+                <MapPin className="w-3 h-3 shrink-0 text-slate-500" />
+                {formatCoords(game.lat, game.lng)}
+              </span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 rounded p-1 text-slate-400 hover:text-white hover:bg-slate-700"
-            aria-label="Close"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-          </button>
         </div>
         <div className="flex gap-2 mt-3">
           {onJoin && !joined && (
@@ -55,13 +63,6 @@ export function GameEventPopup({ game, onClose, onJoin, joined }: GameEventPopup
           {joined && (
             <span className="py-2 px-3 text-emerald-400 text-sm font-medium">Joined</span>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="py-2 px-3 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-800 text-sm"
-          >
-            Close
-          </button>
         </div>
       </div>
     </div>

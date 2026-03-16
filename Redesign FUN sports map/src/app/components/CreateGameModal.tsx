@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Trophy, Users, PenLine, MapPin, X } from "lucide-react";
+import { Trophy, Users, PenLine, MapPin, X, Clock } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 const SPORTS = [
@@ -38,6 +38,7 @@ export function CreateGameModal({
   const [title, setTitle] = useState("");
   const [sport, setSport] = useState("Basketball");
   const [spots, setSpots] = useState(4);
+  const [dateTime, setDateTime] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,9 +47,16 @@ export function CreateGameModal({
       setTitle("");
       setSport("Basketball");
       setSpots(4);
+      setDateTime("");
       setError(null);
     }
   }, [open]);
+
+  const minDateTime = (() => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  })();
 
   const handleSubmit = async () => {
     if (!supabase || !userCoords) {
@@ -61,12 +69,14 @@ export function CreateGameModal({
     }
     setLoading(true);
     setError(null);
+    const startsAt = dateTime.trim() ? new Date(dateTime.trim()).toISOString() : null;
     const { error: err } = await supabase.rpc("create_game", {
       p_title: title.trim() || "Pickup game",
       p_sport: sport,
       p_spots_needed: spots,
       p_lat: userCoords.lat,
       p_lng: userCoords.lng,
+      p_starts_at: startsAt,
     });
     setLoading(false);
     if (err) {
@@ -202,6 +212,25 @@ export function CreateGameModal({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Date & time */}
+          <div>
+            <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              When
+            </div>
+            <input
+              type="datetime-local"
+              value={dateTime}
+              onChange={(e) => setDateTime(e.target.value)}
+              min={minDateTime}
+              className="w-full h-9 px-3 text-sm bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 [color-scheme:dark]"
+              aria-label="Date and time of the game"
+            />
+            <p className="text-slate-500 text-[11px] mt-1">
+              Optional — leave blank for &quot;Time TBD&quot;
+            </p>
           </div>
 
           {/* Title */}

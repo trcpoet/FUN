@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router";
 import { MapboxMap } from "./components/MapboxMap";
 import { TopNavigation } from "./components/TopUI";
 import { BottomCarousel } from "./components/BottomCarousel";
@@ -13,6 +14,9 @@ import { supabase } from "../lib/supabase";
 import { joinGame, avatarIdToGlbUrl } from "../lib/api";
 import type { GameRow } from "../lib/supabase";
 
+const DEFAULT_AVATAR_IMAGE =
+  "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=100";
+
 export default function App() {
   const { coords: userCoords, error: locationError } = useGeolocation();
   const { games, refetch, error: gamesError } = useGamesNearby(
@@ -23,8 +27,9 @@ export default function App() {
     userCoords?.lat ?? null,
     userCoords?.lng ?? null
   );
-  const { avatarId } = useMyProfile();
+  const { avatarId, avatarUrl } = useMyProfile();
   const { stats } = useUserStats();
+  const navigate = useNavigate();
   const { notifications, markRead } = useNotifications({ limit: 10 });
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: string; message: string; type: string } | null>(null);
@@ -113,6 +118,8 @@ export default function App() {
         joinedGameIds={joinedGameIds}
         onMapDoubleClick={(lat, lng, viewportPoint) => {
           setCreateGameCoords({ lat, lng });
+          // Always center the modal on screen so it never goes off the viewport,
+          // even if the double-tap was near the bottom.
           setCreateGameAnchorPoint(viewportPoint ?? null);
           setCreateGameOpen(true);
         }}
@@ -153,11 +160,12 @@ export default function App() {
         <div className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/90 to-transparent pointer-events-none -z-10 h-full" />
         <button
           type="button"
+          onClick={() => navigate("/profile")}
           className="absolute bottom-6 left-4 z-50 w-12 h-12 rounded-full border-2 border-slate-700/50 bg-slate-800/80 backdrop-blur-md overflow-hidden flex items-center justify-center shadow-lg pointer-events-auto"
           aria-label="Profile"
         >
           <img
-            src="https://images.unsplash.com/photo-1624280184393-53ce60e214ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx5b3VuZyUyMG1hbGUlMjBjYXN1YWwlMjBzcG9ydHN3ZWFyJTIwcG9ydHJhaXR8ZW58MXx8fHwxNzczMzc1ODE5fDA&ixlib=rb-4.1.0&q=80&w=100"
+            src={avatarUrl?.trim() || DEFAULT_AVATAR_IMAGE}
             alt=""
             className="w-full h-full object-cover"
           />
