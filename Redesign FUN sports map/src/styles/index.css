@@ -1,3 +1,11 @@
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
@@ -13,9 +21,10 @@
 }
 
 /* User marker: avatar + pulsing ring */
+/* Subtle idle motion only — large translateY reads as “drifting” vs the map under pitch/pan */
 @keyframes user-marker-idle {
   0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-3px) scale(1.02); }
+  50% { transform: translateY(-1px) scale(1.01); }
 }
 @keyframes user-marker-pulse {
   0% { transform: scale(1); opacity: 0.6; }

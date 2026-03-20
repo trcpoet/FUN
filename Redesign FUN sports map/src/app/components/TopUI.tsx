@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Filter, MapPin, Activity, Calendar, Users, Settings, Navigation } from 'lucide-react';
+import { Search, Filter, MapPin, Activity, Calendar, Users, Settings, Navigation, MapPinned, X, MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useIsMobile } from './ui/use-mobile';
+import type { ForwardGeocodeFeature } from '../../lib/geocoding';
 
 const NAV_ITEMS = [
   { id: 'map', label: 'Map', Icon: MapPin, active: true },
@@ -11,14 +12,54 @@ const NAV_ITEMS = [
   { id: 'settings', label: 'Settings', Icon: Settings, active: false },
 ];
 
+export type MapSearchBarProps = {
+  query: string;
+  onQueryChange: (q: string) => void;
+  geocodeLoading: boolean;
+  geocodeResults: ForwardGeocodeFeature[];
+  onPickGeocode: (f: ForwardGeocodeFeature) => void;
+  sportSuggestion: { sport: string; label: string } | null;
+  onPickSport: (sport: string) => void;
+  onClear: () => void;
+};
+
 export type TopNavigationProps = {
   liveNowOpen?: boolean;
   onLiveNowToggle?: () => void;
   onCenterOnUser?: () => void;
+  onOpenFilters?: () => void;
+  /** Open game chat inbox (threads for joined games). */
+  onOpenMessages?: () => void;
+  /** Badge on messenger (e.g. number of joined games). */
+  joinedGameCount?: number;
+  /** Wired search: debounced geocode + sport hints (pass from App). */
+  mapSearch?: MapSearchBarProps | null;
 };
 
+function SearchResultsSkeleton() {
+  return (
+    <div className="px-2 py-1 space-y-2" role="status" aria-label="Loading results">
+      {[0, 1, 2, 3].map((i) => (
+        <div
+          key={i}
+          className="h-11 rounded-xl bg-slate-700/40 animate-pulse"
+          style={{ animationDelay: `${i * 75}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export const TopNavigation = (props: TopNavigationProps) => {
-  const { liveNowOpen = false, onLiveNowToggle, onCenterOnUser } = props;
+  const {
+    liveNowOpen = false,
+    onLiveNowToggle,
+    onCenterOnUser,
+    onOpenFilters,
+    onOpenMessages,
+    joinedGameCount = 0,
+    mapSearch = null,
+  } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const searchWrapRef = useRef<HTMLDivElement>(null);
@@ -51,17 +92,94 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   animate={{ width: '100%', opacity: 1 }}
                   exit={{ width: 48, opacity: 0 }}
                   transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                  className="relative flex items-center h-12 overflow-hidden"
+                  className="relative flex flex-col w-full gap-2 z-[70]"
                 >
-                  <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-emerald-400">
-                    <Search className="w-5 h-5 shrink-0" />
+                  <div className="relative flex items-center h-12 shrink-0">
+                    <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-emerald-400">
+                      <Search className="w-5 h-5 shrink-0" />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Place or sport (e.g. Brooklyn, Soccer)…"
+                      autoFocus
+                      value={mapSearch?.query ?? ''}
+                      onChange={(e) => mapSearch?.onQueryChange(e.target.value)}
+                      className="w-full h-full pl-10 pr-11 rounded-full bg-slate-800/90 backdrop-blur-xl border border-slate-700/50 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 shadow-lg text-[15px] font-medium"
+                    />
+                    {(mapSearch?.query?.length ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => mapSearch?.onClear()}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/80 transition-colors"
+                        aria-label="Clear search"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
-                  <input
-                    type="text"
-                    placeholder="Search sports, venues, players..."
-                    autoFocus
-                    className="w-full h-full pl-10 pr-4 rounded-full bg-slate-800/60 backdrop-blur-xl border border-slate-700/50 text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 shadow-lg text-[15px] font-medium"
-                  />
+
+                  {mapSearch && mapSearch.query.trim().length === 1 && !mapSearch.geocodeLoading && (
+                    <p className="text-xs text-slate-500 px-3">Type at least 2 characters — results load as you pause typing.</p>
+                  )}
+
+                  {mapSearch &&
+                    (mapSearch.geocodeLoading ||
+                      mapSearch.geocodeResults.length > 0 ||
+                      mapSearch.sportSuggestion) && (
+                      <div className="rounded-2xl border border-slate-700/80 bg-slate-900/95 backdrop-blur-xl shadow-2xl max-h-64 overflow-y-auto py-2 text-left">
+                        {mapSearch.sportSuggestion && (
+                          <button
+                            type="button"
+                            onClick={() => mapSearch.onPickSport(mapSearch.sportSuggestion!.sport)}
+                            className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-emerald-500/10 border-b border-slate-800/80 transition-colors"
+                          >
+                            <span className="mt-0.5 text-emerald-400 shrink-0">
+                              <Activity className="w-4 h-4" />
+                            </span>
+                            <span>
+                              <span className="block text-xs font-semibold uppercase tracking-wide text-emerald-400/90">
+                                Sport
+                              </span>
+                              <span className="text-sm text-slate-100 font-medium">{mapSearch.sportSuggestion.label}</span>
+                              <span className="block text-xs text-slate-500 mt-0.5">
+                                Over 5 km away: fly to the closest game. Within 5 km: show every match on the map.
+                              </span>
+                            </span>
+                          </button>
+                        )}
+
+                        {mapSearch.geocodeLoading && mapSearch.query.trim().length >= 2 && <SearchResultsSkeleton />}
+
+                        {!mapSearch.geocodeLoading && mapSearch.geocodeResults.length > 0 && (
+                          <div className="px-2 pt-1">
+                            <p className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                              Places
+                            </p>
+                            <ul className="space-y-0.5">
+                              {mapSearch.geocodeResults.map((f) => (
+                                <li key={f.id}>
+                                  <button
+                                    type="button"
+                                    onClick={() => mapSearch.onPickGeocode(f)}
+                                    className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-slate-200 hover:bg-slate-800/90 transition-colors flex items-start gap-2"
+                                  >
+                                    <MapPinned className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                                    <span>{f.place_name}</span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {!mapSearch.geocodeLoading &&
+                          mapSearch.query.trim().length >= 2 &&
+                          mapSearch.geocodeResults.length === 0 &&
+                          !mapSearch.sportSuggestion && (
+                            <p className="px-4 py-3 text-sm text-slate-500">No place matches. Try another spelling.</p>
+                          )}
+                      </div>
+                    )}
                 </motion.div>
               ) : (
                 <motion.button
@@ -80,8 +198,10 @@ export const TopNavigation = (props: TopNavigationProps) => {
           {/* Filter button */}
           <motion.button
             whileTap={{ scale: 0.95 }}
+            type="button"
             className="w-12 h-12 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-md shrink-0 flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors shadow-lg"
             aria-label="Filter"
+            onClick={onOpenFilters}
           >
             <Filter className="w-5 h-5" />
           </motion.button>
@@ -148,18 +268,36 @@ export const TopNavigation = (props: TopNavigationProps) => {
             )}
           </div>
 
-          {/* Location icon under Live Now + Menu */}
-          {onCenterOnUser && (
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.95 }}
-              onClick={onCenterOnUser}
-              className="w-10 h-10 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-md flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors shadow-lg"
-              aria-label="Center map on my location"
-            >
-              <Navigation className="w-5 h-5" />
-            </motion.button>
-          )}
+          {/* Location, then game chats — stacked under Live Now row */}
+          <div className="flex flex-col items-end gap-1.5">
+            {onCenterOnUser && (
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.95 }}
+                onClick={onCenterOnUser}
+                className="w-10 h-10 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-md flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors shadow-lg"
+                aria-label="Center map on my location"
+              >
+                <Navigation className="w-5 h-5" />
+              </motion.button>
+            )}
+            {onOpenMessages && (
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.95 }}
+                onClick={onOpenMessages}
+                className="relative w-10 h-10 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-md flex items-center justify-center text-slate-300 hover:text-sky-400 hover:border-sky-500/50 transition-colors shadow-lg"
+                aria-label="Game chats"
+              >
+                <MessageCircle className="w-5 h-5" />
+                {joinedGameCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-sky-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C]">
+                    {joinedGameCount > 9 ? "9+" : joinedGameCount}
+                  </span>
+                )}
+              </motion.button>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -8,8 +8,6 @@ import {
   Users,
   Calendar,
   Settings,
-  MessageCircle,
-  X,
   Clock,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -35,10 +33,9 @@ export type BottomCarouselProps = {
   games: GameRow[];
   selectedGame: GameRow | null;
   onSelectGame: (game: GameRow | null) => void;
-  onJoin: (game: GameRow) => void;
+  /** Fly to the game on the map and open the join modal (does not join). */
+  onOpenGame: (game: GameRow) => void;
   joinedGameIds: Set<string>;
-  chatOpenForGameId: string | null;
-  onCloseChat: () => void;
   liveNowOpen?: boolean;
 };
 
@@ -46,10 +43,8 @@ export const BottomCarousel = ({
   games,
   selectedGame,
   onSelectGame,
-  onJoin,
+  onOpenGame,
   joinedGameIds,
-  chatOpenForGameId,
-  onCloseChat,
   liveNowOpen = false,
 }: BottomCarouselProps) => {
   const isMobile = useIsMobile();
@@ -57,27 +52,6 @@ export const BottomCarousel = ({
 
   return (
     <div className="absolute bottom-0 left-0 right-0 z-40 pb-6 pt-12 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/80 to-transparent pointer-events-none flex flex-col justify-end">
-      {/* Event chat placeholder (opens after join) */}
-      {chatOpenForGameId && (
-        <div className="pointer-events-auto absolute left-4 right-4 bottom-48 rounded-2xl bg-slate-800 border border-slate-600 shadow-xl p-4 z-50">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-semibold text-white flex items-center gap-2">
-              <MessageCircle className="w-4 h-4 text-emerald-400" />
-              Event chat
-            </span>
-            <button
-              onClick={onCloseChat}
-              className="p-1 rounded-full hover:bg-slate-700 text-slate-400"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <p className="text-slate-400 text-sm">
-            Chat with participants will go here. (Placeholder for MVP.)
-          </p>
-        </div>
-      )}
-
       {/* Live Now carousel: only when Live Now button is pressed */}
       {liveNowOpen && (
         <>
@@ -117,37 +91,45 @@ export const BottomCarousel = ({
             >
               <div className="absolute inset-0 bg-slate-800 z-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-700 via-slate-800 to-slate-900" />
 
-              <div className="relative z-20 p-4 w-full">
-                <div className="flex justify-between items-start mb-2">
-                  <span className="px-2.5 py-1 text-xs font-bold rounded-full flex items-center gap-1.5 uppercase tracking-wider backdrop-blur-md shadow-lg bg-orange-500/20 text-orange-400 border border-orange-500/30">
-                    <Flame className="w-3 h-3" />
+              <div className="relative z-20 p-3 w-full">
+                <div className="flex justify-between items-start mb-1.5">
+                  <span className="px-2 py-0.5 text-[11px] font-bold rounded-full flex items-center gap-1 uppercase tracking-wider backdrop-blur-md shadow-lg bg-orange-500/20 text-orange-400 border border-orange-500/30">
+                    <Flame className="w-2.5 h-2.5" />
                     Live Now
                   </span>
-                  <span className="text-xs font-medium text-slate-300 flex items-center gap-1 bg-slate-900/60 backdrop-blur-md px-2 py-1 rounded-full border border-slate-700/50">
-                    <MapPin className="w-3 h-3 text-slate-400" />
+                  <span className="text-[11px] font-medium text-slate-300 flex items-center gap-1 bg-slate-900/60 backdrop-blur-md px-2 py-0.5 rounded-full border border-slate-700/50">
+                    <MapPin className="w-2.5 h-2.5 text-slate-400" />
                     {formatDistance(game.distance_km)}
                   </span>
                 </div>
 
-                <h3 className="text-lg font-black text-white mb-0.5 leading-tight tracking-tight drop-shadow-md">
+                <h3 className="text-[15px] font-black text-white mb-0.5 leading-tight tracking-tight drop-shadow-md">
                   {game.title}
                 </h3>
-                <p className="text-sm text-slate-300 font-medium mb-1 drop-shadow-md">
-                  {game.sport} • {game.spots_needed} spots left
+                {game.description?.trim() ? (
+                  <p className="text-[11px] text-slate-400 leading-snug mb-1 line-clamp-2 drop-shadow-md">
+                    {game.description.trim()}
+                  </p>
+                ) : null}
+                <p className="text-[13px] text-slate-300 font-medium mb-1 drop-shadow-md">
+                  {game.sport} •{" "}
+                  {game.spots_remaining != null
+                    ? `${game.spots_remaining} spots left`
+                    : `${game.spots_needed} player cap`}
                 </p>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-400 mb-3">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400 mb-2">
                   <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
+                    <Clock className="w-2.5 h-2.5" />
                     {game.starts_at
                       ? format(new Date(game.starts_at), "MMM d, h:mm a")
                       : "Time TBD"}
                   </span>
-                  {typeof game.lat === "number" && typeof game.lng === "number" && (
-                    <span className="flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />
-                      {game.lat.toFixed(2)}°, {game.lng.toFixed(2)}°
-                    </span>
-                  )}
+                  <span className="flex items-center gap-1">
+                    <MapPin className="w-2.5 h-2.5" />
+                    {game.location_label?.trim()
+                      ? game.location_label
+                      : `${game.lat.toFixed(2)}°, ${game.lng.toFixed(2)}°`}
+                  </span>
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -159,20 +141,19 @@ export const BottomCarousel = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onJoin(game);
+                      onOpenGame(game);
                     }}
-                    disabled={isJoined}
                     className={cn(
-                      "flex items-center justify-center w-10 h-10 rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 z-30",
+                      "flex items-center justify-center w-9 h-9 rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 z-30",
                       isJoined
-                        ? "bg-slate-600 text-slate-400 cursor-default"
+                        ? "bg-slate-600 text-slate-400 cursor-pointer"
                         : "bg-orange-500 text-slate-950 shadow-orange-500/30"
                     )}
                   >
                     {isJoined ? (
                       <span className="text-xs font-bold">In</span>
                     ) : (
-                      <ChevronRight className="w-5 h-5" strokeWidth={3} />
+                      <ChevronRight className="w-4 h-4" strokeWidth={3} />
                     )}
                   </button>
                 </div>

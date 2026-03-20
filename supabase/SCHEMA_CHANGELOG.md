@@ -41,3 +41,23 @@ Implement an **Edge Function** (or Postgres function called via service role) th
 3. For each participant, update **user_stats** (games_played_total, streak, xp, level) and check **badges** criteria → insert into **user_badges** and **notifications**.
 
 Then wire the frontend: call that function when the host confirms the result, and subscribe to **notifications** (Supabase Realtime) for toasts.
+
+## 2025-03-21 – Per-game chat + roster counts
+
+**File:** `migrations/20250321000000_game_chat_roster.sql`  
+**Run after:** prior game migrations (needs `games.description` from `20250320000000_games_description.sql` if `get_games_nearby` selects it).
+
+### What was added
+
+| Change | Purpose |
+|--------|--------|
+| **game_messages** | Chat rows: `game_id`, `user_id`, `body`, `created_at`; RLS so only **game_participants** can read/insert |
+| **supabase_realtime** publication | `game_messages` added for Postgres Changes (idempotent check) |
+| **get_games_nearby** | Returns **participant_count** and **spots_remaining** (`spots_needed - count`, floored at 0) |
+| **get_my_game_inbox()** | Joined games for `auth.uid()` with last message preview + roster fields |
+
+### App behavior
+
+- Map marker label uses **participant_count** / **spots_needed** from RPC.
+- **Join** refetches nearby games so **spots left** updates.
+- Messenger inbox calls **`get_my_game_inbox`**; thread uses **`game_messages`** + Realtime INSERT filter `game_id=eq.{id}`.

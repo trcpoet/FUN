@@ -2,9 +2,13 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { GameRow } from "../lib/supabase";
 
-const DEFAULT_RADIUS_KM = 15;
+export const DEFAULT_GAMES_RADIUS_KM = 15;
 
-export function useGamesNearby(lat: number | null, lng: number | null) {
+export function useGamesNearby(
+  lat: number | null,
+  lng: number | null,
+  radiusKm: number = DEFAULT_GAMES_RADIUS_KM
+) {
   const [games, setGames] = useState<GameRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +30,7 @@ export function useGamesNearby(lat: number | null, lng: number | null) {
       .rpc("get_games_nearby", {
         lat,
         lng,
-        radius_km: DEFAULT_RADIUS_KM,
+        radius_km: radiusKm,
       })
       .then(({ data, error: err }) => {
         if (cancelled) return;
@@ -49,7 +53,7 @@ export function useGamesNearby(lat: number | null, lng: number | null) {
     return () => {
       cancelled = true;
     };
-  }, [lat, lng, refreshTrigger]);
+  }, [lat, lng, radiusKm, refreshTrigger]);
 
   return { games, loading, error, refetch };
 }

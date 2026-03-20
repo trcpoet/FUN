@@ -1,13 +1,13 @@
 # FUN web MVP – map, create game, join, event chat
 
-This app implements the loop: **Open map → see nearby games → tap card/pin → join → event chat opens.**
+This app implements the loop: **Open map → see nearby games → tap card/pin → join → game chat opens** (messenger under the location button lists all joined games).
 
 ## What’s in place
 
 - **Map:** Mapbox GL JS (dark style), centered on your location via the browser Geolocation API.
 - **Backend:** Supabase with PostGIS. Geo query: `get_games_nearby(lat, lng, radius_km)`.
 - **Create game:** Green “+” FAB or “Start a Game” card → sheet with title, sport, spots → game is created at your current location and appears on the map.
-- **Join:** Tap a game card or map marker → “Join” → you’re added to the game; a placeholder “Event chat” panel appears (real chat can be added later).
+- **Join:** Tap a game card or map marker → “Join” → you’re added to `game_participants`; nearby list refetches so **spots left** updates; the **game chat** sheet opens. Use the **message** button (under recenter) for all joined-game threads (`game_messages` + Realtime).
 
 ## Run it
 

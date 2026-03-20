@@ -83,6 +83,9 @@ export function CreateGameSheet({
       p_spots_needed: spots,
       p_lat: userCoords.lat,
       p_lng: userCoords.lng,
+      p_starts_at: null,
+      p_location_label: null,
+      p_description: null,
     });
     setLoading(false);
     if (err) {

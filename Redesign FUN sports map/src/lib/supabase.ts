@@ -16,13 +16,39 @@ export type GameRow = {
   title: string;
   sport: string;
   spots_needed: number;
+  /** Headcount including host (from `get_games_nearby` after roster migration). */
+  participant_count?: number;
+  /** `spots_needed - participant_count`, floored at 0. */
+  spots_remaining?: number;
   starts_at: string | null;
   created_by: string | null;
   created_at: string;
   status?: "open" | "full" | "completed" | "cancelled";
+  location_label?: string | null;
+  description?: string | null;
   distance_km: number;
   lat: number;
   lng: number;
+};
+
+export type GameMessageRow = {
+  id: string;
+  game_id: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+};
+
+export type GameInboxRow = {
+  id: string;
+  title: string;
+  sport: string;
+  starts_at: string | null;
+  location_label: string | null;
+  last_message_body: string | null;
+  last_message_at: string | null;
+  participant_count: number;
+  spots_remaining: number;
 };
 
 export type ProfileNearbyRow = {

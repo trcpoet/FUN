@@ -1,254 +1,275 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { useUserStats } from "../../hooks/useUserStats";
-import { signOut, uploadAvatarImage } from "../../lib/api";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
-import type { UserBadgeRow } from "../../lib/supabase";
-import type { BadgeRow } from "../../lib/supabase";
-import { getMyBadges } from "../../lib/api";
-import { LogOut } from "lucide-react";
-
-type BadgeWithDetail = UserBadgeRow & { badges?: BadgeRow | null };
+import { signOut, getMyBadges, uploadAvatarImage } from "../../lib/api";
+import { useIsMobile } from "../components/ui/use-mobile";
+import {
+  ProfileHero,
+  ProfileActionRow,
+  AthleticSnapshotCard,
+  SportsSkillCard,
+  PerformanceMetricsSection,
+  ExperienceTimeline,
+  ProfileEditSheet,
+  ProfileStickyBar,
+  StoriesRail,
+  PostsReelsSection,
+  AboutSheet,
+  TrustRatingsBlock,
+  ProfileBadgesSection,
+  type UserBadgeWithDetail,
+} from "../components/athlete-profile";
+import { mergeAthleteProfile } from "../../lib/athleteProfile";
+import { cn } from "../components/ui/utils";
 
 export default function Profile() {
-  const { displayName, avatarUrl, avatarId, updateProfile, refetch } = useMyProfile();
+  const { displayName, avatarUrl, updateProfile, refetch, athleteProfile, loading } = useMyProfile();
   const { stats } = useUserStats();
-  const [badges, setBadges] = useState<BadgeWithDetail[]>([]);
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(displayName ?? "");
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const isMobile = useIsMobile();
+  const [badges, setBadges] = useState<UserBadgeWithDetail[]>([]);
+  const [editOpen, setEditOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [sticky, setSticky] = useState(false);
+  const heroRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  React.useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     getMyBadges().then(({ data }) => {
-      if (!cancelled) setBadges((data as BadgeWithDetail[]) ?? []);
+      if (!cancelled) setBadges((data as UserBadgeWithDetail[]) ?? []);
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  React.useEffect(() => {
-    setName(displayName ?? "");
-  }, [displayName, avatarUrl]);
+  useEffect(() => {
+    if (editOpen) setEditDisplayName(displayName ?? "");
+  }, [editOpen, displayName]);
+
+  useEffect(() => {
+    const hero = heroRef.current;
+    if (!hero || loading) return;
+    const obs = new IntersectionObserver(
+      ([e]) => {
+        setSticky(!e.isIntersecting);
+      },
+      { threshold: 0, rootMargin: "-52px 0px 0px 0px" },
+    );
+    obs.observe(hero);
+    return () => obs.disconnect();
+  }, [loading]);
 
   const handleSignOut = async () => {
     await signOut();
     navigate("/login", { replace: true });
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaveError(null);
-    setSaving(true);
-
-    let newAvatarUrl: string | null = null;
-    if (avatarFile) {
-      const { url, error } = await uploadAvatarImage(avatarFile);
-      if (error) {
-        setSaving(false);
-        setSaveError(error.message);
-        return;
-      }
-      newAvatarUrl = url;
-    }
-
-    const err = await updateProfile({
-      display_name: name.trim() || null,
-      ...(newAvatarUrl !== null ? { avatar_url: newAvatarUrl } : {}),
-    });
-    setSaving(false);
-    if (err) {
-      setSaveError(err.message);
-      return;
-    }
-    await refetch();
-    setEditing(false);
+  const handleShare = () => {
+    const url = `${window.location.origin}/profile`;
+    const handle = athleteProfile.handle?.replace(/^@/, "") || "";
+    const sports = (athleteProfile.primarySports ?? []).slice(0, 2).join(" · ");
+    const lvl = stats?.level ?? 1;
+    const block = [
+      `${displayName?.trim() || "Player"}${handle ? ` @${handle}` : ""} · FUN`,
+      [sports && `Sports: ${sports}`, `Lvl ${lvl}`].filter(Boolean).join(" · "),
+      url,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    void navigator.clipboard.writeText(block).catch(() => navigator.clipboard.writeText(url));
   };
 
   const fallbackInitial = (displayName?.trim() || "?")[0].toUpperCase();
+  const primarySports = athleteProfile.primarySports ?? [];
+  const pinnedPost = (athleteProfile.posts ?? []).find((p) => p.pinned) ?? null;
+
+  const shellClass = cn(
+    "mx-auto w-full px-4 pb-24 pt-0",
+    isMobile ? "max-w-lg" : "max-w-6xl md:px-10 lg:px-14",
+  );
 
   return (
-    <div className="min-h-screen bg-[#0A0F1C] text-white">
-      <div className="max-w-lg mx-auto px-4 py-8 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Profile</h1>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleSignOut}
-            className="text-slate-400 hover:text-white"
-            aria-label="Sign out"
-          >
-            <LogOut className="w-5 h-5" />
-          </Button>
-        </div>
+    <div className="min-h-screen w-full bg-[#080c14] text-white">
+      <ProfileStickyBar
+        visible={sticky && !loading}
+        displayName={displayName?.trim() || "Player"}
+        avatarUrl={avatarUrl}
+        fallbackInitial={fallbackInitial}
+        onBack={() => navigate("/")}
+        onOpenSettings={() => setEditOpen(true)}
+        onShare={handleShare}
+      />
 
-        {!editing ? (
-          <Card className="bg-slate-800/60 border-slate-700">
-            <CardHeader>
-              <div className="flex items-center gap-4">
-                <Avatar className="h-16 w-16 rounded-full border-2 border-slate-600">
-                  {avatarUrl?.trim() ? (
-                    <AvatarImage src={avatarUrl} alt="" />
-                  ) : null}
-                  <AvatarFallback className="bg-slate-700 text-slate-300 text-xl">
-                    {fallbackInitial}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <CardTitle className="text-white text-lg">
-                    {displayName || "Player"}
-                  </CardTitle>
-                  <p className="text-sm text-slate-400">Your public display name</p>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Button
-                variant="outline"
-                className="border-slate-600 text-slate-300 hover:bg-slate-700"
-                onClick={() => setEditing(true)}
-              >
-                Edit profile
-              </Button>
-            </CardContent>
-          </Card>
+      <div className={shellClass}>
+        {loading ? (
+          <div className="mt-4 rounded-2xl bg-white/[0.04] h-64 animate-pulse" />
         ) : (
-          <Card className="bg-slate-800/60 border-slate-700">
-            <CardHeader>
-              <CardTitle className="text-white">Edit profile</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSave} className="space-y-4">
-                {saveError && (
-                  <div className="rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-3 py-2">
-                    {saveError}
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="profile-displayName" className="text-slate-300">
-                    Display name
-                  </Label>
-                  <Input
-                    id="profile-displayName"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="bg-slate-800 border-slate-700 text-white"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="profile-avatarFile" className="text-slate-300">
-                    New avatar image
-                  </Label>
-                  <Input
-                    id="profile-avatarFile"
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] ?? null;
-                      setAvatarFile(file);
-                    }}
-                    className="bg-slate-800 border-slate-700 text-white file:text-slate-200"
-                  />
-                  <p className="text-xs text-slate-500">
-                    Leave empty to keep your current avatar.
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    type="submit"
-                    disabled={saving}
-                    className="bg-emerald-600 hover:bg-emerald-700"
-                  >
-                    {saving ? "Saving..." : "Save"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="border-slate-600 text-slate-300"
-                    onClick={() => {
-                      setEditing(false);
-                      setName(displayName ?? "");
-                      setAvatarFile(null);
-                      setSaveError(null);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
+          <>
+            <div ref={heroRef}>
+              <div className={cn(!isMobile && "rounded-b-3xl overflow-hidden")}>
+                <ProfileHero
+                  displayName={displayName?.trim() || "Player"}
+                  handle={athleteProfile.handle ?? null}
+                  city={athleteProfile.city ?? null}
+                  avatarUrl={avatarUrl}
+                  favoriteSport={athleteProfile.favoriteSport ?? null}
+                  fallbackInitial={fallbackInitial}
+                  primarySports={primarySports}
+                  bio={athleteProfile.bio ?? null}
+                  level={stats?.level ?? 1}
+                  xp={stats?.xp ?? 0}
+                  tierLabel={athleteProfile.athleteTierLabel ?? null}
+                  availability={athleteProfile.availability ?? null}
+                  verified={!!athleteProfile.verified}
+                  sportsmanshipBadge={!!athleteProfile.sportsmanshipBadge}
+                  lastGameIso={stats?.last_game_date ?? null}
+                  onBack={() => navigate("/")}
+                  onOpenSettings={() => setEditOpen(true)}
+                  minimal
+                  isDesktop={!isMobile}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-5 pt-4">
+              <ProfileActionRow isOwnProfile onAbout={() => setAboutOpen(true)} onShare={handleShare} />
+
+              <StoriesRail
+                stories={athleteProfile.stories ?? []}
+                allowCreate
+                onCreateStory={async (story) => {
+                  const err = await updateProfile({
+                    athlete_profile: mergeAthleteProfile(athleteProfile, {
+                      stories: [...(athleteProfile.stories ?? []), story],
+                    }),
+                  });
+                  if (err) throw new Error(err.message);
+                }}
+              />
+
+              <PostsReelsSection
+                reels={athleteProfile.highlights ?? []}
+                posts={athleteProfile.posts ?? []}
+                pinnedPost={pinnedPost}
+                onAddReel={() => setEditOpen(true)}
+                onAddPost={() => setEditOpen(true)}
+              />
+            </div>
+          </>
         )}
 
-        {stats && (
-          <Card className="bg-slate-800/60 border-slate-700">
-            <CardHeader>
-              <CardTitle className="text-white">Stats</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <p className="text-slate-300">
-                Games played: <span className="text-white font-medium">{stats.games_played_total}</span>
-              </p>
-              <p className="text-slate-300">
-                Level: <span className="text-white font-medium">{stats.level}</span>
-              </p>
-              <p className="text-slate-300">
-                XP: <span className="text-white font-medium">{stats.xp}</span>
-              </p>
-              <p className="text-slate-300">
-                Current streak: <span className="text-white font-medium">{stats.current_streak_days} days</span>
-              </p>
-            </CardContent>
-          </Card>
-        )}
+        <AboutSheet
+          open={aboutOpen}
+          onOpenChange={setAboutOpen}
+          side={isMobile ? "bottom" : "right"}
+          wide={!isMobile}
+        >
+          <div>
+            <h3 className="text-sm font-semibold text-white mb-3">Games</h3>
+            {stats ? (
+              <div className="space-y-2 text-sm text-slate-300">
+                <p>
+                  Games played{" "}
+                  <span className="text-white font-semibold tabular-nums">{stats.games_played_total}</span>
+                </p>
+                <p>
+                  Current streak{" "}
+                  <span className="text-white font-semibold tabular-nums">{stats.current_streak_days} days</span>
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Play games to see your activity here.</p>
+            )}
+          </div>
 
-        {badges.length > 0 && (
-          <Card className="bg-slate-800/60 border-slate-700">
-            <CardHeader>
-              <CardTitle className="text-white">Badges</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-2">
-                {badges.map((ub) => {
-                  const b = ub as BadgeWithDetail;
-                  return (
+          <div>
+            <h3 className="text-sm font-semibold text-white mb-3">Stats</h3>
+            <div className="space-y-6">
+              <AthleticSnapshotCard
+                snapshot={athleteProfile.snapshot}
+                hideHeading
+                className="border-0 border-b border-white/[0.06] rounded-none bg-transparent pb-6"
+              />
+              <SportsSkillCard
+                primarySports={primarySports}
+                secondarySports={athleteProfile.secondarySports ?? []}
+                sportsSkills={athleteProfile.sportsSkills ?? []}
+                skillRatings={athleteProfile.skillRatings ?? []}
+                hideHeading
+                className="border-0 border-b border-white/[0.06] rounded-none bg-transparent pb-6"
+              />
+              <PerformanceMetricsSection
+                metrics={athleteProfile.performanceMetrics ?? []}
+                primarySports={primarySports}
+                hideHeading
+                className="border-0 rounded-none bg-transparent"
+              />
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-white mb-3">Journey</h3>
+            <ExperienceTimeline
+              items={athleteProfile.experience ?? []}
+              hideHeading
+              className="border-0 rounded-none bg-transparent"
+            />
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-white mb-3">Trust</h3>
+            <TrustRatingsBlock trust={athleteProfile.trust} className="mb-6" />
+            {(athleteProfile.endorsements ?? []).length > 0 && (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Teammate quotes</p>
+                <ul className="space-y-3">
+                  {(athleteProfile.endorsements ?? []).map((e) => (
                     <li
-                      key={ub.id}
-                      className="flex items-center gap-2 rounded-lg bg-slate-700/50 px-3 py-2 text-sm"
+                      key={e.id}
+                      className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 text-sm text-slate-200"
                     >
-                      <span className="font-medium text-emerald-400">
-                        {b.badges?.name ?? ub.badge_id}
-                      </span>
-                      {b.badges?.description && (
-                        <span className="text-slate-400">— {b.badges.description}</span>
-                      )}
+                      <p className="leading-relaxed">&ldquo;{e.quote}&rdquo;</p>
+                      <p className="text-xs text-slate-500 mt-2">
+                        — {e.authorName}
+                        {e.relation ? ` · ${e.relation}` : ""}
+                      </p>
                     </li>
-                  );
-                })}
-              </ul>
-            </CardContent>
-          </Card>
-        )}
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="mt-8">
+              <ProfileBadgesSection badges={badges} className="border-0 rounded-none bg-transparent" />
+            </div>
+          </div>
+        </AboutSheet>
 
-        <div className="pt-4">
-          <Button
-            variant="outline"
-            className="w-full border-slate-600 text-slate-300"
-            onClick={() => navigate("/")}
-          >
-            Back to map
-          </Button>
-        </div>
+        <ProfileEditSheet
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          editDisplayName={editDisplayName}
+          onEditDisplayNameChange={setEditDisplayName}
+          currentAvatarUrl={avatarUrl}
+          athleteProfile={athleteProfile}
+          onSignOut={() => void handleSignOut()}
+          onSaveAthleteProfile={async (next, options) => {
+            let avatar_url: string | undefined;
+            if (options?.avatarFile) {
+              const { url, error: upErr } = await uploadAvatarImage(options.avatarFile);
+              if (upErr) throw new Error(upErr.message);
+              if (url) avatar_url = url;
+            }
+            const err = await updateProfile({
+              display_name: editDisplayName.trim() || null,
+              ...(avatar_url !== undefined ? { avatar_url } : {}),
+              athlete_profile: next,
+            });
+            if (err) throw new Error(err.message);
+          }}
+        />
       </div>
     </div>
   );

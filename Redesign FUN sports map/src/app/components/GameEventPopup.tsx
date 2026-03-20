@@ -1,5 +1,6 @@
 import React from "react";
 import type { GameRow } from "../../lib/supabase";
+import { cn } from "./MapCanvas";
 import { format } from "date-fns";
 import { MapPin, Clock } from "lucide-react";
 
@@ -22,7 +23,7 @@ export function GameEventPopup({ game, onClose, onJoin, joined }: GameEventPopup
 
   return (
     <div
-      className="absolute z-[1000] w-56 rounded-xl border border-slate-600 bg-slate-900/95 shadow-xl backdrop-blur-sm"
+      className="absolute z-[1000] w-[min(18rem,calc(100vw-2rem))] max-w-[18rem] rounded-xl border border-slate-600 bg-slate-900/95 shadow-xl backdrop-blur-sm"
       style={{
         transform: "translate(-50%, calc(-100% - 12px))",
       }}
@@ -32,8 +33,21 @@ export function GameEventPopup({ game, onClose, onJoin, joined }: GameEventPopup
           <p className="font-semibold text-white truncate">
             {game.title || "Pickup game"}
           </p>
-          <p className="text-slate-400 text-sm mt-0.5">
-            {game.sport} · {game.spots_needed} spots
+          {game.description?.trim() ? (
+            <p className="text-slate-500 text-xs mt-1 leading-snug line-clamp-3">
+              {game.description.trim()}
+            </p>
+          ) : null}
+          <p
+            className={cn(
+              "text-slate-400 text-sm",
+              game.description?.trim() ? "mt-1.5" : "mt-0.5"
+            )}
+          >
+            {game.sport} ·{" "}
+            {game.spots_remaining != null
+              ? `${game.spots_remaining} spots left`
+              : `${game.spots_needed} max`}
           </p>
           <div className="flex flex-col gap-0.5 mt-1.5 text-slate-500 text-xs">
             <span className="flex items-center gap-1.5">

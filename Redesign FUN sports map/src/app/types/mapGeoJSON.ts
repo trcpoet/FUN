@@ -6,6 +6,7 @@
 
 import type { Feature, FeatureCollection, Point } from "geojson";
 import type { GameRow } from "../../lib/supabase";
+import { getGameMapboxIconId, getSportIconEmoji, resolveSportMapboxSuffix } from "../map/gameSportIcons";
 
 /** Game status for glow color: live => red, soon => orange, scheduled => green */
 export type GameStatus = "live" | "soon" | "scheduled";
@@ -13,23 +14,15 @@ export type GameStatus = "live" | "soon" | "scheduled";
 export type GameFeatureProperties = {
   id: string;
   sport: string;
+  /** Registered Mapbox `icon-image` id (rasterized emoji badge). */
+  sport_map_icon: string;
   status: GameStatus;
   players_filled: number;
   players_total: number;
   players_label: string; // e.g. "3/10"
-  sport_emoji: string; // e.g. "🏀" for map symbol
+  sport_emoji: string; // UI / parity with map glyph
   visibility?: "public" | "private";
   title?: string;
-};
-
-const SPORT_EMOJI: Record<string, string> = {
-  basketball: "🏀",
-  soccer: "⚽",
-  football: "🏈",
-  volleyball: "🏐",
-  tennis: "🎾",
-  running: "🏃",
-  pickup: "🎯",
 };
 
 export type GameFeature = Feature<Point, GameFeatureProperties>;
@@ -53,12 +46,9 @@ export function getGameStatus(startsAt: string | null): GameStatus {
   return "scheduled";
 }
 
-/** Map GameRow to GeoJSON feature. players_filled can come from backend later; we use 0 for now. */
-export function gameToFeature(
-  game: GameRow,
-  playersFilled: number = 0,
-  selectedGameId: string | null
-): GameFeature {
+/** Map GameRow to GeoJSON feature. Uses `participant_count` from `get_games_nearby` when present. */
+export function gameToFeature(game: GameRow, _selectedGameId: string | null): GameFeature {
+  const players_filled = game.participant_count ?? 0;
   const players_total = game.spots_needed;
   const status = getGameStatus(game.starts_at);
   return {
@@ -71,46 +61,43 @@ export function gameToFeature(
     properties: {
       id: game.id,
       sport: game.sport,
+      sport_map_icon: getGameMapboxIconId(game.sport),
       status,
-      players_filled: playersFilled,
+      players_filled,
       players_total,
-      players_label: `${playersFilled}/${players_total}`,
-      sport_emoji: SPORT_EMOJI[game.sport.toLowerCase()] ?? SPORT_EMOJI.pickup,
+      players_label: `${players_filled}/${players_total}`,
+      sport_emoji: getSportIconEmoji(game.sport),
       title: game.title,
     },
   };
 }
 
-export function gamesToGeoJSON(
-  games: GameRow[],
-  selectedGameId: string | null,
-  getPlayersFilled?: (gameId: string) => number
-): GamesGeoJSON {
-  const features = games.map((g) =>
-    gameToFeature(g, getPlayersFilled?.(g.id) ?? 0, selectedGameId)
-  );
+export function gamesToGeoJSON(games: GameRow[], selectedGameId: string | null): GamesGeoJSON {
+  const features = games.map((g) => gameToFeature(g, selectedGameId));
   return {
     type: "FeatureCollection",
     features,
   };
 }
 
-/** Sport key to Mapbox icon-image name (we register these images on the map). */
+/** @deprecated Use `resolveSportMapboxSuffix` from `../map/gameSportIcons` */
 export const SPORT_ICON_IDS = [
   "basketball",
   "soccer",
   "football",
   "volleyball",
   "tennis",
+  "pickleball",
   "running",
-  "pickup",
+  "gym",
+  "other",
 ] as const;
 
 export type SportIconId = (typeof SPORT_ICON_IDS)[number];
 
-/** Normalize backend sport string to icon id (lowercase, match SPORTS in CreateGameSheet). */
+/** Normalize backend sport string to icon id (CreateGame / filters). */
 export function sportToIconId(sport: string): SportIconId {
-  const lower = sport.toLowerCase();
-  if (SPORT_ICON_IDS.includes(lower as SportIconId)) return lower as SportIconId;
-  return "pickup";
+  const s = resolveSportMapboxSuffix(sport);
+  if (SPORT_ICON_IDS.includes(s as SportIconId)) return s as SportIconId;
+  return "other";
 }

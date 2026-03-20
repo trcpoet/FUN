@@ -1,15 +1,38 @@
 /// <reference types="vite/client" />
-import React, { useRef, useEffect, useState } from "react";
-import { createRoot } from "react-dom/client";
-import { Flag } from "lucide-react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import type { GameRow } from "../../lib/supabase";
 import type { ProfileNearbyRow } from "../../lib/supabase";
 import { gamesToGeoJSON } from "../types/mapGeoJSON";
 import { fetchSportsVenuesFromOverpass, bboxFromCenterRadius } from "../lib/sportsVenues";
 import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
+import { limitGamesForMapViewport } from "../map/mapBounds";
+import {
+  getViewportMetrics,
+  shouldShowGameClusters,
+  shouldShowGameIndividuals,
+  shouldShowPlayerMarkers,
+  shouldShowVenueDots,
+  shouldShowVenueFootprints,
+} from "../map/mapVisibility";
+import * as MapCfg from "../map/mapConfig";
+import { registerGameSportImages } from "../map/registerGameSportImages";
+import { getGameMapboxIconId } from "../map/gameSportIcons";
 import { Avatar3DOverlay } from "./Avatar3DOverlay";
 import { GameEventPopup } from "./GameEventPopup";
+import { VenueInfoPopup } from "./VenueInfoPopup";
 import { useIsMobile } from "./ui/use-mobile";
+
+/** Layer / source ids: games use GL clustering (geo-anchored, no DOM drift). */
+const L_GAME_SOURCE = "fun-games";
+const L_GAME_CLUSTERS = "fun-games-clusters";
+const L_GAME_CLUSTER_LABEL = "fun-games-cluster-label";
+/** Neutral disc + status-colored ring (not a solid green “dot” — icon carries sport identity). */
+const L_GAME_POINT = "fun-games-point";
+/** Rasterized sport badge (`sport_map_icon` → addImage). */
+const L_GAME_ICON = "fun-games-sport-icon";
+const L_GAME_COUNT = "fun-games-roster";
+const L_VENUE_DOTS = "venue-dots-core";
+const SRC_VENUE_DOTS = "venue-dots";
 
 const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined)?.trim() || undefined;
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?w=100&h=100&fit=crop";
@@ -17,11 +40,66 @@ const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1624280184393-53ce60e2
 const DEFAULT_AVATAR_GLB =
   "https://models.readyplayer.me/64b7d2a3d1b31a0096b5e8c4.glb?quality=low";
 
+function circlePolygon(
+  centerLng: number,
+  centerLat: number,
+  radiusMeters: number,
+  steps = 32
+): import("geojson").Polygon {
+  const coordinates: [number, number][] = [];
+  const earthRadius = 6378137;
+
+  for (let i = 0; i <= steps; i++) {
+    const angle = (2 * Math.PI * i) / steps;
+    const dx = (radiusMeters * Math.cos(angle)) / earthRadius;
+    const dy = (radiusMeters * Math.sin(angle)) / earthRadius;
+
+    const lng = centerLng + (dx * 180) / Math.PI;
+    const lat =
+      centerLat + (dy * 180) / Math.PI / Math.cos((centerLat * Math.PI) / 180);
+
+    coordinates.push([lng, lat]);
+  }
+
+  return {
+    type: "Polygon",
+    coordinates: [coordinates],
+  };
+}
+
+function haversineDistanceMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
+  const earthRadius = 6378137; // meters
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadius * c;
+}
+
+export type MapCameraRequest =
+  | { id: number; kind: "fly"; lat: number; lng: number; zoom?: number }
+  | { id: number; kind: "fitBounds"; coordinates: [number, number][] };
+
 type MapboxMapProps = {
   userCoords: { lat: number; lng: number } | null;
   games: GameRow[];
   selectedGameId: string | null;
   onSelectGame: (game: GameRow | null) => void;
+  selectedVenue: VenueSelection | null;
+  onSelectVenue: (venue: VenueSelection | null) => void;
+  /** Where to fetch/render sports venues (defaults to `userCoords` if omitted). */
+  venuesCenter?: { lat: number; lng: number } | null;
+  /** When set, open the game join modal for this game id. */
+  gamePopupRequest?: { nonce: number; gameId: string } | null;
+  /** Fly / fitBounds when `id` changes (search, sport focus, etc.). */
+  mapCameraRequest?: MapCameraRequest | null;
   enable3D?: boolean;
   /** 2D fallback: image URL for user marker when 3D is off. */
   userAvatarUrl?: string | null;
@@ -41,12 +119,25 @@ type MapboxMapProps = {
   centerOnUserTrigger?: number;
 };
 
+export type VenueSelection = {
+  id: string;
+  name?: string;
+  sport?: string;
+  leisure?: string;
+  center: { lat: number; lng: number };
+};
+
 export function MapboxMap(props: MapboxMapProps) {
   const {
     userCoords,
     games,
     selectedGameId,
     onSelectGame,
+    selectedVenue,
+    onSelectVenue,
+    venuesCenter = null,
+    gamePopupRequest = null,
+    mapCameraRequest = null,
     enable3D = false,
     userAvatarUrl = null,
     avatarGlbUrl = null,
@@ -63,25 +154,53 @@ export function MapboxMap(props: MapboxMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("mapbox-gl").Map | null>(null);
   const playerMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
-  const gameMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
-  const venueMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
-  const venueRootsRef = useRef<ReturnType<typeof createRoot>[]>([]);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [eventPopup, setEventPopup] = useState<{ game: GameRow; point: { x: number; y: number } } | null>(null);
+  const [venuePopupPoint, setVenuePopupPoint] = useState<{ x: number; y: number } | null>(null);
   const isMobile = useIsMobile();
+  const venueInteractionTsRef = useRef(0);
+  const gameInteractionTsRef = useRef(0);
+  const lastHandledGamePopupNonceRef = useRef<number | null>(null);
+  const initialUserFlyDoneRef = useRef(false);
+  const gameLayersInitedRef = useRef(false);
+  const gamesRef = useRef(games);
+  const onSelectGameRef = useRef(onSelectGame);
+  const onJoinGameRef = useRef(onJoinGame);
+  const selectedGameIdRef = useRef(selectedGameId);
+  const [mapUxHint, setMapUxHint] = useState<string | null>(null);
+  const venuesFetchCenter = venuesCenter ?? userCoords;
+
+  gamesRef.current = games;
+  onSelectGameRef.current = onSelectGame;
+  onJoinGameRef.current = onJoinGame;
+  selectedGameIdRef.current = selectedGameId;
 
   // —— Map init: sports-first dark basemap, terrain, fog ———
   useEffect(() => {
     setMapError(null);
     if (!MAPBOX_TOKEN || !containerRef.current) return;
+    if (mapRef.current) return;
+
+    let cancelled = false;
 
     import("mapbox-gl").then((mapboxgl) => {
+      if (cancelled) return;
+      const container = containerRef.current;
+      if (!container) return;
+
       mapboxgl.default.accessToken = MAPBOX_TOKEN;
+
+      try {
+        container.innerHTML = "";
+      } catch (_) {
+        return;
+      }
+
       let map: import("mapbox-gl").Map | null = null;
       try {
         map = new mapboxgl.default.Map({
-          container: containerRef.current!,
+          container,
           style: "mapbox://styles/mapbox/dark-v11",
           center: userCoords ? [userCoords.lng, userCoords.lat] : [-98, 40],
           zoom: 15,
@@ -94,10 +213,19 @@ export function MapboxMap(props: MapboxMapProps) {
         return;
       }
 
+      if (cancelled) {
+        try {
+          map.remove();
+        } catch (_) {}
+        return;
+      }
+
+      mapRef.current = map;
+
       map.on("load", () => {
+        if (cancelled || mapRef.current !== map) return;
         setMapLoaded(true);
         setMapError(null);
-        // 3D terrain for depth (sports world feel)
         if (enable3D) {
           try {
             if (!map!.getSource("fun-terrain")) {
@@ -111,11 +239,9 @@ export function MapboxMap(props: MapboxMapProps) {
             map!.setTerrain({ source: "fun-terrain", exaggeration: 1.2 });
           } catch (_) {}
         }
-        // Disable default double-click zoom so we can use double-tap/double-click to open "Create game"
         try {
           map!.doubleClickZoom?.disable();
         } catch (_) {}
-        // Fog for depth perception (Mapbox GL JS v3)
         try {
           map!.setFog({
             color: "rgb(10, 15, 28)",
@@ -126,32 +252,86 @@ export function MapboxMap(props: MapboxMapProps) {
           });
         } catch (_) {}
       });
+
       map.on("error", (e) => {
         if (e.error?.message) {
           setMapError(e.error.message);
           try {
             map.remove();
           } catch (_) {}
-          mapRef.current = null;
+          if (mapRef.current === map) mapRef.current = null;
         }
       });
-      mapRef.current = map;
-      return () => {
-        map?.remove();
-        mapRef.current = null;
-      };
     });
-  }, [MAPBOX_TOKEN, enable3D]);
 
+    return () => {
+      cancelled = true;
+      gameLayersInitedRef.current = false;
+      initialUserFlyDoneRef.current = false;
+      setMapLoaded(false);
+      const m = mapRef.current;
+      if (m) {
+        try {
+          m.remove();
+        } catch (_) {}
+        mapRef.current = null;
+      }
+    };
+  }, [MAPBOX_TOKEN, enable3D, userCoords]);
+
+  // One-time fly to user when coords first become available (avoid fighting search / sport camera)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || !userCoords) return;
+    if (initialUserFlyDoneRef.current) return;
+    initialUserFlyDoneRef.current = true;
     map.flyTo({
       center: [userCoords.lng, userCoords.lat],
       zoom: 16,
       pitch: enable3D ? 50 : 0,
     });
   }, [mapLoaded, userCoords, enable3D]);
+
+  // Search / sport-driven camera
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !mapCameraRequest) return;
+    const req = mapCameraRequest;
+
+    import("mapbox-gl").then((mapboxgl) => {
+      const m = mapRef.current;
+      if (!m) return;
+
+      if (req.kind === "fly") {
+        m.flyTo({
+          center: [req.lng, req.lat],
+          zoom: req.zoom ?? 13,
+          pitch: enable3D ? 50 : 0,
+          duration: 1400,
+        });
+        return;
+      }
+
+      const coords = req.coordinates.filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+      if (coords.length === 0) return;
+      if (coords.length === 1) {
+        m.flyTo({
+          center: coords[0],
+          zoom: 14,
+          pitch: enable3D ? 50 : 0,
+          duration: 1200,
+        });
+        return;
+      }
+      const bounds = new mapboxgl.default.LngLatBounds(coords[0], coords[0]);
+      for (let i = 1; i < coords.length; i++) bounds.extend(coords[i]);
+      m.fitBounds(bounds, {
+        padding: { top: 120, bottom: 240, left: 48, right: 48 },
+        maxZoom: 14,
+        duration: 1200,
+      });
+    });
+  }, [mapLoaded, mapCameraRequest, enable3D]);
 
   // Center on user when "Center on me" is pressed (works without auth; uses browser geolocation)
   useEffect(() => {
@@ -179,63 +359,378 @@ export function MapboxMap(props: MapboxMapProps) {
     );
   }, [mapLoaded, centerOnUserTrigger, userCoords, enable3D]);
 
-  // —— Games as DOM markers: sport emoji only, roster count top-right ———
+  // —— Venue selection: fly camera + emphasize selected venue area ——
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !selectedVenue) return;
+
+    map.flyTo({
+      center: [selectedVenue.center.lng, selectedVenue.center.lat],
+      zoom: 17,
+      pitch: enable3D ? 50 : 0,
+      duration: 450,
+    });
+  }, [mapLoaded, selectedVenue, enable3D]);
+
+  // —— Open game modal from carousel (center + delayed popup) ——
+  useEffect(() => {
+    if (!mapLoaded || !gamePopupRequest) return;
+    if (lastHandledGamePopupNonceRef.current === gamePopupRequest.nonce) return;
+    lastHandledGamePopupNonceRef.current = gamePopupRequest.nonce;
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    const game = gamesRef.current.find((g) => g.id === gamePopupRequest.gameId);
+    if (!game) return;
+
+    // Close venue popup (if open) and ensure game selection is synced.
+    onSelectVenue(null);
+    setVenuePopupPoint(null);
+    onSelectGameRef.current(game);
+
+    const rect = map.getContainer().getBoundingClientRect();
+    const mapPoint = { x: rect.width / 2, y: rect.height / 2 };
+
+    gameInteractionTsRef.current = Date.now();
+    setEventPopup(null);
+
+    const t = window.setTimeout(() => {
+      setEventPopup({ game, point: mapPoint });
+    }, 650);
+
+    return () => window.clearTimeout(t);
+  }, [mapLoaded, gamePopupRequest, onSelectVenue]);
+
+  /** Venue footprint paint: calm default; selected venue slightly warmer (still quieter than games). */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
 
-    gameMarkersRef.current.forEach((m) => m.remove());
-    gameMarkersRef.current = [];
+    const fillLayerId = "venue-areas-fill";
+    const outlineLayerId = "venue-areas-outline";
 
-    const features = gamesToGeoJSON(games, selectedGameId).features;
-    if (features.length === 0) return;
+    if (map.getLayer(fillLayerId)) {
+      const sel = selectedVenue?.id ?? "";
+      map.setPaintProperty(fillLayerId, "fill-color", [
+        "case",
+        ["==", ["get", "id"], sel],
+        MapCfg.VENUE_FILL_COLOR_SELECTED,
+        MapCfg.VENUE_FILL_COLOR_DEFAULT,
+      ]);
+      map.setPaintProperty(fillLayerId, "fill-opacity", [
+        "case",
+        ["==", ["get", "id"], sel],
+        0.22,
+        0.12,
+      ]);
+    }
 
-    import("mapbox-gl").then((mapboxgl) => {
-      features.forEach((f) => {
-        const id = f.properties?.id;
-        const game = games.find((g) => g.id === id);
-        if (!game || !f.geometry || f.geometry.type !== "Point") return;
-        const [lng, lat] = f.geometry.coordinates;
+    if (map.getLayer(outlineLayerId)) {
+      const sel = selectedVenue?.id ?? "";
+      map.setPaintProperty(outlineLayerId, "line-color", [
+        "case",
+        ["==", ["get", "id"], sel],
+        MapCfg.VENUE_OUTLINE_COLOR_SELECTED,
+        MapCfg.VENUE_OUTLINE_COLOR_DEFAULT,
+      ]);
+      map.setPaintProperty(outlineLayerId, "line-width", [
+        "case",
+        ["==", ["get", "id"], sel],
+        MapCfg.VENUE_OUTLINE_WIDTH_SELECTED,
+        MapCfg.VENUE_OUTLINE_WIDTH_DEFAULT,
+      ]);
+    }
 
-        const wrap = document.createElement("div");
-        wrap.className = "game-marker-wrap";
-        wrap.dataset.gameId = id;
-        wrap.style.cssText =
-          "position:relative;cursor:pointer;display:flex;align-items:center;justify-content:center;width:36px;height:36px;";
-        const emojiWrap = document.createElement("div");
-        emojiWrap.style.cssText =
-          "width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:22px;line-height:1;text-shadow:0 0 4px rgba(0,0,0,0.8),0 1px 2px rgba(0,0,0,0.9);background:rgba(15,23,42,0.9);border-radius:8px;border:2px solid rgba(251,191,36,0.5);";
-        emojiWrap.textContent = f.properties?.sport_emoji ?? "🎯";
-        wrap.appendChild(emojiWrap);
-        const roster = document.createElement("div");
-        roster.style.cssText =
-          "position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;font-size:10px;font-weight:600;color:#e2e8f0;background:rgba(251,191,36,0.9);border-radius:9px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.5);";
-        roster.textContent = f.properties?.players_label ?? "";
-        wrap.appendChild(roster);
+    // Subtle venue center dot emphasis (no extra pulse layers / yellow beacons)
+    if (map.getLayer(L_VENUE_DOTS)) {
+      const sel = selectedVenue?.id ?? "";
+      map.setPaintProperty(L_VENUE_DOTS, "circle-radius", [
+        "case",
+        ["==", ["get", "id"], sel],
+        MapCfg.VENUE_DOT_RADIUS_SELECTED_PX,
+        MapCfg.VENUE_DOT_RADIUS_PX,
+      ]);
+      map.setPaintProperty(L_VENUE_DOTS, "circle-color", [
+        "case",
+        ["==", ["get", "id"], sel],
+        MapCfg.VENUE_DOT_COLOR_SELECTED,
+        MapCfg.VENUE_DOT_COLOR,
+      ]);
+      map.setPaintProperty(L_VENUE_DOTS, "circle-opacity", [
+        "case",
+        ["==", ["get", "id"], sel],
+        0.95,
+        0.55,
+      ]);
+    }
+  }, [mapLoaded, selectedVenue]);
 
-        wrap.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          onSelectGame(game);
-          const rect = wrap.getBoundingClientRect();
-          const container = map.getContainer().getBoundingClientRect();
-          setEventPopup({
-            game,
-            point: { x: rect.left - container.left + rect.width / 2, y: rect.top - container.top },
-          });
-        });
+  /** Geo-anchored games: clustered GL source + symbol/circle layers (no DOM markers). */
+  const applyMapLayerVisibility = useCallback(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer(L_GAME_CLUSTERS)) return;
+    const { zoom, boundsWidthKm } = getViewportMetrics(map);
+    const showClusters = shouldShowGameClusters(zoom, boundsWidthKm);
+    const showIndividuals = shouldShowGameIndividuals(zoom, boundsWidthKm);
+    const showVenueFp = shouldShowVenueFootprints(zoom);
+    const showVenueDot = shouldShowVenueDots(zoom);
+    const showPlayers = shouldShowPlayerMarkers(zoom);
 
-        const marker = new mapboxgl.default.Marker({ element: wrap, offset: [0, 0] })
-          .setLngLat([lng, lat])
-          .addTo(map);
-        gameMarkersRef.current.push(marker);
+    map.setLayoutProperty(L_GAME_CLUSTERS, "visibility", showClusters ? "visible" : "none");
+    map.setLayoutProperty(L_GAME_CLUSTER_LABEL, "visibility", showClusters ? "visible" : "none");
+    map.setLayoutProperty(L_GAME_POINT, "visibility", showIndividuals ? "visible" : "none");
+    map.setLayoutProperty(L_GAME_ICON, "visibility", showIndividuals ? "visible" : "none");
+    map.setLayoutProperty(L_GAME_COUNT, "visibility", showIndividuals ? "visible" : "none");
+
+    if (map.getLayer("venue-areas-fill")) {
+      map.setLayoutProperty("venue-areas-fill", "visibility", showVenueFp ? "visible" : "none");
+    }
+    if (map.getLayer("venue-areas-outline")) {
+      map.setLayoutProperty("venue-areas-outline", "visibility", showVenueFp ? "visible" : "none");
+    }
+    if (map.getLayer(L_VENUE_DOTS)) {
+      map.setLayoutProperty(L_VENUE_DOTS, "visibility", showVenueDot ? "visible" : "none");
+    }
+
+    playerMarkersRef.current.forEach((m) => {
+      const el = m.getElement();
+      if (el) el.style.visibility = showPlayers ? "visible" : "hidden";
+    });
+
+    const g = gamesRef.current;
+    setMapUxHint(
+      g.length > 0 && !showClusters && !showIndividuals && zoom < MapCfg.GAME_INDIVIDUAL_MIN_ZOOM
+        ? "Zoom in to explore games nearby"
+        : null
+    );
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || gameLayersInitedRef.current) return;
+    gameLayersInitedRef.current = true;
+
+    registerGameSportImages(map);
+
+    map.addSource(L_GAME_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+      cluster: true,
+      clusterMaxZoom: MapCfg.GAME_CLUSTER_MAX_ZOOM,
+      clusterRadius: MapCfg.GAME_CLUSTER_RADIUS_PX,
+    });
+
+    map.addLayer({
+      id: L_GAME_CLUSTERS,
+      type: "circle",
+      source: L_GAME_SOURCE,
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-color": "rgba(30, 41, 59, 0.92)",
+        "circle-radius": ["step", ["get", "point_count"], 18, 8, 22, 16, 26, 32, 30],
+        "circle-opacity": 0.88,
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": "rgba(251, 191, 36, 0.55)",
+      },
+    });
+
+    map.addLayer({
+      id: L_GAME_CLUSTER_LABEL,
+      type: "symbol",
+      source: L_GAME_SOURCE,
+      filter: ["has", "point_count"],
+      layout: {
+        "text-field": ["get", "point_count_abbreviated"],
+        "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Regular"],
+        "text-size": 12,
+      },
+      paint: {
+        "text-color": "#e2e8f0",
+      },
+    });
+
+    map.addLayer({
+      id: L_GAME_POINT,
+      type: "circle",
+      source: L_GAME_SOURCE,
+      filter: ["!", ["has", "point_count"]],
+      paint: {
+        "circle-radius": 14,
+        "circle-color": "rgba(15, 23, 42, 0.88)",
+        "circle-opacity": 0.92,
+        "circle-stroke-width": 2,
+        "circle-stroke-color": [
+          "match",
+          ["get", "status"],
+          "live",
+          "rgba(248, 113, 113, 0.95)",
+          "soon",
+          "rgba(251, 146, 60, 0.95)",
+          "scheduled",
+          "rgba(52, 211, 153, 0.6)",
+          "rgba(148, 163, 184, 0.55)",
+        ],
+      },
+    });
+
+    map.addLayer({
+      id: L_GAME_ICON,
+      type: "symbol",
+      source: L_GAME_SOURCE,
+      filter: ["!", ["has", "point_count"]],
+      layout: {
+        "icon-image": ["coalesce", ["get", "sport_map_icon"], getGameMapboxIconId("other")],
+        // Make the sport badge fill the neutral circle marker.
+        "icon-size": 0.64,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
+      paint: {},
+    });
+
+    map.addLayer({
+      id: L_GAME_COUNT,
+      type: "symbol",
+      source: L_GAME_SOURCE,
+      filter: ["!", ["has", "point_count"]],
+      layout: {
+        "text-field": ["get", "players_label"],
+        "text-size": 9,
+        "text-offset": [0, 1.35],
+        "text-anchor": "top",
+        "text-allow-overlap": true,
+        "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Regular"],
+      },
+      paint: {
+        "text-color": "#cbd5e1",
+        "text-halo-color": "rgba(15,23,42,0.85)",
+        "text-halo-width": 1,
+      },
+    });
+
+    const openPopupForGame = (game: GameRow, mapPoint: { x: number; y: number }) => {
+      gameInteractionTsRef.current = Date.now();
+      onSelectGameRef.current(game);
+      setEventPopup({ game, point: mapPoint });
+    };
+
+    const openGameFromFeature = (e: {
+      features?: import("mapbox-gl").MapboxGeoJSONFeature[];
+      point: { x: number; y: number };
+    }) => {
+      const f = e.features?.[0];
+      const gid = f?.properties?.id;
+      if (!gid) return;
+      const game = gamesRef.current.find((g) => g.id === gid);
+      if (game) openPopupForGame(game, e.point);
+    };
+
+    map.on("click", L_GAME_CLUSTERS, (e) => {
+      if (!e.features?.length) return;
+      const f = e.features[0];
+      const src = map.getSource(L_GAME_SOURCE) as import("mapbox-gl").GeoJSONSource;
+      const raw = f.properties?.cluster_id;
+      const clusterId = typeof raw === "number" ? raw : Number(raw);
+      if (raw == null || Number.isNaN(clusterId)) return;
+      src.getClusterExpansionZoom(clusterId, (err, z) => {
+        if (err || z == null) return;
+        const coords = (f.geometry as import("geojson").Point).coordinates as [number, number];
+        map.easeTo({ center: coords, zoom: Math.min(z + 0.5, 16), duration: 450 });
       });
     });
 
-    return () => {
-      gameMarkersRef.current.forEach((m) => m.remove());
-      gameMarkersRef.current = [];
+    map.on("click", L_GAME_POINT, openGameFromFeature);
+    map.on("click", L_GAME_ICON, openGameFromFeature);
+
+    [L_GAME_CLUSTERS, L_GAME_POINT, L_GAME_ICON].forEach((id) => {
+      map.on("mouseenter", id, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", id, () => {
+        map.getCanvas().style.cursor = "";
+      });
+    });
+
+    let visRaf = 0;
+    const scheduleVis = () => {
+      if (visRaf) cancelAnimationFrame(visRaf);
+      visRaf = requestAnimationFrame(() => {
+        visRaf = 0;
+        applyMapLayerVisibility();
+      });
     };
-  }, [mapLoaded, games, selectedGameId, onSelectGame]);
+
+    map.on("move", scheduleVis);
+    map.on("zoom", scheduleVis);
+    map.on("moveend", applyMapLayerVisibility);
+    map.on("zoomend", applyMapLayerVisibility);
+
+    applyMapLayerVisibility();
+
+    return () => {
+      map.off("move", scheduleVis);
+      map.off("zoom", scheduleVis);
+      map.off("moveend", applyMapLayerVisibility);
+      map.off("zoomend", applyMapLayerVisibility);
+    };
+  }, [mapLoaded, applyMapLayerVisibility]);
+
+  /** Push game GeoJSON into clustered source (capped by viewport for performance). */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const src = map.getSource(L_GAME_SOURCE) as import("mapbox-gl").GeoJSONSource | undefined;
+    if (!src) return;
+
+    const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
+    src.setData(gamesToGeoJSON(capped, selectedGameId));
+    applyMapLayerVisibility();
+  }, [mapLoaded, games, selectedGameId, applyMapLayerVisibility]);
+
+  /** Selected game: stronger ring + slightly larger sport icon. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer(L_GAME_POINT)) return;
+    const sid = selectedGameId ?? "";
+    map.setPaintProperty(L_GAME_POINT, "circle-stroke-width", [
+      "case",
+      ["==", ["get", "id"], sid],
+      3,
+      2,
+    ]);
+    map.setPaintProperty(L_GAME_POINT, "circle-stroke-color", [
+      "case",
+      ["==", ["get", "id"], sid],
+      "rgba(251, 191, 36, 0.98)",
+      [
+        "match",
+        ["get", "status"],
+        "live",
+        "rgba(248, 113, 113, 0.95)",
+        "soon",
+        "rgba(251, 146, 60, 0.95)",
+        "scheduled",
+        "rgba(52, 211, 153, 0.6)",
+        "rgba(148, 163, 184, 0.55)",
+      ],
+    ]);
+    map.setPaintProperty(L_GAME_POINT, "circle-radius", [
+      "case",
+      ["==", ["get", "id"], sid],
+      16,
+      14,
+    ]);
+
+    if (map.getLayer(L_GAME_ICON)) {
+      map.setLayoutProperty(L_GAME_ICON, "icon-size", [
+        "case",
+        ["==", ["get", "id"], sid],
+        0.74,
+        0.64,
+      ]);
+    }
+  }, [mapLoaded, selectedGameId]);
 
   // Map click:
   // - On desktop: close popup only.
@@ -244,7 +739,16 @@ export function MapboxMap(props: MapboxMapProps) {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     const handler = (e: { lngLat: { lat: number; lng: number }; point: { x: number; y: number } }) => {
+      // Avoid clearing venue selection immediately after venue marker/polygon clicks.
+      if (Date.now() - venueInteractionTsRef.current < 250) return;
+      // Also avoid clearing game popup immediately after clicking a game point/icon.
+      if (Date.now() - gameInteractionTsRef.current < 250) return;
+
       if (isMobile && onMapDoubleClick) {
+        setEventPopup(null);
+        onSelectVenue(null);
+        setVenuePopupPoint(null);
+
         const container = map.getContainer();
         const rect = container.getBoundingClientRect();
 
@@ -272,14 +776,16 @@ export function MapboxMap(props: MapboxMapProps) {
 
       // Desktop: normal click just closes any open popup
       setEventPopup(null);
+      onSelectVenue(null);
+      setVenuePopupPoint(null);
     };
     map.on("click", handler);
     return () => {
       map.off("click", handler);
     };
-  }, [mapLoaded, isMobile, onMapDoubleClick]);
+  }, [mapLoaded, isMobile, onMapDoubleClick, onSelectVenue]);
 
-  // Map double-click / double-tap (desktop only): center map and open Create Game modal via callback
+  // Map double-click (desktop): use the geographic point under the cursor, not viewport center
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || !onMapDoubleClick || isMobile) return;
@@ -288,31 +794,32 @@ export function MapboxMap(props: MapboxMapProps) {
       const container = map.getContainer();
       const rect = container.getBoundingClientRect();
 
-      // Use the visual center of the map viewport as the game location,
-      // so even if the tap is at the bottom, we recentre the map first.
-      const centerPoint = { x: rect.width / 2, y: rect.height / 2 };
-      const centerLngLat = map.unproject(centerPoint);
+      const tapLat = e.lngLat.lat;
+      const tapLng = e.lngLat.lng;
 
-      // Center the map on this point (keeping current zoom/pitch)
+      setEventPopup(null);
+      onSelectVenue(null);
+      setVenuePopupPoint(null);
+
       map.easeTo({
-        center: [centerLngLat.lng, centerLngLat.lat],
+        center: [tapLng, tapLat],
         duration: 300,
       });
 
-      // Anchor the modal to the viewport center so it never goes off-screen
+      // Screen position of the double-click (for modal placement)
       const viewportPoint = {
-        x: rect.left + centerPoint.x,
-        y: rect.top + centerPoint.y,
+        x: rect.left + e.point.x,
+        y: rect.top + e.point.y,
       };
 
-      onMapDoubleClick(centerLngLat.lat, centerLngLat.lng, viewportPoint);
+      onMapDoubleClick(tapLat, tapLng, viewportPoint);
     };
 
     map.on("dblclick", handler);
     return () => {
       map.off("dblclick", handler);
     };
-  }, [mapLoaded, onMapDoubleClick, isMobile]);
+  }, [mapLoaded, onMapDoubleClick, isMobile, onSelectVenue]);
 
   const glbUrl = avatarGlbUrl ?? userAvatarUrl ?? DEFAULT_AVATAR_GLB;
   const use3DOverlay = enable3D && !!userCoords && !!glbUrl && !use2DAvatar;
@@ -390,63 +897,267 @@ export function MapboxMap(props: MapboxMapProps) {
           .addTo(map);
         playerMarkersRef.current.push(marker);
       });
+      applyMapLayerVisibility();
     });
 
     return () => {
       playerMarkersRef.current.forEach((m) => m.remove());
       playerMarkersRef.current = [];
     };
-  }, [mapLoaded, nearbyProfiles, currentUserId]);
+  }, [mapLoaded, nearbyProfiles, currentUserId, applyMapLayerVisibility]);
 
-  // —— Sports venues: 5km radius, Lucide Flag icon (small, no white bg) ———
-  const venueFetchKey = userCoords ? `${userCoords.lat.toFixed(4)},${userCoords.lng.toFixed(4)}` : null;
+  // —— Sports venues: subtle GL polygons + small center dots (no DOM flag markers) ———
+  const venueFetchKey = venuesFetchCenter
+    ? `${venuesFetchCenter.lat.toFixed(4)},${venuesFetchCenter.lng.toFixed(4)}`
+    : null;
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || !userCoords || !venueFetchKey) return;
+    if (!map || !mapLoaded || !venuesFetchCenter || !venueFetchKey) return;
 
     const addVenueMarkers = (geojson: SportsVenueGeoJSON) => {
-      venueMarkersRef.current.forEach((m) => m.remove());
-      venueMarkersRef.current = [];
-      venueRootsRef.current.forEach((r) => r.unmount());
-      venueRootsRef.current = [];
+      const mapInstance = mapRef.current;
+      if (!mapInstance) return;
 
-      import("mapbox-gl").then((mapboxgl) => {
+      import("mapbox-gl").then(() => {
+        type Cluster = {
+          lng: number;
+          lat: number;
+          properties: SportsVenueGeoJSON["features"][number]["properties"];
+        };
+
+        const clusters: Cluster[] = [];
+        const maxDistanceMeters = 80;
+        const toRadians = (deg: number) => (deg * Math.PI) / 180;
+        const distanceMeters = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+          const R = 6378137;
+          const dLat = toRadians(lat2 - lat1);
+          const dLng = toRadians(lng2 - lng1);
+          const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          return R * c;
+        };
+
         geojson.features.forEach((f) => {
           if (!f.geometry || f.geometry.type !== "Point") return;
           const [lng, lat] = f.geometry.coordinates;
 
-          const wrap = document.createElement("div");
-          wrap.style.cssText =
-            "display:flex;align-items:center;justify-content:center;width:20px;height:20px;color:#fbbf24;";
-          const root = createRoot(wrap);
-          root.render(
-            React.createElement(Flag, {
-              size: 18,
-              strokeWidth: 2.5,
-              style: { filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.6))" },
-            })
-          );
-          venueRootsRef.current.push(root);
+          let targetCluster: Cluster | null = null;
+          for (const cluster of clusters) {
+            if (distanceMeters(lat, lng, cluster.lat, cluster.lng) <= maxDistanceMeters) {
+              targetCluster = cluster;
+              break;
+            }
+          }
 
-          const marker = new mapboxgl.default.Marker({ element: wrap })
-            .setLngLat([lng, lat])
-            .addTo(map);
-          venueMarkersRef.current.push(marker);
+          if (targetCluster) {
+            targetCluster.lng = (targetCluster.lng + lng) / 2;
+            targetCluster.lat = (targetCluster.lat + lat) / 2;
+          } else {
+            clusters.push({ lng, lat, properties: f.properties });
+          }
         });
+
+        const areaFeatures: import("geojson").Feature<
+          import("geojson").Polygon,
+          SportsVenueGeoJSON["features"][number]["properties"]
+        >[] = [];
+
+        clusters.forEach((cluster) => {
+          const polygon = circlePolygon(cluster.lng, cluster.lat, MapCfg.VENUE_AREA_RADIUS_METERS);
+          areaFeatures.push({
+            type: "Feature",
+            geometry: polygon,
+            properties: cluster.properties,
+          });
+        });
+
+        const areaCollection: import("geojson").FeatureCollection = {
+          type: "FeatureCollection",
+          features: areaFeatures,
+        };
+
+        const dotFeatures: import("geojson").Feature<
+          import("geojson").Point,
+          { id: string; name?: string }
+        >[] = clusters.map((c) => ({
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [c.lng, c.lat] },
+          properties: { id: c.properties.id, name: c.properties.name },
+        }));
+
+        const dotCollection: import("geojson").FeatureCollection = {
+          type: "FeatureCollection",
+          features: dotFeatures,
+        };
+
+        const sourceId = "venue-areas";
+        const fillLayerId = "venue-areas-fill";
+        const outlineLayerId = "venue-areas-outline";
+        const beforeGames = mapInstance.getLayer(L_GAME_CLUSTERS) ? L_GAME_CLUSTERS : undefined;
+
+        const selectVenueFromCluster = (cluster: Cluster, mapPoint: { x: number; y: number }) => {
+          venueInteractionTsRef.current = Date.now();
+          setEventPopup(null);
+          setVenuePopupPoint(mapPoint);
+          onSelectVenue({
+            id: cluster.properties.id,
+            name: cluster.properties.name,
+            sport: cluster.properties.sport,
+            leisure: cluster.properties.leisure,
+            center: { lng: cluster.lng, lat: cluster.lat },
+          });
+        };
+
+        if (mapInstance.getSource(sourceId)) {
+          (mapInstance.getSource(sourceId) as import("mapbox-gl").GeoJSONSource).setData(areaCollection);
+          const dotSrc = mapInstance.getSource(SRC_VENUE_DOTS) as import("mapbox-gl").GeoJSONSource | undefined;
+          if (dotSrc) dotSrc.setData(dotCollection);
+        } else {
+          mapInstance.addSource(sourceId, {
+            type: "geojson",
+            data: areaCollection,
+            promoteId: "id",
+          });
+
+          mapInstance.addSource(SRC_VENUE_DOTS, {
+            type: "geojson",
+            data: dotCollection,
+            promoteId: "id",
+          });
+
+          mapInstance.addLayer(
+            {
+              id: fillLayerId,
+              type: "fill",
+              source: sourceId,
+              paint: {
+                "fill-color": MapCfg.VENUE_FILL_COLOR_DEFAULT,
+                "fill-opacity": 0.12,
+              },
+            },
+            beforeGames
+          );
+
+          mapInstance.addLayer(
+            {
+              id: outlineLayerId,
+              type: "line",
+              source: sourceId,
+              paint: {
+                "line-color": MapCfg.VENUE_OUTLINE_COLOR_DEFAULT,
+                "line-width": MapCfg.VENUE_OUTLINE_WIDTH_DEFAULT,
+              },
+            },
+            beforeGames
+          );
+
+          mapInstance.addLayer(
+            {
+              id: L_VENUE_DOTS,
+              type: "circle",
+              source: SRC_VENUE_DOTS,
+              paint: {
+                "circle-radius": MapCfg.VENUE_DOT_RADIUS_PX,
+                "circle-color": MapCfg.VENUE_DOT_COLOR,
+                "circle-opacity": 0.55,
+                "circle-stroke-width": MapCfg.VENUE_DOT_STROKE_WIDTH,
+                "circle-stroke-color": MapCfg.VENUE_DOT_STROKE,
+              },
+            },
+            beforeGames
+          );
+
+          const onFillClick = (e: { features?: import("mapbox-gl").MapboxGeoJSONFeature[]; point: { x: number; y: number } }) => {
+            const feature = e.features?.[0] as
+              | import("geojson").Feature<
+                  import("geojson").Polygon,
+                  SportsVenueGeoJSON["features"][number]["properties"]
+                >
+              | undefined;
+            if (!feature) return;
+            const ring = feature.geometry.coordinates[0];
+            if (!ring?.length) return;
+            const center = ring.reduce(
+              (acc, coord) => {
+                acc[0] += coord[0];
+                acc[1] += coord[1];
+                return acc;
+              },
+              [0, 0] as [number, number]
+            );
+            center[0] /= ring.length;
+            center[1] /= ring.length;
+            const cl = clusters.find((c) => c.properties.id === feature.properties.id);
+            if (cl) selectVenueFromCluster(cl, e.point);
+            else {
+              venueInteractionTsRef.current = Date.now();
+              setEventPopup(null);
+              setVenuePopupPoint({ x: e.point.x, y: e.point.y });
+              onSelectVenue({
+                id: feature.properties.id,
+                name: feature.properties.name,
+                sport: feature.properties.sport,
+                leisure: feature.properties.leisure,
+                center: { lng: center[0], lat: center[1] },
+              });
+            }
+          };
+
+          mapInstance.on("click", fillLayerId, onFillClick);
+
+          mapInstance.on("click", L_VENUE_DOTS, (e) => {
+            const id = e.features?.[0]?.properties?.id as string | undefined;
+            if (!id) return;
+            const cl = clusters.find((c) => c.properties.id === id);
+            if (cl) selectVenueFromCluster(cl, e.point);
+          });
+
+          [fillLayerId, L_VENUE_DOTS].forEach((lid) => {
+            mapInstance.on("mouseenter", lid, () => {
+              mapInstance.getCanvas().style.cursor = "pointer";
+            });
+            mapInstance.on("mouseleave", lid, () => {
+              mapInstance.getCanvas().style.cursor = "";
+            });
+          });
+        }
+
+        applyMapLayerVisibility();
       });
     };
 
-    const bbox = bboxFromCenterRadius(userCoords.lat, userCoords.lng, 5);
+    const bbox = bboxFromCenterRadius(venuesFetchCenter.lat, venuesFetchCenter.lng, 5);
     fetchSportsVenuesFromOverpass(bbox).then(addVenueMarkers);
 
     return () => {
-      venueMarkersRef.current.forEach((m) => m.remove());
-      venueMarkersRef.current = [];
-      venueRootsRef.current.forEach((r) => r.unmount());
-      venueRootsRef.current = [];
+      const m = mapRef.current;
+      if (!m) return;
+      try {
+        if (m.getLayer(L_VENUE_DOTS)) m.removeLayer(L_VENUE_DOTS);
+        if (m.getLayer("venue-areas-outline")) m.removeLayer("venue-areas-outline");
+        if (m.getLayer("venue-areas-fill")) m.removeLayer("venue-areas-fill");
+        if (m.getSource(SRC_VENUE_DOTS)) m.removeSource(SRC_VENUE_DOTS);
+        if (m.getSource("venue-areas")) m.removeSource("venue-areas");
+      } catch (_) {}
     };
-  }, [mapLoaded, venueFetchKey]);
+  }, [mapLoaded, venueFetchKey, onSelectVenue, applyMapLayerVisibility]);
+
+  const openGamesNearbyCount = selectedVenue
+    ? games.filter((g) => {
+        const isOpen = g.status === "open" || !g.status;
+        if (!isOpen) return false;
+        const dMeters = haversineDistanceMeters(
+          selectedVenue.center.lat,
+          selectedVenue.center.lng,
+          g.lat,
+          g.lng
+        );
+        return dMeters <= 120;
+      }).length
+    : 0;
 
   if (!MAPBOX_TOKEN || mapError) {
     return (
@@ -471,6 +1182,14 @@ export function MapboxMap(props: MapboxMapProps) {
         className={`absolute inset-0 w-full h-full ${!mapLoaded ? "pointer-events-none" : ""}`}
         style={{ minHeight: "100%" }}
       />
+      {mapUxHint && (
+        <div
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-36 z-30 max-w-sm px-4 py-2 rounded-full bg-slate-900/75 border border-slate-600/60 text-slate-300 text-xs text-center backdrop-blur-md shadow-lg"
+          role="status"
+        >
+          {mapUxHint}
+        </div>
+      )}
       {eventPopup && containerRef.current && (
         <div
           className="absolute inset-0 pointer-events-auto"
@@ -490,6 +1209,32 @@ export function MapboxMap(props: MapboxMapProps) {
           </div>
         </div>
       )}
+
+      {selectedVenue && venuePopupPoint && mapLoaded && containerRef.current && (
+        <div
+          className="absolute inset-0 pointer-events-auto"
+          onClick={() => {
+            onSelectVenue(null);
+            setVenuePopupPoint(null);
+          }}
+        >
+          <div
+            className="absolute"
+            style={{ left: venuePopupPoint.x, top: venuePopupPoint.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <VenueInfoPopup
+              venue={selectedVenue}
+              openGamesNearbyCount={openGamesNearbyCount}
+              onClose={() => {
+                onSelectVenue(null);
+                setVenuePopupPoint(null);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {mapLoaded && use3DOverlay && userCoords && mapRef.current && (
         <Avatar3DOverlay
           map={mapRef.current}

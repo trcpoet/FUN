@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { getMyProfile, updateMyAvatarId, updateMyProfile } from "../lib/api";
+import type { AthleteProfilePayload } from "../lib/athleteProfile";
+import { emptyAthleteProfile, parseAthleteProfile } from "../lib/athleteProfile";
 
 export function useMyProfile() {
   const [avatarId, setAvatarId] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [athleteProfile, setAthleteProfile] = useState<AthleteProfilePayload>(() => emptyAthleteProfile());
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +21,7 @@ export function useMyProfile() {
     setAvatarId(res.avatarId);
     setDisplayName(res.displayName);
     setAvatarUrl(res.avatarUrl ?? null);
+    setAthleteProfile(res.error ? emptyAthleteProfile() : res.athleteProfile ?? parseAthleteProfile(null));
     setOnboardingCompleted(res.onboardingCompleted);
     setError(res.error?.message ?? null);
     setLoading(false);
@@ -39,7 +43,13 @@ export function useMyProfile() {
   }, []);
 
   const updateProfile = useCallback(
-    async (updates: { display_name?: string | null; avatar_url?: string | null; avatar_id?: string | null; onboarding_completed?: boolean }) => {
+    async (updates: {
+      display_name?: string | null;
+      avatar_url?: string | null;
+      avatar_id?: string | null;
+      onboarding_completed?: boolean;
+      athlete_profile?: AthleteProfilePayload;
+    }) => {
       const err = await updateMyProfile(updates);
       if (!err) await refetch();
       return err;
@@ -51,6 +61,7 @@ export function useMyProfile() {
     avatarId,
     displayName,
     avatarUrl,
+    athleteProfile,
     onboardingCompleted,
     loading,
     error,
