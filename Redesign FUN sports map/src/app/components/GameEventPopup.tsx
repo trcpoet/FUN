@@ -15,10 +15,11 @@ type GameEventPopupProps = {
   point?: { x: number; y: number };
   onClose: () => void;
   onJoin?: (game: GameRow) => void;
+  onLeave?: (game: GameRow) => void;
   joined?: boolean;
 };
 
-export function GameEventPopup({ game, onClose, onJoin, joined }: GameEventPopupProps) {
+export function GameEventPopup({ game, onClose, onJoin, onLeave, joined }: GameEventPopupProps) {
   const hasCoords = typeof game.lat === "number" && typeof game.lng === "number";
 
   return (
@@ -75,7 +76,19 @@ export function GameEventPopup({ game, onClose, onJoin, joined }: GameEventPopup
             </button>
           )}
           {joined && (
-            <span className="py-2 px-3 text-emerald-400 text-sm font-medium">Joined</span>
+            <>
+              {onLeave ? (
+                <button
+                  type="button"
+                  onClick={() => onLeave(game)}
+                  className="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-medium border border-slate-600"
+                >
+                  Unjoin
+                </button>
+              ) : (
+                <span className="py-2 px-3 text-emerald-400 text-sm font-medium">Joined</span>
+              )}
+            </>
           )}
         </div>
       </div>

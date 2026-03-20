@@ -18,11 +18,12 @@ type Props = {
 
 function ReelCell({ cell }: { cell: HighlightEntry }) {
   const thumb = cell.thumbUrl?.trim();
+  const isVideo = cell.mediaKind === "video" && thumb;
   return (
     <div
-      className="aspect-square relative bg-gradient-to-br from-slate-800 to-slate-950 min-h-0 group"
+      className="aspect-square relative bg-gradient-to-br from-slate-800 to-slate-950 min-h-0 group overflow-hidden"
       style={
-        thumb
+        thumb && !isVideo
           ? {
               backgroundImage: `url(${thumb})`,
               backgroundSize: "cover",
@@ -31,6 +32,9 @@ function ReelCell({ cell }: { cell: HighlightEntry }) {
           : undefined
       }
     >
+      {isVideo ? (
+        <video src={thumb} className="absolute inset-0 size-full object-cover" muted playsInline loop />
+      ) : null}
       <div className="absolute inset-0 bg-black/40 group-hover:bg-black/25 transition-colors" />
       <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-black/80 to-transparent">
         <p className="text-[10px] font-medium text-white line-clamp-2 leading-tight">{cell.title || "Reel"}</p>
@@ -41,10 +45,15 @@ function ReelCell({ cell }: { cell: HighlightEntry }) {
 
 function PostCell({ post }: { post: ActivityPost }) {
   const src = post.mediaUrl?.trim();
+  const isVideo = post.mediaKind === "video";
   return (
     <div className="aspect-square relative bg-slate-900 min-h-0 overflow-hidden group" title={post.caption}>
       {src ? (
-        <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
+        isVideo ? (
+          <video src={src} className="absolute inset-0 size-full object-cover" muted playsInline loop />
+        ) : (
+          <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
+        )
       ) : (
         <div className="absolute inset-0 flex items-center justify-center p-1 bg-gradient-to-br from-slate-800 to-slate-950">
           <span className="text-[9px] text-slate-500 text-center line-clamp-4">{post.caption || "Post"}</span>
@@ -94,7 +103,7 @@ function CombinedGrid({
         >
           Add reel
         </button>
-        {[0, 1, 2, 3].map((i) => (
+        {Array.from({ length: 7 }, (_, i) => i).map((i) => (
           <div key={i} className="aspect-square bg-white/[0.02]" aria-hidden />
         ))}
       </div>

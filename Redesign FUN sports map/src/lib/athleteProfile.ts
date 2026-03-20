@@ -61,6 +61,8 @@ export type HighlightEntry = {
   date?: string;
   /** Cover image for grid / story ring (optional). */
   thumbUrl?: string | null;
+  /** When `video`, grid plays thumbUrl as a video instead of a cover image. */
+  mediaKind?: "image" | "video";
 };
 
 export type ActivityPost = {
@@ -72,6 +74,8 @@ export type ActivityPost = {
   comments?: number;
   /** Image or clip poster URL for media-first feed cards. */
   mediaUrl?: string | null;
+  /** How to render mediaUrl in the grid (defaults to image). */
+  mediaKind?: "image" | "video";
   /** Pinned post shown above the feed (Twitter/IG-style). */
   pinned?: boolean;
 };
@@ -273,6 +277,8 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
           subtitle: asStr(h.subtitle) ?? undefined,
           date: asStr(h.date) ?? undefined,
           thumbUrl: asStr(h.thumbUrl) ?? undefined,
+          mediaKind:
+            h.mediaKind === "video" ? ("video" as const) : h.mediaKind === "image" ? ("image" as const) : undefined,
         }))
     : [];
 
@@ -287,6 +293,8 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
           likes: asNum(p.likes) ?? undefined,
           comments: asNum(p.comments) ?? undefined,
           mediaUrl: asStr(p.mediaUrl) ?? undefined,
+          mediaKind:
+            p.mediaKind === "video" ? ("video" as const) : p.mediaKind === "image" ? ("image" as const) : undefined,
           pinned: p.pinned === true,
         }))
     : [];

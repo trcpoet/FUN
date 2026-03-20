@@ -13,7 +13,9 @@ type Props = {
   displayName: string;
   handle: string | null;
   city: string | null;
-  coverUrl: string | null;
+  /** @deprecated Unused in layout; kept for call-site compatibility. */
+  coverUrl?: string | null;
+  favoriteSport?: string | null;
   avatarUrl: string | null;
   fallbackInitial: string;
   primarySports: string[];
@@ -28,6 +30,8 @@ type Props = {
   onBack: () => void;
   /** Opens settings / edit sheet (full profile editor). */
   onOpenSettings: () => void;
+  /** Hide header edit control (e.g. public athlete view). */
+  readOnly?: boolean;
   /** Instagram-style main profile: only name, handle, bio, badges under avatar. */
   minimal?: boolean;
   /** Taller cover on desktop */
@@ -58,6 +62,7 @@ export function ProfileHero({
   lastGameIso,
   onBack,
   onOpenSettings,
+  readOnly = false,
   minimal,
   isDesktop,
   className,
@@ -89,16 +94,18 @@ export function ProfileHero({
           >
             <ChevronLeft className="size-6" />
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="text-white/80 hover:bg-white/10 hover:text-white rounded-full"
-            onClick={onOpenSettings}
-            aria-label="Profile settings"
-          >
-            <Pencil className="size-5" />
-          </Button>
+          {!readOnly && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="text-white/80 hover:bg-white/10 hover:text-white rounded-full"
+              onClick={onOpenSettings}
+              aria-label="Profile settings"
+            >
+              <Pencil className="size-5" />
+            </Button>
+          )}
         </div>
       </div>
 

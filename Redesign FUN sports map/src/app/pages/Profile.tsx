@@ -15,6 +15,8 @@ import {
   ProfileStickyBar,
   StoriesRail,
   PostsReelsSection,
+  AddPostOrReelDialog,
+  type AddFeedKind,
   AboutSheet,
   TrustRatingsBlock,
   ProfileBadgesSection,
@@ -22,13 +24,17 @@ import {
 } from "../components/athlete-profile";
 import { mergeAthleteProfile } from "../../lib/athleteProfile";
 import { cn } from "../components/ui/utils";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function Profile() {
+  const { user } = useAuth();
   const { displayName, avatarUrl, updateProfile, refetch, athleteProfile, loading } = useMyProfile();
   const { stats } = useUserStats();
   const isMobile = useIsMobile();
   const [badges, setBadges] = useState<UserBadgeWithDetail[]>([]);
   const [editOpen, setEditOpen] = useState(false);
+  const [addFeedOpen, setAddFeedOpen] = useState(false);
+  const [addFeedKind, setAddFeedKind] = useState<AddFeedKind>("post");
   const [aboutOpen, setAboutOpen] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState("");
   const [sticky, setSticky] = useState(false);
@@ -68,7 +74,9 @@ export default function Profile() {
   };
 
   const handleShare = () => {
-    const url = `${window.location.origin}/profile`;
+    const url = user?.id
+      ? `${window.location.origin}/athlete/${user.id}`
+      : `${window.location.origin}/profile`;
     const handle = athleteProfile.handle?.replace(/^@/, "") || "";
     const sports = (athleteProfile.primarySports ?? []).slice(0, 2).join(" · ");
     const lvl = stats?.level ?? 1;
@@ -154,8 +162,14 @@ export default function Profile() {
                 reels={athleteProfile.highlights ?? []}
                 posts={athleteProfile.posts ?? []}
                 pinnedPost={pinnedPost}
-                onAddReel={() => setEditOpen(true)}
-                onAddPost={() => setEditOpen(true)}
+                onAddReel={() => {
+                  setAddFeedKind("reel");
+                  setAddFeedOpen(true);
+                }}
+                onAddPost={() => {
+                  setAddFeedKind("post");
+                  setAddFeedOpen(true);
+                }}
               />
             </div>
           </>
@@ -246,6 +260,29 @@ export default function Profile() {
             </div>
           </div>
         </AboutSheet>
+
+        <AddPostOrReelDialog
+          open={addFeedOpen}
+          onOpenChange={setAddFeedOpen}
+          kind={addFeedKind}
+          onSave={async (item) => {
+            if (item.type === "post") {
+              const err = await updateProfile({
+                athlete_profile: mergeAthleteProfile(athleteProfile, {
+                  posts: [...(athleteProfile.posts ?? []), item.post],
+                }),
+              });
+              if (err) throw new Error(err.message);
+            } else {
+              const err = await updateProfile({
+                athlete_profile: mergeAthleteProfile(athleteProfile, {
+                  highlights: [...(athleteProfile.highlights ?? []), item.highlight],
+                }),
+              });
+              if (err) throw new Error(err.message);
+            }
+          }}
+        />
 
         <ProfileEditSheet
           open={editOpen}

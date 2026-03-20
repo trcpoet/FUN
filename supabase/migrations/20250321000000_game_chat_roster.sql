@@ -159,3 +159,5 @@ $$;
 
 grant execute on function public.get_my_game_inbox() to authenticated;
 grant execute on function public.get_my_game_inbox() to anon;
+
+notify pgrst, 'reload schema';

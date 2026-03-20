@@ -102,10 +102,17 @@ export async function uploadAvatarImage(file: File): Promise<{ url: string | nul
 
   const { error: uploadError } = await supabase.storage.from("avatars").upload(path, file, {
     cacheControl: "3600",
-    upsert: false,
-    contentType: file.type,
+    upsert: true,
+    contentType: file.type || undefined,
   });
-  if (uploadError) return { url: null, error: new Error(uploadError.message) };
+  if (uploadError) {
+    const hint =
+      uploadError.message?.toLowerCase().includes("row-level security") ||
+      uploadError.message?.toLowerCase().includes("policy")
+        ? " Run supabase/migrations/20250322000000_storage_avatars_bucket.sql in the SQL Editor (bucket + RLS)."
+        : "";
+    return { url: null, error: new Error(`${uploadError.message}${hint}`) };
+  }
 
   const { data } = supabase.storage.from("avatars").getPublicUrl(path);
   return { url: data.publicUrl ?? null, error: null };
@@ -121,6 +128,31 @@ export async function uploadProfileStoryMedia(file: File): Promise<{ url: string
 
   const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, "_");
   const path = `stories/${user.id}/${Date.now()}-${safeName}`;
+
+  const { error: uploadError } = await supabase.storage.from("avatars").upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: file.type || undefined,
+  });
+  if (uploadError) return { url: null, error: new Error(uploadError.message) };
+
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  return { url: data.publicUrl ?? null, error: null };
+}
+
+/** Profile post / reel media in the public `avatars` bucket (`feed/posts|reels/…`). */
+export async function uploadProfileFeedMedia(
+  file: File,
+  folder: "posts" | "reels"
+): Promise<{ url: string | null; error: Error | null }> {
+  if (!supabase) return { url: null, error: new Error("Supabase not configured") };
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { url: null, error: new Error("Not signed in") };
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, "_");
+  const path = `feed/${folder}/${user.id}/${Date.now()}-${safeName}`;
 
   const { error: uploadError } = await supabase.storage.from("avatars").upload(path, file, {
     cacheControl: "3600",
@@ -192,6 +224,20 @@ export async function joinGame(gameId: string): Promise<Error | null> {
   return error ? new Error(error.message) : null;
 }
 
+export async function leaveGame(gameId: string): Promise<Error | null> {
+  if (!supabase) return new Error("Supabase not configured");
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return new Error("Not signed in");
+
+  const { error } = await supabase
+    .from("game_participants")
+    .delete()
+    .eq("game_id", gameId)
+    .eq("user_id", user.id);
+
+  return error ? new Error(error.message) : null;
+}
+
 export async function completeGame(params: {
   gameId: string;
   winnerTeamOrUser?: string | null;
@@ -231,6 +277,84 @@ const PROFILE_SELECT_WITH_ATHLETE =
 const PROFILE_SELECT_BASE = "avatar_id, display_name, avatar_url, onboarding_completed";
 const PROFILE_SELECT_MIN = "avatar_id, display_name, avatar_url";
 
+const ATHLETE_PROFILE_COLUMN_LS_KEY = "fun_profiles_athlete_column";
+
+type AthleteProfileColumnState = "unknown" | "present" | "absent";
+
+function readAthleteProfileColumnState(): AthleteProfileColumnState {
+  try {
+    const v = localStorage.getItem(ATHLETE_PROFILE_COLUMN_LS_KEY);
+    if (v === "present") return "present";
+    if (v === "absent") return "absent";
+  } catch {
+    /* private mode */
+  }
+  return "unknown";
+}
+
+function writeAthleteProfileColumnState(s: "present" | "absent") {
+  try {
+    localStorage.setItem(ATHLETE_PROFILE_COLUMN_LS_KEY, s);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Call after you add `profiles.athlete_profile` in Supabase so the app retries the full select. */
+export function clearAthleteProfileColumnCache() {
+  try {
+    localStorage.removeItem(ATHLETE_PROFILE_COLUMN_LS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function isMissingAthleteProfileColumnError(err: {
+  message?: string;
+  code?: string;
+  details?: string;
+  hint?: string;
+} | null): boolean {
+  if (!err) return false;
+  const blob = `${err.message ?? ""} ${err.details ?? ""} ${err.hint ?? ""} ${err.code ?? ""}`.toLowerCase();
+  if (blob.includes("athlete_profile")) return true;
+  if (blob.includes("could not find") && blob.includes("column")) return true;
+  if (blob.includes("column") && blob.includes("does not exist")) return true;
+  return err.code === "42703";
+}
+
+/** One in-flight probe per user so parallel getMyProfile() calls only trigger a single failing select. */
+const athleteProfileProbeByUser = new Map<
+  string,
+  Promise<{ ok: true; row: Record<string, unknown> } | { ok: false }>
+>();
+
+async function probeProfileRowWithAthlete(userId: string): Promise<{ ok: true; row: Record<string, unknown> } | { ok: false }> {
+  const existing = athleteProfileProbeByUser.get(userId);
+  if (existing) return existing;
+
+  const p = (async () => {
+    const res = await supabase!
+      .from("profiles")
+      .select(PROFILE_SELECT_WITH_ATHLETE)
+      .eq("id", userId)
+      .maybeSingle();
+    if (!res.error && res.data) {
+      writeAthleteProfileColumnState("present");
+      return { ok: true, row: res.data as Record<string, unknown> };
+    }
+    if (res.error && isMissingAthleteProfileColumnError(res.error)) {
+      writeAthleteProfileColumnState("absent");
+    }
+    return { ok: false };
+  })().finally(() => {
+    athleteProfileProbeByUser.delete(userId);
+  });
+
+  athleteProfileProbeByUser.set(userId, p);
+  return p;
+}
+
 async function fetchProfileRow(
   userId: string
 ): Promise<{
@@ -240,22 +364,34 @@ async function fetchProfileRow(
 }> {
   if (!supabase) return { row: null, athleteProfileRaw: null, error: new Error("Supabase not configured") };
 
-  let { data, error } = await supabase
-    .from("profiles")
-    .select(PROFILE_SELECT_WITH_ATHLETE)
-    .eq("id", userId)
-    .maybeSingle();
+  const colState = readAthleteProfileColumnState();
 
-  if (!error && data) {
-    const r = data as Record<string, unknown>;
-    return { row: r, athleteProfileRaw: r.athlete_profile, error: null };
+  if (colState === "present") {
+    const res = await supabase
+      .from("profiles")
+      .select(PROFILE_SELECT_WITH_ATHLETE)
+      .eq("id", userId)
+      .maybeSingle();
+    if (!res.error && res.data) {
+      const r = res.data as Record<string, unknown>;
+      return { row: r, athleteProfileRaw: r.athlete_profile, error: null };
+    }
+    clearAthleteProfileColumnCache();
   }
 
-  ({ data, error } = await supabase
+  if (readAthleteProfileColumnState() !== "absent") {
+    const probed = await probeProfileRowWithAthlete(userId);
+    if (probed.ok) {
+      const r = probed.row;
+      return { row: r, athleteProfileRaw: r.athlete_profile, error: null };
+    }
+  }
+
+  let { data, error } = await supabase
     .from("profiles")
     .select(PROFILE_SELECT_BASE)
     .eq("id", userId)
-    .maybeSingle());
+    .maybeSingle();
 
   if (!error && data) {
     const r = data as Record<string, unknown>;
@@ -283,6 +419,46 @@ export async function updateMyAvatarId(avatarId: string | null): Promise<Error |
     .update({ avatar_id: avatarId, updated_at: new Date().toISOString() })
     .eq("id", user.id);
   return error ? new Error(error.message) : null;
+}
+
+/** Read any profile by id (RLS: profiles are publicly readable). */
+export async function getPublicProfileById(userId: string): Promise<{
+  avatarId: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  onboardingCompleted: boolean;
+  athleteProfile: AthleteProfilePayload;
+  error: Error | null;
+}> {
+  if (!supabase) {
+    return {
+      avatarId: null,
+      displayName: null,
+      avatarUrl: null,
+      onboardingCompleted: false,
+      athleteProfile: parseAthleteProfile(null),
+      error: new Error("Supabase not configured"),
+    };
+  }
+  const { row, athleteProfileRaw, error } = await fetchProfileRow(userId);
+  if (error || !row) {
+    return {
+      avatarId: null,
+      displayName: null,
+      avatarUrl: null,
+      onboardingCompleted: false,
+      athleteProfile: parseAthleteProfile(null),
+      error: error ?? new Error("Profile not found"),
+    };
+  }
+  return {
+    avatarId: (row.avatar_id as string | undefined) ?? null,
+    displayName: (row.display_name as string | undefined) ?? null,
+    avatarUrl: (row.avatar_url as string | undefined) ?? null,
+    onboardingCompleted: (row.onboarding_completed as boolean | undefined) ?? true,
+    athleteProfile: parseAthleteProfile(athleteProfileRaw),
+    error: null,
+  };
 }
 
 export async function getMyProfile(): Promise<{
@@ -357,6 +533,12 @@ export async function updateMyProfile(updates: {
   const { error } = await supabase.from("profiles").update(set).eq("id", user.id);
 
   if (error && updates.athlete_profile !== undefined) {
+    // Only treat as "missing column" when Postgres/PostgREST actually says so; otherwise a
+    // successful retry without athlete_profile would falsely claim the column is missing.
+    if (!isMissingAthleteProfileColumnError(error)) {
+      return new Error(error.message);
+    }
+    writeAthleteProfileColumnState("absent");
     const withoutAthlete = { ...set };
     delete withoutAthlete.athlete_profile;
     const { error: err2 } = await supabase.from("profiles").update(withoutAthlete).eq("id", user.id);
@@ -364,8 +546,13 @@ export async function updateMyProfile(updates: {
     return new Error(
       "Athlete card data was not saved: your Supabase project is missing the column profiles.athlete_profile (jsonb). " +
         "Run the migration in supabase/migrations/20250320000000_athlete_profile_jsonb.sql (SQL Editor). " +
+        "If the column already exists, run NOTIFY pgrst, 'reload schema'; in the SQL Editor so the API picks it up. " +
         "Other profile fields were updated.",
     );
+  }
+
+  if (!error && updates.athlete_profile !== undefined) {
+    writeAthleteProfileColumnState("present");
   }
 
   return error ? new Error(error.message) : null;

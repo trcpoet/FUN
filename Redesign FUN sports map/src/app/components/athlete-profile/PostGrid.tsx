@@ -13,7 +13,11 @@ export function PinnedProfileRibbon({ post }: { post?: ActivityPost | null }) {
       </div>
       <div className="relative aspect-[16/9] max-h-48 bg-slate-900">
         {src ? (
-          <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
+          post.mediaKind === "video" ? (
+            <video src={src} className="absolute inset-0 size-full object-cover" muted playsInline controls />
+          ) : (
+            <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
+          )
         ) : (
           <div className="absolute inset-0 flex items-center justify-center p-4">
             <p className="text-sm text-slate-200 text-center">{post.caption}</p>
@@ -37,7 +41,7 @@ export function PostGrid({ posts, onAdd, className }: Props) {
   if (gridPosts.length === 0) {
     return (
       <div className={cn("grid grid-cols-3 gap-[2px]", className)}>
-        {[0, 1, 2, 3, 4, 5].map((i) => (
+        {Array.from({ length: 9 }, (_, i) => i).map((i) => (
           <button
             key={i}
             type="button"
@@ -55,6 +59,7 @@ export function PostGrid({ posts, onAdd, className }: Props) {
     <div className={cn("grid grid-cols-3 gap-[2px]", className)}>
       {gridPosts.map((p) => {
         const src = p.mediaUrl?.trim();
+        const isVideo = p.mediaKind === "video";
         return (
           <div
             key={p.id}
@@ -62,7 +67,17 @@ export function PostGrid({ posts, onAdd, className }: Props) {
             title={p.caption}
           >
             {src ? (
-              <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
+              isVideo ? (
+                <video
+                  src={src}
+                  className="absolute inset-0 size-full object-cover"
+                  muted
+                  playsInline
+                  loop
+                />
+              ) : (
+                <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
+              )
             ) : (
               <div className="absolute inset-0 flex items-center justify-center p-1 bg-gradient-to-br from-slate-800 to-slate-950">
                 <span className="text-[9px] text-slate-500 text-center line-clamp-4">{p.caption || "Post"}</span>

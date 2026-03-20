@@ -113,16 +113,31 @@ export function CreateGameModal({
   const hasAnchor = anchorPoint != null;
   const rightEdge = typeof window !== "undefined" ? window.innerWidth : 400;
   const bottomEdge = typeof window !== "undefined" ? window.innerHeight : 600;
+  // Clamp modal to viewport so it never goes below the screen.
+  const modalMaxHeightPx =
+    typeof window !== "undefined" ? Math.min(Math.round(bottomEdge * 0.88), 520) : 520;
   const x = hasAnchor
     ? anchorPoint!.x + gap < rightEdge - modalWidth
       ? anchorPoint!.x + gap
       : anchorPoint!.x - modalWidth - gap
     : undefined;
   const y = hasAnchor
-    ? anchorPoint!.y + gap < bottomEdge - 380
-      ? anchorPoint!.y + gap
-      : anchorPoint!.y - 380 - gap
+    ? (() => {
+        // Prefer below the anchor, but flip above if needed.
+        const preferredTop = anchorPoint!.y + gap;
+        const maxTop = bottomEdge - modalMaxHeightPx - 12;
+        const minTop = 12;
+
+        if (preferredTop <= maxTop) {
+          return Math.max(minTop, Math.min(preferredTop, maxTop));
+        }
+        const aboveTop = anchorPoint!.y - modalMaxHeightPx - gap;
+        return Math.max(minTop, Math.min(aboveTop, maxTop));
+      })()
     : undefined;
+
+  const centeredTop = !hasAnchor ? Math.max(12, Math.min(bottomEdge - modalMaxHeightPx - 12, bottomEdge / 2 - modalMaxHeightPx / 2)) : undefined;
+  const centeredLeft = !hasAnchor ? Math.max(12, Math.min(rightEdge - modalWidth - 12, rightEdge / 2 - modalWidth / 2)) : undefined;
 
   return (
     <>
@@ -138,12 +153,16 @@ export function CreateGameModal({
         className="fixed z-[70] w-[360px] max-h-[88vh] flex flex-col rounded-2xl border border-white/10 bg-slate-950/95 shadow-2xl shadow-violet-950/20 overflow-hidden backdrop-blur-xl"
         style={
           hasAnchor
-            ? { left: Math.max(12, x!), top: Math.max(12, y!), maxHeight: "min(88vh, 520px)" }
+            ? {
+                left: Math.max(12, Math.min(x!, rightEdge - modalWidth - 12)),
+                top: Math.max(12, y!),
+                maxHeight: modalMaxHeightPx,
+              }
             : {
-                left: "50%",
-                top: "50%",
-                transform: "translate(-50%, -50%)",
-                maxHeight: "min(88vh, 520px)",
+                left: centeredLeft,
+                top: centeredTop,
+                transform: "none",
+                maxHeight: modalMaxHeightPx,
               }
         }
       >

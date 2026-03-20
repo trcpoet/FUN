@@ -11,14 +11,18 @@ import { FiltersModal, type FiltersState } from "./components/FiltersModal";
 import { useGeolocation } from "../hooks/useGeolocation";
 import { useGamesNearby, DEFAULT_GAMES_RADIUS_KM } from "../hooks/useGamesNearby";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { forwardGeocodeSearch, type ForwardGeocodeFeature } from "../lib/geocoding";
-import { findSportMatch, gamesMatchingSport, closestGame } from "../lib/sportSearch";
+import { useUnifiedSearch } from "../hooks/useUnifiedSearch";
+import { SEARCH_DEBOUNCE_MS } from "../lib/searchConstants";
+import type { ForwardGeocodeFeature } from "../lib/geocoding";
+import { gamesMatchingSport, closestGame } from "../lib/sportSearch";
+import type { ProfileSearchRow } from "../lib/supabase";
 import { useProfilesNearby } from "../hooks/useProfilesNearby";
 import { useMyProfile } from "../hooks/useMyProfile";
 import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
 import { supabase } from "../lib/supabase";
-import { joinGame, avatarIdToGlbUrl } from "../lib/api";
+import { joinGame, leaveGame, avatarIdToGlbUrl } from "../lib/api";
+import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow } from "../lib/supabase";
 
 const DEFAULT_AVATAR_IMAGE =
@@ -32,9 +36,7 @@ export default function App() {
   const { coords: userCoords, error: locationError } = useGeolocation();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const debouncedSearch = useDebouncedValue(searchQuery, 400);
-  const [geocodeResults, setGeocodeResults] = useState<ForwardGeocodeFeature[]>([]);
-  const [geocodeLoading, setGeocodeLoading] = useState(false);
+  const debouncedSearch = useDebouncedValue(searchQuery, SEARCH_DEBOUNCE_MS);
   const [mapSearchLocation, setMapSearchLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [sportFocus, setSportFocus] = useState<{ sport: string } | null>(null);
   const [gamesRadiusKm, setGamesRadiusKm] = useState(DEFAULT_GAMES_RADIUS_KM);
@@ -61,7 +63,8 @@ export default function App() {
     userCoords?.lat ?? null,
     userCoords?.lng ?? null
   );
-  const { avatarId, avatarUrl } = useMyProfile();
+  const { avatarId, avatarUrl, athleteProfile } = useMyProfile();
+  const favoriteSport = athleteProfile.favoriteSport?.trim() ?? null;
   const { stats } = useUserStats();
   const navigate = useNavigate();
   const { notifications, markRead } = useNotifications({ limit: 10 });
@@ -164,6 +167,27 @@ export default function App() {
     }
   };
 
+  const handleLeave = async (game: GameRow) => {
+    const ok = await ensureSession();
+    if (!ok) return;
+
+    const err = await leaveGame(game.id);
+    if (!err) {
+      setJoinedGameIds((prev) => {
+        const next = new Set(prev);
+        next.delete(game.id);
+        return next;
+      });
+      refetchGames();
+
+      // If the user is currently viewing the thread for this game, close it.
+      if (messagesOpen && messengerFocus?.gameId === game.id) {
+        setMessagesOpen(false);
+        setMessengerFocus(null);
+      }
+    }
+  };
+
   const handleOpenGameFromCard = (game: GameRow) => {
     // 1) Center camera on the game's location.
     mapCameraIdRef.current += 1;
@@ -194,34 +218,16 @@ export default function App() {
     markRead(last.id);
   }, [notifications, markRead]);
 
-  const sportSuggestion = useMemo(() => {
-    const s = findSportMatch(debouncedSearch);
-    if (!s) return null;
-    return { sport: s, label: `${s} — games near you` };
-  }, [debouncedSearch]);
+  const searchAnchorLat = gamesFetchLat;
+  const searchAnchorLng = gamesFetchLng;
 
-  useEffect(() => {
-    const q = debouncedSearch.trim();
-    if (q.length < 2) {
-      setGeocodeResults([]);
-      setGeocodeLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setGeocodeLoading(true);
-    forwardGeocodeSearch(q, {
-      proximity: userCoords ? [userCoords.lng, userCoords.lat] : undefined,
-      limit: 6,
-    }).then((rows) => {
-      if (!cancelled) {
-        setGeocodeResults(rows);
-        setGeocodeLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [debouncedSearch, userCoords?.lat, userCoords?.lng]);
+  const unifiedSearch = useUnifiedSearch({
+    debouncedQuery: debouncedSearch,
+    anchorLat: searchAnchorLat,
+    anchorLng: searchAnchorLng,
+    excludeUserId: currentUserId,
+    games,
+  });
 
   useEffect(() => {
     if (!sportFocus || !userCoords) return;
@@ -290,7 +296,6 @@ export default function App() {
 
   const clearMapSearch = () => {
     setSearchQuery("");
-    setGeocodeResults([]);
     setMapSearchLocation(null);
     setSportFocus(null);
     setGamesRadiusKm(DEFAULT_GAMES_RADIUS_KM);
@@ -327,7 +332,6 @@ export default function App() {
       zoom: LOCATION_SEARCH_ZOOM,
     });
     setSearchQuery(f.place_name);
-    setGeocodeResults([]);
   };
 
   const handlePickSport = (sport: string) => {
@@ -337,7 +341,6 @@ export default function App() {
     sportCameraSigRef.current = "";
     emptySportToastSportRef.current = null;
     setSearchQuery(sport);
-    setGeocodeResults([]);
   };
 
   const handleCenterOnUser = () => {
@@ -347,12 +350,15 @@ export default function App() {
     sportCameraSigRef.current = "";
     emptySportToastSportRef.current = null;
     setSearchQuery("");
-    setGeocodeResults([]);
     setMapCameraRequest(null);
     setCenterOnUserTrigger((n) => n + 1);
   };
 
   const avatarGlbUrl = avatarId ? avatarIdToGlbUrl(avatarId, "low") : null;
+
+  const handlePickPerson = (p: ProfileSearchRow) => {
+    navigate(`/athlete/${p.profile_id}`);
+  };
 
   return (
     <div className="relative w-full h-screen bg-[#0A0F1C] overflow-hidden font-sans touch-none selection:bg-emerald-500/30">
@@ -370,6 +376,7 @@ export default function App() {
         venuesCenter={mapSearchLocation ?? userCoords}
         gamePopupRequest={gamePopupRequest}
         onJoinGame={handleJoin}
+        onLeaveGame={handleLeave}
         joinedGameIds={joinedGameIds}
         onMapDoubleClick={(lat, lng, viewportPoint) => {
           setCreateGameCoords({ lat, lng });
@@ -416,30 +423,52 @@ export default function App() {
         mapSearch={{
           query: searchQuery,
           onQueryChange: setSearchQuery,
-          geocodeLoading,
-          geocodeResults,
-          onPickGeocode: handlePickGeocode,
-          sportSuggestion,
-          onPickSport: handlePickSport,
           onClear: clearMapSearch,
+          placesLoading: unifiedSearch.placesLoading,
+          places: unifiedSearch.places,
+          sportHits: unifiedSearch.sportHits.map((h) => ({
+            sport: h.sport,
+            nearbyCount: h.nearbyCount,
+            matchKind: h.matchKind,
+          })),
+          peopleLoading: unifiedSearch.peopleLoading,
+          people: unifiedSearch.people,
+          sectionOrder: unifiedSearch.sectionOrder,
+          playersNearMe: unifiedSearch.playersNearMe,
+          onPickPlace: handlePickGeocode,
+          onPickSport: handlePickSport,
+          onPickPerson: handlePickPerson,
         }}
       />
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
         <div className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/90 to-transparent pointer-events-none -z-10 h-full" />
-        <button
-          type="button"
-          onClick={() => navigate("/profile")}
-          className="absolute bottom-6 left-4 z-50 w-12 h-12 rounded-full border-2 border-slate-700/50 bg-slate-800/80 backdrop-blur-md overflow-hidden flex items-center justify-center shadow-lg pointer-events-auto"
-          aria-label="Profile"
-        >
-          <img
-            src={avatarUrl?.trim() || DEFAULT_AVATAR_IMAGE}
-            alt=""
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-slate-800" />
-        </button>
+        <div className="absolute bottom-6 left-4 z-50 pointer-events-none">
+          <div className="relative w-12 h-12 pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => navigate("/profile")}
+              className="w-full h-full rounded-full border-2 border-slate-700/50 bg-slate-800/80 backdrop-blur-md overflow-hidden flex items-center justify-center shadow-lg"
+              aria-label="Profile"
+            >
+              <img
+                src={avatarUrl?.trim() || DEFAULT_AVATAR_IMAGE}
+                alt=""
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-slate-800" />
+            </button>
+            {favoriteSport ? (
+              <div
+                className="pointer-events-none absolute z-20 flex size-[1.75rem] items-center justify-center rounded-full border-[3px] border-[#0A0F1C] bg-gradient-to-br from-slate-700 to-slate-900 text-[0.95rem] leading-none shadow-lg shadow-black/40 ring-1 ring-white/15 -bottom-0.5 -left-0.5 sm:size-[2.125rem] sm:text-[1.05rem] sm:-bottom-1 sm:-left-1"
+                title={favoriteSport}
+                aria-hidden
+              >
+                <span className="select-none">{sportEmoji(favoriteSport)}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
         <BottomCarousel
           games={displayGames}
           selectedGame={selectedGame}

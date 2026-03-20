@@ -24,7 +24,8 @@ create table if not exists public.games (
   starts_at timestamptz,
   location geography(point, 4326) not null,
   created_by uuid references auth.users(id) on delete set null,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 
 -- 3b) Profile locations (for showing "nearby players" on the map; update from app when user moves)
@@ -47,39 +48,39 @@ create table if not exists public.game_participants (
 -- 5) Index for fast geo search
 create index if not exists games_location_idx on public.games using gist(location);
 
--- 5b) Get profiles near a point (for map "nearby players")
-create or replace function public.get_profiles_nearby(
-  lat double precision,
-  lng double precision,
-  radius_km double precision default 5,
-  limit_count int default 50
-)
-returns table (
-  profile_id uuid,
-  display_name text,
-  avatar_url text,
-  lat double precision,
-  lng double precision,
-  distance_km double precision
-)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select
-    p.id as profile_id,
-    p.display_name,
-    p.avatar_url,
-    pl.lat,
-    pl.lng,
-    (st_distance(st_setsrid(st_makePoint(pl.lng, pl.lat), 4326)::geography, st_setsrid(st_makePoint(lng, lat), 4326)::geography) / 1000.0) as distance_km
-  from public.profile_locations pl
-  join public.profiles p on p.id = pl.profile_id
-  where st_dwithin(st_setsrid(st_makePoint(pl.lng, pl.lat), 4326)::geography, st_setsrid(st_makePoint(lng, lat), 4326)::geography, radius_km * 1000.0)
-  order by pl.updated_at desc
-  limit limit_count;
-$$;
+-- -- 5b) Get profiles near a point (for map "nearby players")
+-- create or replace function public.get_profiles_nearby(
+--   lat double precision,
+--   lng double precision,
+--   radius_km double precision default 5,
+--   limit_count int default 50
+-- )
+-- returns table (
+--   profile_id uuid,
+--   display_name text,
+--   avatar_url text,
+--   lat double precision,
+--   lng double precision,
+--   distance_km double precision
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select
+--     p.id as profile_id,
+--     p.display_name,
+--     p.avatar_url,
+--     pl.lat,
+--     pl.lng,
+--     (st_distance(st_setsrid(st_makePoint(pl.lng, pl.lat), 4326)::geography, st_setsrid(st_makePoint(lng, lat), 4326)::geography) / 1000.0) as distance_km
+--   from public.profile_locations pl
+--   join public.profiles p on p.id = pl.profile_id
+--   where st_dwithin(st_setsrid(st_makePoint(pl.lng, pl.lat), 4326)::geography, st_setsrid(st_makePoint(lng, lat), 4326)::geography, radius_km * 1000.0)
+--   order by pl.updated_at desc
+--   limit limit_count;
+-- $$;
 
 -- 5c) Update current user's location (call from app when location changes)
 create or replace function public.update_my_location(p_lat double precision, p_lng double precision)
@@ -130,45 +131,45 @@ create policy "Authenticated users can create games" on public.games for insert 
 create policy "Participants are viewable by everyone" on public.game_participants for select using (true);
 create policy "Authenticated users can join games" on public.game_participants for insert with check (auth.role() = 'authenticated');
 
--- 7) Get games within X km of a point (returns lat/lng for map markers)
-create or replace function public.get_games_nearby(
-  lat double precision,
-  lng double precision,
-  radius_km double precision default 10
-)
-returns table (
-  id uuid,
-  title text,
-  sport text,
-  spots_needed int,
-  starts_at timestamptz,
-  created_by uuid,
-  created_at timestamptz,
-  distance_km double precision,
-  lat double precision,
-  lng double precision
-)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select
-    g.id,
-    g.title,
-    g.sport,
-    g.spots_needed,
-    g.starts_at,
-    g.created_by,
-    g.created_at,
-    (st_distance(g.location, st_point(lng, lat)::geography) / 1000.0) as distance_km,
-    st_y(g.location::geometry) as lat,
-    st_x(g.location::geometry) as lng
-  from public.games g
-  where st_dwithin(g.location, st_point(lng, lat)::geography, radius_km * 1000.0)
-  order by g.location <-> st_point(lng, lat)::geography
-  limit 50;
-$$;
+-- -- 7) Get games within X km of a point (returns lat/lng for map markers)
+-- create or replace function public.get_games_nearby(
+--   lat double precision,
+--   lng double precision,
+--   radius_km double precision default 10
+-- )
+-- returns table (
+--   id uuid,
+--   title text,
+--   sport text,
+--   spots_needed int,
+--   starts_at timestamptz,
+--   created_by uuid,
+--   created_at timestamptz,
+--   distance_km double precision,
+--   lat double precision,
+--   lng double precision
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select
+--     g.id,
+--     g.title,
+--     g.sport,
+--     g.spots_needed,
+--     g.starts_at,
+--     g.created_by,
+--     g.created_at,
+--     (st_distance(g.location, st_point(lng, lat)::geography) / 1000.0) as distance_km,
+--     st_y(g.location::geometry) as lat,
+--     st_x(g.location::geometry) as lng
+--   from public.games g
+--   where st_dwithin(g.location, st_point(lng, lat)::geography, radius_km * 1000.0)
+--   order by g.location <-> st_point(lng, lat)::geography
+--   limit 50;
+-- $$;
 
 -- 8) Create a game from the client (accepts lat/lng, builds geography)
 -- Required params first; only the last param has a default (PostgreSQL rule).

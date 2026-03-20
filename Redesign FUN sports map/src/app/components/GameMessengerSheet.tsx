@@ -132,9 +132,13 @@ export function GameMessengerSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
-        side="bottom"
+        side="right"
         className={cn(
-          "h-[min(88vh,640px)] rounded-t-2xl border-slate-700 bg-[#0c1222] text-slate-100 p-0 gap-0",
+          // Drawer: about 20% of viewport width (capped on very large screens),
+          // full height, anchored to the right.
+          "h-full w-[20vw] min-w-[260px] max-w-[420px] rounded-l-2xl border-slate-700 bg-[#0c1222] text-slate-100 p-0 gap-0",
+          // Override the default SheetContent width (w-3/4 + sm:max-w-sm).
+          "sm:max-w-none",
           "flex flex-col overflow-hidden"
         )}
         aria-describedby={undefined}

@@ -12,6 +12,8 @@ export { ProfileEditSheet } from "./ProfileEditSheet";
 export { ProfileStickyBar } from "./ProfileStickyBar";
 export { StoriesRail } from "./StoriesRail";
 export { CreateStoryDialog } from "./CreateStoryDialog";
+export { AddPostOrReelDialog } from "./AddPostOrReelDialog";
+export type { AddFeedKind } from "./AddPostOrReelDialog";
 export { HighlightsGrid } from "./HighlightsGrid";
 export { PostsReelsSection } from "./PostsReelsSection";
 export type { ProfileFeedTab } from "./PostsReelsSection";

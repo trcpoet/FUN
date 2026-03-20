@@ -61,6 +61,18 @@ export type ProfileNearbyRow = {
   distance_km: number;
 };
 
+/** Public-safe row from `search_profiles` RPC (no lat/lng). */
+export type ProfileSearchRow = {
+  profile_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  handle: string | null;
+  city: string | null;
+  favorite_sport: string | null;
+  distance_km: number | null;
+  rank_score: number | null;
+};
+
 export type UserStatsRow = {
   user_id: string;
   games_played_total: number;

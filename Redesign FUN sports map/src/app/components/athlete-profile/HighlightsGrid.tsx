@@ -22,14 +22,14 @@ export function HighlightsGrid({ highlights, onAdd, className }: Props) {
     return (
       <div className={cn("space-y-2", className)}>
         <div className="grid grid-cols-3 gap-[2px] rounded-lg overflow-hidden bg-white/[0.06]">
-          {[0, 1, 2].map((i) => (
+          {Array.from({ length: 9 }, (_, i) => i).map((i) => (
             <button
               key={i}
               type="button"
               onClick={onAdd}
               className="aspect-square bg-white/[0.03] flex items-center justify-center text-[10px] font-medium text-slate-500 hover:bg-white/[0.06] transition-colors p-2 text-center"
             >
-              Add reel
+              {i === 0 ? "Add reel" : ""}
             </button>
           ))}
         </div>
@@ -44,13 +44,14 @@ export function HighlightsGrid({ highlights, onAdd, className }: Props) {
     <div className={cn("space-y-3", className)}>
       <div className="grid grid-cols-3 gap-[2px] rounded-lg overflow-hidden bg-white/[0.06]">
         {slice.map((cell) => {
-          const thumb = cell.thumbUrl;
+          const thumb = cell.thumbUrl?.trim();
+          const isVideo = cell.mediaKind === "video" && thumb;
           return (
             <div
               key={cell.id}
-              className="aspect-square relative bg-gradient-to-br from-slate-800 to-slate-950 min-h-0 group"
+              className="aspect-square relative bg-gradient-to-br from-slate-800 to-slate-950 min-h-0 group overflow-hidden"
               style={
-                thumb
+                thumb && !isVideo
                   ? {
                       backgroundImage: `url(${thumb})`,
                       backgroundSize: "cover",
@@ -59,6 +60,9 @@ export function HighlightsGrid({ highlights, onAdd, className }: Props) {
                   : undefined
               }
             >
+              {isVideo ? (
+                <video src={thumb} className="absolute inset-0 size-full object-cover" muted playsInline loop />
+              ) : null}
               <div className="absolute inset-0 bg-black/40 group-hover:bg-black/25 transition-colors" />
               <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-black/80 to-transparent">
                 <p className="text-[10px] font-medium text-white line-clamp-2 leading-tight">{cell.title || "Highlight"}</p>

@@ -109,6 +109,8 @@ type MapboxMapProps = {
   use2DAvatar?: boolean;
   /** Called when user clicks Join in the event popup. */
   onJoinGame?: (game: GameRow) => void;
+  /** Called when user clicks Unjoin in the event popup. */
+  onLeaveGame?: (game: GameRow) => void;
   /** Set of game ids the current user has joined (to show "Joined" in popup). */
   joinedGameIds?: Set<string>;
   nearbyProfiles?: ProfileNearbyRow[];
@@ -143,6 +145,7 @@ export function MapboxMap(props: MapboxMapProps) {
     avatarGlbUrl = null,
     use2DAvatar = false,
     onJoinGame,
+    onLeaveGame,
     joinedGameIds,
     nearbyProfiles = [],
     onMapDoubleClick,
@@ -1062,7 +1065,7 @@ export function MapboxMap(props: MapboxMapProps) {
               paint: {
                 "circle-radius": MapCfg.VENUE_DOT_RADIUS_PX,
                 "circle-color": MapCfg.VENUE_DOT_COLOR,
-                "circle-opacity": 0.55,
+                  "circle-opacity": 0.78,
                 "circle-stroke-width": MapCfg.VENUE_DOT_STROKE_WIDTH,
                 "circle-stroke-color": MapCfg.VENUE_DOT_STROKE,
               },
@@ -1204,6 +1207,7 @@ export function MapboxMap(props: MapboxMapProps) {
               game={eventPopup.game}
               onClose={() => setEventPopup(null)}
               onJoin={onJoinGame}
+              onLeave={onLeaveGame}
               joined={joinedSet.has(eventPopup.game.id)}
             />
           </div>

@@ -24,6 +24,16 @@ do $$ begin
   end if;
 end $$;
 
+-- complete_game() sets games.updated_at when marking completed
+do $$ begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'games' and column_name = 'updated_at'
+  ) then
+    alter table public.games add column updated_at timestamptz not null default now();
+  end if;
+end $$;
+
 do $$ begin
   if not exists (
     select 1 from information_schema.columns
