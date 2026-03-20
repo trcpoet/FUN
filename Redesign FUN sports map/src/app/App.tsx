@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { Loader2 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { MapboxMap, type MapCameraRequest } from "./components/MapboxMap";
 import type { VenueSelection } from "./components/MapboxMap";
@@ -7,9 +8,9 @@ import { BottomCarousel } from "./components/BottomCarousel";
 import { GameMessengerSheet } from "./components/GameMessengerSheet";
 import type { MessengerThreadFocus } from "./components/GameMessengerSheet";
 import { CreateGameModal } from "./components/CreateGameModal";
-import { FiltersModal, type FiltersState } from "./components/FiltersModal";
+import { FiltersModal, type FiltersState, DEFAULT_FILTERS } from "./components/FiltersModal";
 import { useGeolocation } from "../hooks/useGeolocation";
-import { useGamesNearby, DEFAULT_GAMES_RADIUS_KM } from "../hooks/useGamesNearby";
+import { useGamesNearby } from "../hooks/useGamesNearby";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { useUnifiedSearch } from "../hooks/useUnifiedSearch";
 import { SEARCH_DEBOUNCE_MS } from "../lib/searchConstants";
@@ -21,7 +22,7 @@ import { useMyProfile } from "../hooks/useMyProfile";
 import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
 import { supabase } from "../lib/supabase";
-import { joinGame, leaveGame, avatarIdToGlbUrl } from "../lib/api";
+import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl } from "../lib/api";
 import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow } from "../lib/supabase";
 
@@ -39,7 +40,7 @@ export default function App() {
   const debouncedSearch = useDebouncedValue(searchQuery, SEARCH_DEBOUNCE_MS);
   const [mapSearchLocation, setMapSearchLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [sportFocus, setSportFocus] = useState<{ sport: string } | null>(null);
-  const [gamesRadiusKm, setGamesRadiusKm] = useState(DEFAULT_GAMES_RADIUS_KM);
+  const [gamesRadiusKm, setGamesRadiusKm] = useState(DEFAULT_FILTERS.gamesRadiusKm);
   const [mapCameraRequest, setMapCameraRequest] = useState<MapCameraRequest | null>(null);
   const mapCameraIdRef = useRef(0);
   const sportCameraSigRef = useRef("");
@@ -59,10 +60,62 @@ export default function App() {
     gamesFetchLng,
     gamesRadiusKm
   );
-  const { profiles: nearbyProfiles } = useProfilesNearby(
+  const [appliedFilters, setAppliedFilters] = useState<FiltersState>(DEFAULT_FILTERS);
+  const [filtersDraft, setFiltersDraft] = useState<FiltersState>(DEFAULT_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const { profiles: nearbyProfiles, loading: profilesLoading } = useProfilesNearby(
     userCoords?.lat ?? null,
-    userCoords?.lng ?? null
+    userCoords?.lng ?? null,
+    appliedFilters.athletesRadiusKm
   );
+  const [venuesFetchLoading, setVenuesFetchLoading] = useState(false);
+  const [filterApplySync, setFilterApplySync] = useState(false);
+  const filterApplyStartedAtRef = useRef<number | null>(null);
+
+  const handleVenuesFetchLoading = useCallback((loading: boolean) => {
+    setVenuesFetchLoading(loading);
+  }, []);
+
+  /** Keep "Applying filters" visible briefly so fast API/venue updates still show feedback (React may batch loading toggles). */
+  useEffect(() => {
+    if (!filterApplySync) return;
+    const idle = !gamesLoading && !profilesLoading && !venuesFetchLoading;
+    if (!idle) return;
+
+    const minMs = 550;
+    const started = filterApplyStartedAtRef.current ?? 0;
+    const elapsed = Date.now() - started;
+    const finish = () => {
+      setFilterApplySync(false);
+      filterApplyStartedAtRef.current = null;
+    };
+
+    if (elapsed < minMs) {
+      const id = window.setTimeout(finish, minMs - elapsed);
+      return () => window.clearTimeout(id);
+    }
+    finish();
+  }, [filterApplySync, gamesLoading, profilesLoading, venuesFetchLoading]);
+
+  const showMapLoadingBanner = venuesFetchLoading || filterApplySync;
+
+  const mapLoadingLines = useMemo(() => {
+    const lines: string[] = [];
+    if (filterApplySync) {
+      lines.push("Applying your map filters…");
+    }
+    if (venuesFetchLoading) {
+      lines.push("Loading sports venues from OpenStreetMap (radius / area)…");
+    }
+    if (filterApplySync && gamesLoading) {
+      lines.push("Fetching nearby games for your games search radius…");
+    }
+    if (filterApplySync && profilesLoading) {
+      lines.push("Loading athletes for your athletes radius…");
+    }
+    return lines;
+  }, [venuesFetchLoading, filterApplySync, gamesLoading, profilesLoading]);
   const { avatarId, avatarUrl, athleteProfile } = useMyProfile();
   const favoriteSport = athleteProfile.favoriteSport?.trim() ?? null;
   const { stats } = useUserStats();
@@ -78,50 +131,53 @@ export default function App() {
   const [createGameOpen, setCreateGameOpen] = useState(false);
   const [createGameCoords, setCreateGameCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [createGameAnchorPoint, setCreateGameAnchorPoint] = useState<{ x: number; y: number } | null>(null);
+  const [createGameLocationLabel, setCreateGameLocationLabel] = useState<string | null>(null);
   const [joinedGameIds, setJoinedGameIds] = useState<Set<string>>(new Set());
+  const [hostGameIds, setHostGameIds] = useState<Set<string>>(new Set());
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [messengerFocus, setMessengerFocus] = useState<MessengerThreadFocus | null>(null);
   const [liveNowOpen, setLiveNowOpen] = useState(false);
   const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<FiltersState>({
-    sports: [],
-    level: "Any",
-    distance: "5 km",
-    ageRange: "Any",
-    availability: [],
-    timeOfDay: [],
-    gameTypes: [],
-    school: "",
-    onlyLookingNow: false,
-  });
 
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data: { session } }) => {
       setCurrentUserId(session?.user?.id ?? null);
     });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUserId(session?.user?.id ?? null);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
-  /** Restore joined games after refresh (for badges + inbox). */
-  useEffect(() => {
-    if (!supabase || !currentUserId) {
-      if (!currentUserId) setJoinedGameIds(new Set());
+  /** Restore joined games from DB (uses getUser() so it works right after sign-in, before React state updates). */
+  const reloadJoinedGameIds = useCallback(async () => {
+    if (!supabase) {
+      setJoinedGameIds(new Set());
       return;
     }
-    let cancelled = false;
-    supabase
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setJoinedGameIds(new Set());
+      return;
+    }
+    const { data } = await supabase
       .from("game_participants")
-      .select("game_id")
-      .eq("user_id", currentUserId)
-      .then(({ data }) => {
-        if (cancelled || !data) return;
-        setJoinedGameIds(new Set(data.map((r) => r.game_id as string)));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUserId]);
+      .select("game_id, role")
+      .eq("user_id", user.id);
+
+    const rows = data ?? [];
+    setJoinedGameIds(new Set(rows.map((r) => r.game_id as string)));
+    setHostGameIds(new Set(rows.filter((r) => r.role === "host").map((r) => r.game_id as string)));
+  }, []);
+
+  useEffect(() => {
+    void reloadJoinedGameIds();
+  }, [currentUserId, reloadJoinedGameIds]);
 
   const ensureSession = async (): Promise<boolean> => {
     if (!supabase) return false;
@@ -156,15 +212,23 @@ export default function App() {
     if (!ok) return;
     const err = await joinGame(game.id);
     if (!err) {
-      setJoinedGameIds((prev) => new Set(prev).add(game.id));
+      await reloadJoinedGameIds();
       refetchGames();
       setMessengerFocus({
         gameId: game.id,
         title: game.title || "Pickup game",
         sport: game.sport,
       });
-      setMessagesOpen(true);
     }
+  };
+
+  const handleOpenChatForGame = (game: GameRow) => {
+    setMessengerFocus({
+      gameId: game.id,
+      title: game.title || "Pickup game",
+      sport: game.sport,
+    });
+    setMessagesOpen(true);
   };
 
   const handleLeave = async (game: GameRow) => {
@@ -173,11 +237,7 @@ export default function App() {
 
     const err = await leaveGame(game.id);
     if (!err) {
-      setJoinedGameIds((prev) => {
-        const next = new Set(prev);
-        next.delete(game.id);
-        return next;
-      });
+      await reloadJoinedGameIds();
       refetchGames();
 
       // If the user is currently viewing the thread for this game, close it.
@@ -186,6 +246,41 @@ export default function App() {
         setMessengerFocus(null);
       }
     }
+  };
+
+  const handleLeaveThreadById = async (gameId: string) => {
+    const ok = await ensureSession();
+    if (!ok) return;
+
+    const err = await leaveGame(gameId);
+    if (!err) {
+      await reloadJoinedGameIds();
+      refetchGames();
+
+      // If the user is currently viewing the thread for this game, close it.
+      if (messagesOpen && messengerFocus?.gameId === gameId) {
+        setMessagesOpen(false);
+        setMessengerFocus(null);
+      }
+    }
+  };
+
+  const handleDeleteHostedGame = async (game: GameRow): Promise<boolean> => {
+    const ok = await ensureSession();
+    if (!ok) return false;
+    const err = await deleteHostedGame(game.id);
+    if (err) {
+      setToast({ id: `del-game-${game.id}`, message: err.message, type: "error" });
+      return false;
+    }
+    await reloadJoinedGameIds();
+    refetchGames();
+    if (selectedGame?.id === game.id) setSelectedGame(null);
+    if (messagesOpen && messengerFocus?.gameId === game.id) {
+      setMessagesOpen(false);
+      setMessengerFocus(null);
+    }
+    return true;
   };
 
   const handleOpenGameFromCard = (game: GameRow) => {
@@ -202,6 +297,25 @@ export default function App() {
     // 2) Open the join modal (GameEventPopup) after the camera moves.
     openGamePopupNonceRef.current += 1;
     setGamePopupRequest({ nonce: openGamePopupNonceRef.current, gameId: game.id });
+  };
+
+  const handleSelectGameOnMapFromChat = async (gameId: string) => {
+    // Prefer coordinates from our already-fetched `games` list (used for map markers),
+    // so chat clicks still work even if the RPC isn't available yet.
+    const inMemoryGame = games.find((g) => g.id === gameId);
+    const coords =
+      inMemoryGame && typeof inMemoryGame.lat === "number" && typeof inMemoryGame.lng === "number"
+        ? { lat: inMemoryGame.lat, lng: inMemoryGame.lng }
+        : await getGameLatLng(gameId);
+    if (!coords) return;
+    mapCameraIdRef.current += 1;
+    setMapCameraRequest({
+      id: mapCameraIdRef.current,
+      kind: "fly",
+      lat: coords.lat,
+      lng: coords.lng,
+      zoom: 16,
+    });
   };
 
   useEffect(() => {
@@ -283,9 +397,14 @@ export default function App() {
   }, [sportFocus, games, gamesLoading, gamesRadiusKm, userCoords]);
 
   const displayGames = useMemo(() => {
-    if (!sportFocus) return games;
-    return gamesMatchingSport(games, sportFocus.sport);
-  }, [games, sportFocus]);
+    let list = games;
+    if (sportFocus) list = gamesMatchingSport(list, sportFocus.sport);
+    if (appliedFilters.sports.length > 0) {
+      const allow = new Set(appliedFilters.sports);
+      list = list.filter((g) => allow.has(g.sport));
+    }
+    return list;
+  }, [games, sportFocus, appliedFilters.sports]);
 
   useEffect(() => {
     if (!selectedGame) return;
@@ -298,7 +417,7 @@ export default function App() {
     setSearchQuery("");
     setMapSearchLocation(null);
     setSportFocus(null);
-    setGamesRadiusKm(DEFAULT_GAMES_RADIUS_KM);
+    setGamesRadiusKm(appliedFilters.gamesRadiusKm);
     sportCameraSigRef.current = "";
     emptySportToastSportRef.current = null;
     if (userCoords) {
@@ -320,7 +439,7 @@ export default function App() {
     setMapSearchLocation({ lat, lng });
     setSelectedVenue(null);
     setSportFocus(null);
-    setGamesRadiusKm(DEFAULT_GAMES_RADIUS_KM);
+    setGamesRadiusKm(appliedFilters.gamesRadiusKm);
     sportCameraSigRef.current = "";
     emptySportToastSportRef.current = null;
     mapCameraIdRef.current += 1;
@@ -337,7 +456,7 @@ export default function App() {
   const handlePickSport = (sport: string) => {
     setSportFocus({ sport });
     setMapSearchLocation(null);
-    setGamesRadiusKm(DEFAULT_GAMES_RADIUS_KM);
+    setGamesRadiusKm(appliedFilters.gamesRadiusKm);
     sportCameraSigRef.current = "";
     emptySportToastSportRef.current = null;
     setSearchQuery(sport);
@@ -346,7 +465,7 @@ export default function App() {
   const handleCenterOnUser = () => {
     setMapSearchLocation(null);
     setSportFocus(null);
-    setGamesRadiusKm(DEFAULT_GAMES_RADIUS_KM);
+    setGamesRadiusKm(appliedFilters.gamesRadiusKm);
     sportCameraSigRef.current = "";
     emptySportToastSportRef.current = null;
     setSearchQuery("");
@@ -374,13 +493,38 @@ export default function App() {
         selectedVenue={selectedVenue}
         onSelectVenue={setSelectedVenue}
         venuesCenter={mapSearchLocation ?? userCoords}
+        venueSearchRadiusKm={appliedFilters.venueRadiusKm}
+        venueSportsFilter={appliedFilters.sports}
+        onVenuesFetchLoadingChange={handleVenuesFetchLoading}
         gamePopupRequest={gamePopupRequest}
         onJoinGame={handleJoin}
+        onOpenMessagesForGame={handleOpenChatForGame}
         onLeaveGame={handleLeave}
+        onDeleteHostedGame={handleDeleteHostedGame}
         joinedGameIds={joinedGameIds}
+        hostGameIds={hostGameIds}
         onMapDoubleClick={(lat, lng, viewportPoint) => {
           setCreateGameCoords({ lat, lng });
           setCreateGameAnchorPoint(viewportPoint ?? null);
+          setCreateGameLocationLabel(null);
+          setCreateGameOpen(true);
+        }}
+        onCreateGameAtVenue={(venue, viewportPoint) => {
+          setCreateGameCoords({ lat: venue.center.lat, lng: venue.center.lng });
+          setCreateGameAnchorPoint(viewportPoint ?? null);
+          const prettyLabel = (s: string | undefined | null) => {
+            const raw = s?.trim();
+            if (!raw) return null;
+            return raw.replace(/_/g, " ").replace(/\s+/g, " ");
+          };
+
+          const name = prettyLabel(venue.name);
+          const sport = prettyLabel(venue.sport);
+          const leisure = prettyLabel(venue.leisure);
+          setCreateGameLocationLabel(
+            name ??
+              (sport && leisure ? `${sport} ${leisure}` : sport ?? leisure ?? "Sports venue")
+          );
           setCreateGameOpen(true);
         }}
         centerOnUserTrigger={centerOnUserTrigger}
@@ -388,6 +532,27 @@ export default function App() {
         userAvatarUrl={null}
         avatarGlbUrl={avatarGlbUrl}
       />
+
+      {showMapLoadingBanner && (
+        <div
+          className="pointer-events-none absolute left-4 top-24 z-[55] max-w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-white/10 bg-slate-950/92 px-3 py-2.5 shadow-lg backdrop-blur-md"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <div className="flex items-start gap-2.5">
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-emerald-400" aria-hidden />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-slate-100">Updating map</p>
+              <ul className="mt-1.5 list-disc space-y-1 pl-3.5 text-[11px] leading-snug text-slate-400">
+                {mapLoadingLines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {locationError && (
         <div className="absolute top-20 left-4 right-4 z-50 rounded-lg bg-amber-900/80 text-amber-200 text-sm px-3 py-2">
@@ -444,7 +609,7 @@ export default function App() {
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
         <div className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/90 to-transparent pointer-events-none -z-10 h-full" />
         <div className="absolute bottom-6 left-4 z-50 pointer-events-none">
-          <div className="relative w-12 h-12 pointer-events-auto">
+          <div className="relative w-20 h-20 pointer-events-auto">
             <button
               type="button"
               onClick={() => navigate("/profile")}
@@ -459,13 +624,14 @@ export default function App() {
               <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-slate-800" />
             </button>
             {favoriteSport ? (
-              <div
-                className="pointer-events-none absolute z-20 flex size-[1.75rem] items-center justify-center rounded-full border-[3px] border-[#0A0F1C] bg-gradient-to-br from-slate-700 to-slate-900 text-[0.95rem] leading-none shadow-lg shadow-black/40 ring-1 ring-white/15 -bottom-0.5 -left-0.5 sm:size-[2.125rem] sm:text-[1.05rem] sm:-bottom-1 sm:-left-1"
+              <span
+                className="pointer-events-none absolute z-20 -bottom-1 -right-1 select-none text-3xl leading-none drop-shadow-[0_1px_3px_rgba(0,0,0,0.95),0_0_8px_rgba(0,0,0,0.5)]"
                 title={favoriteSport}
-                aria-hidden
+                role="img"
+                aria-label={`Favorite sport: ${favoriteSport}`}
               >
-                <span className="select-none">{sportEmoji(favoriteSport)}</span>
-              </div>
+                {sportEmoji(favoriteSport)}
+              </span>
             ) : null}
           </div>
         </div>
@@ -475,6 +641,7 @@ export default function App() {
           onSelectGame={setSelectedGame}
           onOpenGame={handleOpenGameFromCard}
           joinedGameIds={joinedGameIds}
+          currentUserId={currentUserId}
           liveNowOpen={liveNowOpen}
         />
       </div>
@@ -486,11 +653,16 @@ export default function App() {
           if (!open) {
             setCreateGameCoords(null);
             setCreateGameAnchorPoint(null);
+            setCreateGameLocationLabel(null);
           }
         }}
         userCoords={createGameCoords ?? userCoords}
+        locationLabel={createGameLocationLabel}
         anchorPoint={createGameAnchorPoint}
-        onSuccess={refetchGames}
+        onSuccess={() => {
+          void reloadJoinedGameIds();
+          refetchGames();
+        }}
         ensureSession={ensureSession}
       />
 
@@ -504,15 +676,30 @@ export default function App() {
         onFocusThreadChange={setMessengerFocus}
         currentUserId={currentUserId}
         ensureSession={ensureSession}
+        onSelectGameOnMap={handleSelectGameOnMapFromChat}
+        joinedGameIds={joinedGameIds}
+        onLeaveThread={handleLeaveThreadById}
       />
 
       <FiltersModal
         open={filtersOpen}
-        onOpenChange={setFiltersOpen}
-        value={filters}
-        onChange={setFilters}
+        onOpenChange={(open) => {
+          setFiltersOpen(open);
+          if (open) setFiltersDraft(appliedFilters);
+        }}
+        value={filtersDraft}
+        onChange={setFiltersDraft}
         onApply={() => {
-          // TODO: apply filters to queries (games / profiles).
+          filterApplyStartedAtRef.current = Date.now();
+          setFilterApplySync(true);
+          setAppliedFilters(filtersDraft);
+          setGamesRadiusKm(filtersDraft.gamesRadiusKm);
+        }}
+        onClear={() => {
+          filterApplyStartedAtRef.current = Date.now();
+          setFilterApplySync(true);
+          setAppliedFilters(DEFAULT_FILTERS);
+          setGamesRadiusKm(DEFAULT_FILTERS.gamesRadiusKm);
         }}
       />
     </div>

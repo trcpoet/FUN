@@ -35,6 +35,9 @@ Run each file **once**, in this order, in **Supabase → SQL Editor → New quer
 | 9 | `migrations/20250321000000_game_chat_roster.sql` |
 | 10 | `migrations/20250322000000_storage_avatars_bucket.sql` ← **fixes Storage 400 on avatar / story / feed uploads** |
 | 11 | `migrations/20250323000000_search_profiles_trgm.sql` ← **people search: `display_name_search` / `handle_search` + `search_profiles` RPC** |
+| 12 | `migrations/20250324000000_game_participants_delete_rls.sql` ← **Unjoin: `DELETE` on own `game_participants` row** |
+| 13 | `migrations/20250325000000_games_host_delete_rls.sql` ← **Delete hosted game: `DELETE` on `games` where `created_by = auth.uid()`** |
+| 14 | `migrations/20260321000000_games_requirements.sql` ← **`games.requirements` jsonb + `create_game` / `get_games_nearby` include `p_requirements`** |
 
 If you are unsure what is already applied, run steps 7–9 first for the current app features (athlete profile JSON, game description, chat/roster RPCs). Steps 2–6 are required if your database predates gamification (no `avatar_id`, `games.status`, `complete_game`, etc.).
 

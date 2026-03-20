@@ -102,6 +102,12 @@ export type AthleteSnapshot = {
   yearsExperience?: number | null;
   fitnessFocus?: string | null;
   intensity?: "low" | "moderate" | "high" | null;
+  /** School / university (About + optional edit). */
+  university?: string | null;
+  /** Finer location than city, e.g. neighbourhood or campus area. */
+  neighbourhood?: string | null;
+  /** Optional occupation shown in profile edit (stored in snapshot jsonb). */
+  occupation?: string | null;
 };
 
 export type TrustSignals = {
@@ -110,6 +116,17 @@ export type TrustSignals = {
   showUpRate?: number | null;
   communication?: number | null;
   organizerTrust?: number | null;
+};
+
+/** Match-day vs training presets for strengths + intensity (stored in athlete_profile jsonb). */
+export type AthleticLoadoutSlot = {
+  skillRatings?: SkillRating[];
+  intensity?: AthleteSnapshot["intensity"];
+};
+
+export type AthleticLoadouts = {
+  match?: AthleticLoadoutSlot;
+  training?: AthleticLoadoutSlot;
 };
 
 export type AthleteProfilePayload = {
@@ -141,6 +158,8 @@ export type AthleteProfilePayload = {
   /** Teaser for “played with” row; full graph can replace later. */
   playedWithCount?: number | null;
   playedWithAvatarUrls?: string[];
+  /** Optional dual loadouts for athletic build tab. */
+  athleticLoadouts?: AthleticLoadouts;
 };
 
 export function emptyAthleteProfile(): AthleteProfilePayload {
@@ -168,6 +187,7 @@ export function emptyAthleteProfile(): AthleteProfilePayload {
     favoriteSport: null,
     playedWithCount: null,
     playedWithAvatarUrls: [],
+    athleticLoadouts: undefined,
   };
 }
 
@@ -192,6 +212,9 @@ function asStrArray(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.filter((x): x is string => typeof x === "string");
 }
+
+/** Max custom strength rows stored and shown in profile edit / hero. */
+const MAX_SKILL_RATINGS = 4;
 
 export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
   const base = emptyAthleteProfile();
@@ -318,7 +341,38 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
           label: asStr(s.label) ?? "Skill",
           value: Math.min(100, Math.max(0, asNum(s.value) ?? 0)),
         }))
+        .slice(0, MAX_SKILL_RATINGS)
     : [];
+
+  const parseLoadoutSlot = (slot: unknown): AthleticLoadoutSlot | undefined => {
+    if (!slot || typeof slot !== "object") return undefined;
+    const s = slot as Record<string, unknown>;
+    const sr = Array.isArray(s.skillRatings)
+      ? s.skillRatings
+          .filter((x): x is Record<string, unknown> => x != null && typeof x === "object")
+          .map((r) => ({
+            key: asStr(r.key) ?? "skill",
+            label: asStr(r.label) ?? "Skill",
+            value: Math.min(100, Math.max(0, asNum(r.value) ?? 0)),
+          }))
+          .slice(0, MAX_SKILL_RATINGS)
+      : undefined;
+    const int = s.intensity;
+    const intensity =
+      int === "low" || int === "moderate" || int === "high" ? int : int === null ? null : undefined;
+    const out: AthleticLoadoutSlot = {};
+    if (sr?.length) out.skillRatings = sr;
+    if (intensity !== undefined) out.intensity = intensity;
+    return Object.keys(out).length ? out : undefined;
+  };
+
+  const loRaw = o.athleticLoadouts && typeof o.athleticLoadouts === "object" ? (o.athleticLoadouts as Record<string, unknown>) : null;
+  const athleticLoadouts: AthleticLoadouts | undefined = loRaw
+    ? {
+        match: parseLoadoutSlot(loRaw.match),
+        training: parseLoadoutSlot(loRaw.training),
+      }
+    : undefined;
 
   const availability = asStr(o.availability);
   const allowedAvail = AVAILABILITY_OPTIONS.map((a) => a.value) as string[];
@@ -347,6 +401,9 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
         snap.intensity === "low" || snap.intensity === "moderate" || snap.intensity === "high"
           ? snap.intensity
           : null,
+      university: asStr(snap.university),
+      neighbourhood: asStr(snap.neighbourhood),
+      occupation: asStr(snap.occupation),
     },
     skillRatings: skillRatings.length ? skillRatings : base.skillRatings,
     performanceMetrics,
@@ -366,6 +423,7 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
     favoriteSport: asStr(o.favoriteSport),
     playedWithCount: asNum(o.playedWithCount),
     playedWithAvatarUrls: Array.isArray(o.playedWithAvatarUrls) ? asStrArray(o.playedWithAvatarUrls) : [],
+    athleticLoadouts: athleticLoadouts?.match || athleticLoadouts?.training ? athleticLoadouts : undefined,
   };
 }
 
@@ -392,6 +450,15 @@ export function mergeAthleteProfile(
     favoriteSport: patch.favoriteSport !== undefined ? patch.favoriteSport : base.favoriteSport,
     playedWithCount: patch.playedWithCount !== undefined ? patch.playedWithCount : base.playedWithCount,
     playedWithAvatarUrls: patch.playedWithAvatarUrls ?? base.playedWithAvatarUrls,
+    athleticLoadouts:
+      patch.athleticLoadouts !== undefined
+        ? {
+            ...base.athleticLoadouts,
+            ...patch.athleticLoadouts,
+            match: patch.athleticLoadouts.match ?? base.athleticLoadouts?.match,
+            training: patch.athleticLoadouts.training ?? base.athleticLoadouts?.training,
+          }
+        : base.athleticLoadouts,
   };
 }
 

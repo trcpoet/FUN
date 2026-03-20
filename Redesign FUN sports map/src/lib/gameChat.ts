@@ -14,6 +14,13 @@ function inboxRpcMissing(error: { message?: string; code?: string } | null): boo
   );
 }
 
+function isGameMessagesSchemaCacheMissing(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const m = (error.message ?? "").toLowerCase();
+  // PostgREST returns a schema cache miss when the table exists in DB but not in PostgREST cache.
+  return m.includes("schema cache") && (m.includes("game_messages") || m.includes("public.game_messages"));
+}
+
 /**
  * Same rows as `get_my_game_inbox` RPC, built from tables (3 round-trips).
  * Used when the RPC is not deployed or PostgREST has not reloaded schema yet.
@@ -60,7 +67,16 @@ async function fetchMyGameInboxFromTables(): Promise<{
     .select("game_id, body, created_at")
     .in("game_id", gameIds)
     .order("created_at", { ascending: false });
-  if (e4) return { data: null, error: new Error(e4.message) };
+  if (e4) {
+    // If schema cache is temporarily out of date, still show conversation cards
+    // (without last-message info) instead of failing the entire inbox.
+    if (isGameMessagesSchemaCacheMissing(e4)) {
+      // eslint-disable-next-line no-console
+      console.warn("[FUN] game_messages schema cache missing; inbox will load without last messages.", e4.message);
+    } else {
+      return { data: null, error: new Error(e4.message) };
+    }
+  }
 
   const lastMsgByGame = new Map<string, { body: string; created_at: string }>();
   for (const m of msgs ?? []) {
@@ -131,6 +147,10 @@ export async function fetchGameMessages(gameId: string): Promise<{
     .eq("game_id", gameId)
     .order("created_at", { ascending: true })
     .limit(200);
+  if (error && isGameMessagesSchemaCacheMissing(error)) {
+    // Treat as empty thread while we wait for schema cache reload.
+    return { data: [], error: null };
+  }
   return { data: (data as GameMessageRow[]) ?? null, error: error ? new Error(error.message) : null };
 }
 

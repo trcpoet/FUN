@@ -31,6 +31,12 @@ type GameMessengerSheetProps = {
   onFocusThreadChange: (focus: MessengerThreadFocus | null) => void;
   currentUserId: string | null;
   ensureSession?: () => Promise<boolean>;
+  /** Client-side truth: only show games the user is joined to. */
+  joinedGameIds?: Set<string>;
+  /** Center the map on the selected conversation's game. */
+  onSelectGameOnMap?: (gameId: string) => void;
+  /** Leave chat and also unjoin the game (so the thread disappears). */
+  onLeaveThread?: (gameId: string) => Promise<void> | void;
 };
 
 export function GameMessengerSheet({
@@ -40,6 +46,9 @@ export function GameMessengerSheet({
   onFocusThreadChange,
   currentUserId,
   ensureSession,
+  joinedGameIds,
+  onSelectGameOnMap,
+  onLeaveThread,
 }: GameMessengerSheetProps) {
   const [inbox, setInbox] = useState<GameInboxRow[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
@@ -48,6 +57,7 @@ export function GameMessengerSheet({
   const [sendError, setSendError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [leavingThread, setLeavingThread] = useState(false);
   const listEndRef = useRef<HTMLDivElement>(null);
 
   const loadInbox = useCallback(() => {
@@ -59,9 +69,11 @@ export function GameMessengerSheet({
         setInbox([]);
         return;
       }
-      setInbox(data ?? []);
+      const rows = data ?? [];
+      const filtered = joinedGameIds ? rows.filter((r) => joinedGameIds.has(r.id)) : rows;
+      setInbox(filtered);
     });
-  }, []);
+  }, [joinedGameIds]);
 
   useEffect(() => {
     if (!open) return;
@@ -127,6 +139,16 @@ export function GameMessengerSheet({
     loadInbox();
   };
 
+  const handleLeaveChat = async () => {
+    if (!focusThread || !onLeaveThread || leavingThread) return;
+    setLeavingThread(true);
+    try {
+      await onLeaveThread(focusThread.gameId);
+    } finally {
+      setLeavingThread(false);
+    }
+  };
+
   const showList = !focusThread;
 
   return (
@@ -168,6 +190,17 @@ export function GameMessengerSheet({
                   : `${focusThread.sport} · with your squad`}
               </SheetDescription>
             </div>
+            {!showList && onLeaveThread && (
+              <button
+                type="button"
+                onClick={() => void handleLeaveChat()}
+                disabled={leavingThread}
+                className="ml-auto px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-medium border border-slate-600 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                aria-label="Leave chat and unjoin game"
+              >
+                {leavingThread ? "Leaving…" : "Leave chat"}
+              </button>
+            )}
           </div>
         </SheetHeader>
 
@@ -187,13 +220,14 @@ export function GameMessengerSheet({
                   <li key={row.id}>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
                         onFocusThreadChange({
                           gameId: row.id,
                           title: row.title,
                           sport: row.sport,
-                        })
-                      }
+                        });
+                        onSelectGameOnMap?.(row.id);
+                      }}
                       className="w-full text-left rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 hover:bg-white/[0.06] transition-colors"
                     >
                       <div className="flex justify-between gap-2 items-start">

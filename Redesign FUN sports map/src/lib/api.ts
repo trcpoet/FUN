@@ -5,9 +5,11 @@
 
 import { supabase } from "./supabase";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
+import { searchPeople } from "./searchPeople";
 import type {
   GameRow,
   ProfileNearbyRow,
+  ProfileSearchRow,
   UserStatsRow,
   BadgeRow,
   UserBadgeRow,
@@ -191,6 +193,8 @@ export async function createGame(params: {
   startsAt?: string | null;
   /** Short social-style blurb (optional). */
   description?: string | null;
+  /** Structured preferences shown to players (optional). */
+  requirements?: Record<string, unknown> | null;
 }): Promise<{ gameId: string | null; error: Error | null }> {
   if (!supabase) return { gameId: null, error: new Error("Supabase not configured") };
   let locationLabel: string | null = null;
@@ -208,6 +212,8 @@ export async function createGame(params: {
     p_starts_at: params.startsAt ?? null,
     p_location_label: locationLabel,
     p_description: params.description?.trim() ? params.description.trim() : null,
+    p_requirements:
+      params.requirements && Object.keys(params.requirements).length > 0 ? params.requirements : null,
   });
   return { gameId: data as string | null, error: error ? new Error(error.message) : null };
 }
@@ -236,6 +242,35 @@ export async function leaveGame(gameId: string): Promise<Error | null> {
     .eq("user_id", user.id);
 
   return error ? new Error(error.message) : null;
+}
+
+/** Remove a game you created (`created_by`). Cascades participants, messages, etc. Requires RLS policy `Hosts can delete own games`. */
+export async function deleteHostedGame(gameId: string): Promise<Error | null> {
+  if (!supabase) return new Error("Supabase not configured");
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return new Error("Not signed in");
+
+  const { error } = await supabase
+    .from("games")
+    .delete()
+    .eq("id", gameId)
+    .eq("created_by", user.id);
+
+  return error ? new Error(error.message) : null;
+}
+
+export async function getGameLatLng(gameId: string): Promise<{ lat: number; lng: number } | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("get_game_lat_lng", {
+    p_game_id: gameId,
+  });
+  if (error) return null;
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row) return null;
+  const lat = (row as any).lat;
+  const lng = (row as any).lng;
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+  return { lat, lng };
 }
 
 export async function completeGame(params: {
@@ -619,10 +654,11 @@ export function subscribeToNotifications(
   onNotification: (row: NotificationRow) => void
 ): (() => void) | null {
   if (!supabase) return null;
-  const state: { channel: ReturnType<typeof supabase.channel> | null } = { channel: null };
-  supabase.auth.getUser().then(({ data: { user } }) => {
+  const client = supabase;
+  const state: { channel: ReturnType<typeof client.channel> | null } = { channel: null };
+  client.auth.getUser().then(({ data: { user } }) => {
     if (!user) return;
-    state.channel = supabase
+    state.channel = client
       .channel(`notifications:${user.id}`)
       .on(
         "postgres_changes",
@@ -639,8 +675,66 @@ export function subscribeToNotifications(
       .subscribe();
   });
   return () => {
-    if (state.channel) supabase.removeChannel(state.channel);
+    if (state.channel) client.removeChannel(state.channel);
   };
+}
+
+function profileNearbyToSearchRow(r: ProfileNearbyRow): ProfileSearchRow {
+  return {
+    profile_id: r.profile_id,
+    display_name: r.display_name,
+    avatar_url: r.avatar_url,
+    handle: null,
+    city: null,
+    favorite_sport: null,
+    distance_km: r.distance_km,
+    rank_score: null,
+  };
+}
+
+/**
+ * Nearby profiles when lat/lng are known, otherwise similar athletes by sport / generic browse.
+ */
+export async function fetchDiscoveredAthletes(params: {
+  excludeUserId: string;
+  lat?: number | null;
+  lng?: number | null;
+  primarySports?: string[];
+  limit?: number;
+}): Promise<ProfileSearchRow[]> {
+  const limit = Math.min(params.limit ?? 12, 25);
+  const { excludeUserId } = params;
+
+  if (params.lat != null && params.lng != null) {
+    const { data, error } = await getProfilesNearby(params.lat, params.lng, 40, limit + 10);
+    if (!error && data?.length) {
+      return data
+        .filter((r) => r.profile_id !== excludeUserId)
+        .slice(0, limit)
+        .map(profileNearbyToSearchRow);
+    }
+  }
+
+  for (const sport of params.primarySports ?? []) {
+    const s = sport.trim();
+    if (s.length < 2) continue;
+    const rows = await searchPeople({
+      q: s,
+      lat: params.lat ?? null,
+      lng: params.lng ?? null,
+      limit,
+      excludeUserId,
+    });
+    if (rows.length) return rows;
+  }
+
+  return searchPeople({
+    q: "athlete",
+    lat: params.lat ?? null,
+    lng: params.lng ?? null,
+    limit,
+    excludeUserId,
+  });
 }
 
 // —— Helpers for 3D avatar URL ——

@@ -56,7 +56,33 @@ begin
 end;
 $$;
 
+-- Columns expected by get_games_nearby below (if 170 / 20001 failed partway, add them here).
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'games' and column_name = 'location_label'
+  ) then
+    alter table public.games add column location_label text;
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'games' and column_name = 'description'
+  ) then
+    alter table public.games add column description text;
+  end if;
+end;
+$$;
+
 -- 2) Nearby games include headcount + spots left (capacity includes host)
+-- Postgres cannot change a function's return row type with CREATE OR REPLACE (42P13).
+drop function if exists public.get_games_nearby(double precision, double precision, double precision);
+
 create or replace function public.get_games_nearby(
   lat double precision,
   lng double precision,
@@ -111,7 +137,14 @@ as $$
   limit 50;
 $$;
 
+grant execute on function public.get_games_nearby(double precision, double precision, double precision)
+  to authenticated;
+grant execute on function public.get_games_nearby(double precision, double precision, double precision)
+  to anon;
+
 -- 3) Inbox: games I joined, with last message preview
+drop function if exists public.get_my_game_inbox();
+
 create or replace function public.get_my_game_inbox()
 returns table (
   id uuid,

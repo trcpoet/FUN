@@ -23,7 +23,8 @@ const SPORTS = [
   { id: "Pickup", label: "Pickup", icon: "🎯" },
 ];
 
-const SPOT_OPTIONS = [2, 4, 6, 8, 10, 12];
+const MIN_SPOTS = 2;
+const MAX_SPOTS = 20;
 
 type CreateGameSheetProps = {
   open: boolean;
@@ -66,6 +67,8 @@ export function CreateGameSheet({
     }
   }, [open]);
 
+  const clampSpots = (n: number): number => Math.max(MIN_SPOTS, Math.min(MAX_SPOTS, n));
+
   const handleSubmit = async () => {
     if (!supabase || !userCoords) {
       setError("Location required. Allow browser location or pick a spot on the map.");
@@ -86,6 +89,7 @@ export function CreateGameSheet({
       p_starts_at: null,
       p_location_label: null,
       p_description: null,
+      p_requirements: null,
     });
     setLoading(false);
     if (err) {
@@ -159,14 +163,19 @@ export function CreateGameSheet({
                     key={s.id}
                     type="button"
                     onClick={() => setSport(s.id)}
-                    className={`flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-xl border-2 transition-all font-medium ${
+                    className={`flex min-h-[2.75rem] items-center justify-center gap-2 rounded-xl border-2 px-2 py-2 text-center transition-all font-medium ${
                       sport === s.id
                         ? "border-emerald-500 bg-emerald-500/20 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
                         : "border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-600 hover:bg-slate-800"
                     }`}
                   >
-                    <span className="text-xl">{s.icon}</span>
-                    <span className="text-xs">{s.label}</span>
+                    <span
+                      className="shrink-0 text-xl leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] sm:text-2xl"
+                      aria-hidden
+                    >
+                      {s.icon}
+                    </span>
+                    <span className="text-xs leading-tight text-left min-w-0">{s.label}</span>
                   </button>
                 ))}
               </motion.div>
@@ -179,23 +188,61 @@ export function CreateGameSheet({
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
-                className="flex flex-wrap justify-center gap-2"
+                className="space-y-3"
               >
-                {SPOT_OPTIONS.map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setSpots(n)}
-                    className={`w-11 h-11 rounded-xl border-2 flex items-center justify-center text-sm font-bold transition-all ${
-                      spots === n
-                        ? "border-emerald-500 bg-emerald-500/20 text-emerald-400"
-                        : "border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-600"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-                <p className="w-full text-center text-slate-400 text-xs mt-1.5">Spots needed</p>
+                <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-slate-300 text-sm font-semibold">Athletes</p>
+                    <p className="text-white text-base font-bold tabular-nums">{spots}</p>
+                  </div>
+
+                  <input
+                    type="range"
+                    min={MIN_SPOTS}
+                    max={MAX_SPOTS}
+                    step={1}
+                    value={spots}
+                    onChange={(e) => setSpots(clampSpots(Number(e.target.value)))}
+                    className="w-full accent-emerald-400/80"
+                    aria-label="Total spots for this game"
+                  />
+
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      className="w-10 h-10 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-200 hover:bg-slate-700 transition-colors font-semibold"
+                      aria-label="Decrease athletes"
+                      onClick={() => setSpots((s) => clampSpots(s - 1))}
+                    >
+                      -
+                    </button>
+                    <Input
+                      value={spots}
+                      type="number"
+                      min={MIN_SPOTS}
+                      max={MAX_SPOTS}
+                      step={1}
+                      onChange={(e) => {
+                        const next = Number(e.target.value);
+                        if (!Number.isFinite(next)) return;
+                        setSpots(clampSpots(next));
+                      }}
+                      className="h-10 w-20 text-center text-base bg-slate-800 border-slate-600 text-white rounded-xl"
+                      aria-label="Total athletes"
+                    />
+                    <button
+                      type="button"
+                      className="w-10 h-10 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-200 hover:bg-slate-700 transition-colors font-semibold"
+                      aria-label="Increase athletes"
+                      onClick={() => setSpots((s) => clampSpots(s + 1))}
+                    >
+                      +
+                    </button>
+                  </div>
+                  <p className="text-slate-400 text-xs">
+                    Max roster shown is {MAX_SPOTS}. If full, players after the cap can still join (as subs).
+                  </p>
+                </div>
               </motion.div>
             )}
 
@@ -226,8 +273,13 @@ export function CreateGameSheet({
                 transition={{ duration: 0.2 }}
                 className="rounded-xl border border-slate-700 bg-slate-800/60 p-3 space-y-1"
               >
-                <p className="flex items-center gap-1.5 text-slate-300">
-                  <span className="text-xl">{SPORTS.find((s) => s.id === sport)?.icon ?? "🎯"}</span>
+                <p className="flex min-h-[2rem] items-center gap-2 text-slate-300">
+                  <span
+                    className="shrink-0 text-2xl leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
+                    aria-hidden
+                  >
+                    {SPORTS.find((x) => x.id === sport)?.icon ?? "🎯"}
+                  </span>
                   <span className="font-semibold text-white text-sm">{sport}</span>
                 </p>
                 <p className="text-slate-400 text-xs">

@@ -53,6 +53,9 @@ begin
 end;
 $$;
 
+-- 42P13: return row type cannot change with CREATE OR REPLACE alone.
+drop function if exists public.get_games_nearby(double precision, double precision, double precision);
+
 create or replace function public.get_games_nearby(
   lat double precision,
   lng double precision,
@@ -96,3 +99,7 @@ as $$
   limit 50;
 $$;
 
+grant execute on function public.get_games_nearby(double precision, double precision, double precision)
+  to authenticated;
+grant execute on function public.get_games_nearby(double precision, double precision, double precision)
+  to anon;

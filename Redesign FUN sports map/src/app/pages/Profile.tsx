@@ -7,9 +7,6 @@ import { useIsMobile } from "../components/ui/use-mobile";
 import {
   ProfileHero,
   ProfileActionRow,
-  AthleticSnapshotCard,
-  SportsSkillCard,
-  PerformanceMetricsSection,
   ExperienceTimeline,
   ProfileEditSheet,
   ProfileStickyBar,
@@ -18,7 +15,7 @@ import {
   AddPostOrReelDialog,
   type AddFeedKind,
   AboutSheet,
-  TrustRatingsBlock,
+  DiscoveredPeopleCarousel,
   ProfileBadgesSection,
   type UserBadgeWithDetail,
 } from "../components/athlete-profile";
@@ -36,6 +33,7 @@ export default function Profile() {
   const [addFeedOpen, setAddFeedOpen] = useState(false);
   const [addFeedKind, setAddFeedKind] = useState<AddFeedKind>("post");
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState("");
   const [sticky, setSticky] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
@@ -126,6 +124,9 @@ export default function Profile() {
                   favoriteSport={athleteProfile.favoriteSport ?? null}
                   fallbackInitial={fallbackInitial}
                   primarySports={primarySports}
+                  sportsSkills={athleteProfile.sportsSkills ?? []}
+                  snapshot={athleteProfile.snapshot}
+                  skillRatings={athleteProfile.skillRatings ?? []}
                   bio={athleteProfile.bio ?? null}
                   level={stats?.level ?? 1}
                   xp={stats?.xp ?? 0}
@@ -143,20 +144,37 @@ export default function Profile() {
             </div>
 
             <div className="space-y-5 pt-4">
-              <ProfileActionRow isOwnProfile onAbout={() => setAboutOpen(true)} onShare={handleShare} />
-
-              <StoriesRail
-                stories={athleteProfile.stories ?? []}
-                allowCreate
-                onCreateStory={async (story) => {
-                  const err = await updateProfile({
-                    athlete_profile: mergeAthleteProfile(athleteProfile, {
-                      stories: [...(athleteProfile.stories ?? []), story],
-                    }),
-                  });
-                  if (err) throw new Error(err.message);
-                }}
+              <ProfileActionRow
+                isOwnProfile
+                onAbout={() => setAboutOpen(true)}
+                onShare={handleShare}
+                discoverExpanded={discoverOpen}
+                onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
               />
+
+              <div className="space-y-2">
+                {user?.id ? (
+                  <DiscoveredPeopleCarousel
+                    expanded={discoverOpen}
+                    onClose={() => setDiscoverOpen(false)}
+                    excludeUserId={user.id}
+                    primarySports={primarySports}
+                  />
+                ) : null}
+
+                <StoriesRail
+                  stories={athleteProfile.stories ?? []}
+                  allowCreate
+                  onCreateStory={async (story) => {
+                    const err = await updateProfile({
+                      athlete_profile: mergeAthleteProfile(athleteProfile, {
+                        stories: [...(athleteProfile.stories ?? []), story],
+                      }),
+                    });
+                    if (err) throw new Error(err.message);
+                  }}
+                />
+              </div>
 
               <PostsReelsSection
                 reels={athleteProfile.highlights ?? []}
@@ -181,6 +199,48 @@ export default function Profile() {
           side={isMobile ? "bottom" : "right"}
           wide={!isMobile}
         >
+          {athleteProfile.bio?.trim() ? (
+            <div>
+              <h3 className="mb-3 text-sm font-semibold text-white">Athlete tagline</h3>
+              <p className="text-sm leading-relaxed text-slate-300">{athleteProfile.bio.trim()}</p>
+            </div>
+          ) : null}
+
+          {(athleteProfile.snapshot?.university?.trim() ||
+            athleteProfile.city?.trim() ||
+            athleteProfile.snapshot?.neighbourhood?.trim() ||
+            athleteProfile.favoriteSport?.trim()) && (
+            <div>
+              <h3 className="mb-3 text-sm font-semibold text-white">Location &amp; school</h3>
+              <ul className="space-y-2 text-sm text-slate-300">
+                {athleteProfile.snapshot?.university?.trim() ? (
+                  <li>
+                    <span className="text-slate-500">University · </span>
+                    <span className="text-white">{athleteProfile.snapshot.university.trim()}</span>
+                  </li>
+                ) : null}
+                {athleteProfile.city?.trim() ? (
+                  <li>
+                    <span className="text-slate-500">City / area · </span>
+                    <span className="text-white">{athleteProfile.city.trim()}</span>
+                  </li>
+                ) : null}
+                {athleteProfile.snapshot?.neighbourhood?.trim() ? (
+                  <li>
+                    <span className="text-slate-500">Neighbourhood · </span>
+                    <span className="text-white">{athleteProfile.snapshot.neighbourhood.trim()}</span>
+                  </li>
+                ) : null}
+                {athleteProfile.favoriteSport?.trim() ? (
+                  <li>
+                    <span className="text-slate-500">Favorite sport · </span>
+                    <span className="text-white">{athleteProfile.favoriteSport.trim()}</span>
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+          )}
+
           <div>
             <h3 className="text-sm font-semibold text-white mb-3">Games</h3>
             {stats ? (
@@ -200,31 +260,6 @@ export default function Profile() {
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold text-white mb-3">Stats</h3>
-            <div className="space-y-6">
-              <AthleticSnapshotCard
-                snapshot={athleteProfile.snapshot}
-                hideHeading
-                className="border-0 border-b border-white/[0.06] rounded-none bg-transparent pb-6"
-              />
-              <SportsSkillCard
-                primarySports={primarySports}
-                secondarySports={athleteProfile.secondarySports ?? []}
-                sportsSkills={athleteProfile.sportsSkills ?? []}
-                skillRatings={athleteProfile.skillRatings ?? []}
-                hideHeading
-                className="border-0 border-b border-white/[0.06] rounded-none bg-transparent pb-6"
-              />
-              <PerformanceMetricsSection
-                metrics={athleteProfile.performanceMetrics ?? []}
-                primarySports={primarySports}
-                hideHeading
-                className="border-0 rounded-none bg-transparent"
-              />
-            </div>
-          </div>
-
-          <div>
             <h3 className="text-sm font-semibold text-white mb-3">Journey</h3>
             <ExperienceTimeline
               items={athleteProfile.experience ?? []}
@@ -233,31 +268,8 @@ export default function Profile() {
             />
           </div>
 
-          <div>
-            <h3 className="text-sm font-semibold text-white mb-3">Trust</h3>
-            <TrustRatingsBlock trust={athleteProfile.trust} className="mb-6" />
-            {(athleteProfile.endorsements ?? []).length > 0 && (
-              <div className="space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Teammate quotes</p>
-                <ul className="space-y-3">
-                  {(athleteProfile.endorsements ?? []).map((e) => (
-                    <li
-                      key={e.id}
-                      className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 text-sm text-slate-200"
-                    >
-                      <p className="leading-relaxed">&ldquo;{e.quote}&rdquo;</p>
-                      <p className="text-xs text-slate-500 mt-2">
-                        — {e.authorName}
-                        {e.relation ? ` · ${e.relation}` : ""}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <div className="mt-8">
-              <ProfileBadgesSection badges={badges} className="border-0 rounded-none bg-transparent" />
-            </div>
+          <div className="pt-2">
+            <ProfileBadgesSection badges={badges} className="border-0 rounded-none bg-transparent" />
           </div>
         </AboutSheet>
 
@@ -291,6 +303,8 @@ export default function Profile() {
           onEditDisplayNameChange={setEditDisplayName}
           currentAvatarUrl={avatarUrl}
           athleteProfile={athleteProfile}
+          profileLevel={stats?.level ?? 1}
+          profileXp={stats?.xp ?? 0}
           onSignOut={() => void handleSignOut()}
           onSaveAthleteProfile={async (next, options) => {
             let avatar_url: string | undefined;

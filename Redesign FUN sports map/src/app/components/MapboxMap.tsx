@@ -5,6 +5,7 @@ import type { ProfileNearbyRow } from "../../lib/supabase";
 import { gamesToGeoJSON } from "../types/mapGeoJSON";
 import { fetchSportsVenuesFromOverpass, bboxFromCenterRadius } from "../lib/sportsVenues";
 import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
+import { venueMatchesSelectedSports } from "../../lib/osmSportTags";
 import { limitGamesForMapViewport } from "../map/mapBounds";
 import {
   getViewportMetrics,
@@ -26,9 +27,7 @@ import { useIsMobile } from "./ui/use-mobile";
 const L_GAME_SOURCE = "fun-games";
 const L_GAME_CLUSTERS = "fun-games-clusters";
 const L_GAME_CLUSTER_LABEL = "fun-games-cluster-label";
-/** Neutral disc + status-colored ring (not a solid green “dot” — icon carries sport identity). */
-const L_GAME_POINT = "fun-games-point";
-/** Rasterized sport badge (`sport_map_icon` → addImage). */
+/** Rasterized sport emoji only (`sport_map_icon` → addImage); no separate circle layer. */
 const L_GAME_ICON = "fun-games-sport-icon";
 const L_GAME_COUNT = "fun-games-roster";
 const L_VENUE_DOTS = "venue-dots-core";
@@ -96,6 +95,10 @@ type MapboxMapProps = {
   onSelectVenue: (venue: VenueSelection | null) => void;
   /** Where to fetch/render sports venues (defaults to `userCoords` if omitted). */
   venuesCenter?: { lat: number; lng: number } | null;
+  /** Overpass bbox radius (km) around `venuesCenter`. */
+  venueSearchRadiusKm?: number;
+  /** When non-empty, keep only OSM pitches whose `sport=*` matches selected labels. */
+  venueSportsFilter?: string[];
   /** When set, open the game join modal for this game id. */
   gamePopupRequest?: { nonce: number; gameId: string } | null;
   /** Fly / fitBounds when `id` changes (search, sport focus, etc.). */
@@ -111,14 +114,24 @@ type MapboxMapProps = {
   onJoinGame?: (game: GameRow) => void;
   /** Called when user clicks Unjoin in the event popup. */
   onLeaveGame?: (game: GameRow) => void;
+  /** Host: delete game for everyone. Return true if the game row was removed. */
+  onDeleteHostedGame?: (game: GameRow) => Promise<boolean>;
+  /** Called when user clicks Messages in the event popup. */
+  onOpenMessagesForGame?: (game: GameRow) => void;
   /** Set of game ids the current user has joined (to show "Joined" in popup). */
   joinedGameIds?: Set<string>;
+  /** Set of game ids where the current user is the host (to show "You're hosting"). */
+  hostGameIds?: Set<string>;
   nearbyProfiles?: ProfileNearbyRow[];
   currentUserId?: string | null;
   /** (lat, lng, viewportPoint) when user double-taps the map */
   onMapDoubleClick?: (lat: number, lng: number, viewportPoint?: { x: number; y: number }) => void;
+  /** Open Create Game from selected venue popup. */
+  onCreateGameAtVenue?: (venue: VenueSelection, viewportPoint?: { x: number; y: number }) => void;
   /** When this value changes, map flies to user location. */
   centerOnUserTrigger?: number;
+  /** True while OpenStreetMap (Overpass) venue fetch is in progress. */
+  onVenuesFetchLoadingChange?: (loading: boolean) => void;
 };
 
 export type VenueSelection = {
@@ -138,6 +151,8 @@ export function MapboxMap(props: MapboxMapProps) {
     selectedVenue,
     onSelectVenue,
     venuesCenter = null,
+    venueSearchRadiusKm = 15,
+    venueSportsFilter = [],
     gamePopupRequest = null,
     mapCameraRequest = null,
     enable3D = false,
@@ -146,13 +161,18 @@ export function MapboxMap(props: MapboxMapProps) {
     use2DAvatar = false,
     onJoinGame,
     onLeaveGame,
+    onDeleteHostedGame,
+    onOpenMessagesForGame,
     joinedGameIds,
     nearbyProfiles = [],
     onMapDoubleClick,
+    onCreateGameAtVenue,
     centerOnUserTrigger,
+    onVenuesFetchLoadingChange,
   } = props;
   const currentUserId = props.currentUserId ?? null;
   const joinedSet = joinedGameIds ?? new Set<string>();
+  const hostSet = props.hostGameIds ?? new Set<string>();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("mapbox-gl").Map | null>(null);
@@ -161,23 +181,40 @@ export function MapboxMap(props: MapboxMapProps) {
   const [mapError, setMapError] = useState<string | null>(null);
   const [eventPopup, setEventPopup] = useState<{ game: GameRow; point: { x: number; y: number } } | null>(null);
   const [venuePopupPoint, setVenuePopupPoint] = useState<{ x: number; y: number } | null>(null);
+  const [bumpGameId, setBumpGameId] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const venueInteractionTsRef = useRef(0);
   const gameInteractionTsRef = useRef(0);
   const lastHandledGamePopupNonceRef = useRef<number | null>(null);
   const initialUserFlyDoneRef = useRef(false);
   const gameLayersInitedRef = useRef(false);
+  const bumpGameTimeoutRef = useRef<number | null>(null);
   const gamesRef = useRef(games);
   const onSelectGameRef = useRef(onSelectGame);
   const onJoinGameRef = useRef(onJoinGame);
   const selectedGameIdRef = useRef(selectedGameId);
   const [mapUxHint, setMapUxHint] = useState<string | null>(null);
   const venuesFetchCenter = venuesCenter ?? userCoords;
+  const onVenuesFetchLoadingChangeRef = useRef(onVenuesFetchLoadingChange);
+  onVenuesFetchLoadingChangeRef.current = onVenuesFetchLoadingChange;
 
   gamesRef.current = games;
   onSelectGameRef.current = onSelectGame;
   onJoinGameRef.current = onJoinGame;
   selectedGameIdRef.current = selectedGameId;
+
+  // Small tap animation for the game sport icon when opening the join modal.
+  const bumpGameIcon = (gameId: string) => {
+    setBumpGameId(gameId);
+    if (bumpGameTimeoutRef.current != null) window.clearTimeout(bumpGameTimeoutRef.current);
+    bumpGameTimeoutRef.current = window.setTimeout(() => setBumpGameId(null), 240);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (bumpGameTimeoutRef.current != null) window.clearTimeout(bumpGameTimeoutRef.current);
+    };
+  }, []);
 
   // —— Map init: sports-first dark basemap, terrain, fog ———
   useEffect(() => {
@@ -399,6 +436,7 @@ export function MapboxMap(props: MapboxMapProps) {
     setEventPopup(null);
 
     const t = window.setTimeout(() => {
+      bumpGameIcon(game.id);
       setEventPopup({ game, point: mapPoint });
     }, 650);
 
@@ -482,7 +520,6 @@ export function MapboxMap(props: MapboxMapProps) {
 
     map.setLayoutProperty(L_GAME_CLUSTERS, "visibility", showClusters ? "visible" : "none");
     map.setLayoutProperty(L_GAME_CLUSTER_LABEL, "visibility", showClusters ? "visible" : "none");
-    map.setLayoutProperty(L_GAME_POINT, "visibility", showIndividuals ? "visible" : "none");
     map.setLayoutProperty(L_GAME_ICON, "visibility", showIndividuals ? "visible" : "none");
     map.setLayoutProperty(L_GAME_COUNT, "visibility", showIndividuals ? "visible" : "none");
 
@@ -554,38 +591,13 @@ export function MapboxMap(props: MapboxMapProps) {
     });
 
     map.addLayer({
-      id: L_GAME_POINT,
-      type: "circle",
-      source: L_GAME_SOURCE,
-      filter: ["!", ["has", "point_count"]],
-      paint: {
-        "circle-radius": 14,
-        "circle-color": "rgba(15, 23, 42, 0.88)",
-        "circle-opacity": 0.92,
-        "circle-stroke-width": 2,
-        "circle-stroke-color": [
-          "match",
-          ["get", "status"],
-          "live",
-          "rgba(248, 113, 113, 0.95)",
-          "soon",
-          "rgba(251, 146, 60, 0.95)",
-          "scheduled",
-          "rgba(52, 211, 153, 0.6)",
-          "rgba(148, 163, 184, 0.55)",
-        ],
-      },
-    });
-
-    map.addLayer({
       id: L_GAME_ICON,
       type: "symbol",
       source: L_GAME_SOURCE,
       filter: ["!", ["has", "point_count"]],
       layout: {
         "icon-image": ["coalesce", ["get", "sport_map_icon"], getGameMapboxIconId("other")],
-        // Make the sport badge fill the neutral circle marker.
-        "icon-size": 0.64,
+        "icon-size": 0.82,
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
       },
@@ -615,6 +627,7 @@ export function MapboxMap(props: MapboxMapProps) {
     const openPopupForGame = (game: GameRow, mapPoint: { x: number; y: number }) => {
       gameInteractionTsRef.current = Date.now();
       onSelectGameRef.current(game);
+      bumpGameIcon(game.id);
       setEventPopup({ game, point: mapPoint });
     };
 
@@ -643,10 +656,9 @@ export function MapboxMap(props: MapboxMapProps) {
       });
     });
 
-    map.on("click", L_GAME_POINT, openGameFromFeature);
     map.on("click", L_GAME_ICON, openGameFromFeature);
 
-    [L_GAME_CLUSTERS, L_GAME_POINT, L_GAME_ICON].forEach((id) => {
+    [L_GAME_CLUSTERS, L_GAME_ICON].forEach((id) => {
       map.on("mouseenter", id, () => {
         map.getCanvas().style.cursor = "pointer";
       });
@@ -691,49 +703,45 @@ export function MapboxMap(props: MapboxMapProps) {
     applyMapLayerVisibility();
   }, [mapLoaded, games, selectedGameId, applyMapLayerVisibility]);
 
-  /** Selected game: stronger ring + slightly larger sport icon. */
+  /** Selected game: slightly larger icon + warm halo (no circle underlay). */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map?.getLayer(L_GAME_POINT)) return;
+    if (!map?.getLayer(L_GAME_ICON)) return;
     const sid = selectedGameId ?? "";
-    map.setPaintProperty(L_GAME_POINT, "circle-stroke-width", [
+    const bid = bumpGameId ?? "";
+    map.setLayoutProperty(L_GAME_ICON, "icon-size", [
       "case",
+      ["==", ["get", "id"], bid],
+      1.08,
       ["==", ["get", "id"], sid],
+      0.98,
+      0.82,
+    ]);
+    map.setPaintProperty(L_GAME_ICON, "icon-halo-color", [
+      "case",
+      ["==", ["get", "id"], bid],
+      "rgba(251, 191, 36, 0.72)",
+      ["==", ["get", "id"], sid],
+      "rgba(251, 191, 36, 0.55)",
+      "rgba(0, 0, 0, 0)",
+    ]);
+    map.setPaintProperty(L_GAME_ICON, "icon-halo-width", [
+      "case",
+      ["==", ["get", "id"], bid],
       3,
+      ["==", ["get", "id"], sid],
       2,
+      0,
     ]);
-    map.setPaintProperty(L_GAME_POINT, "circle-stroke-color", [
+    map.setPaintProperty(L_GAME_ICON, "icon-halo-blur", [
       "case",
+      ["==", ["get", "id"], bid],
+      1,
       ["==", ["get", "id"], sid],
-      "rgba(251, 191, 36, 0.98)",
-      [
-        "match",
-        ["get", "status"],
-        "live",
-        "rgba(248, 113, 113, 0.95)",
-        "soon",
-        "rgba(251, 146, 60, 0.95)",
-        "scheduled",
-        "rgba(52, 211, 153, 0.6)",
-        "rgba(148, 163, 184, 0.55)",
-      ],
+      0.8,
+      0,
     ]);
-    map.setPaintProperty(L_GAME_POINT, "circle-radius", [
-      "case",
-      ["==", ["get", "id"], sid],
-      16,
-      14,
-    ]);
-
-    if (map.getLayer(L_GAME_ICON)) {
-      map.setLayoutProperty(L_GAME_ICON, "icon-size", [
-        "case",
-        ["==", ["get", "id"], sid],
-        0.74,
-        0.64,
-      ]);
-    }
-  }, [mapLoaded, selectedGameId]);
+  }, [mapLoaded, selectedGameId, bumpGameId]);
 
   // Map click:
   // - On desktop: close popup only.
@@ -910,19 +918,28 @@ export function MapboxMap(props: MapboxMapProps) {
   }, [mapLoaded, nearbyProfiles, currentUserId, applyMapLayerVisibility]);
 
   // —— Sports venues: subtle GL polygons + small center dots (no DOM flag markers) ———
+  const venueSportSig = venueSportsFilter.slice().sort().join("|");
   const venueFetchKey = venuesFetchCenter
-    ? `${venuesFetchCenter.lat.toFixed(4)},${venuesFetchCenter.lng.toFixed(4)}`
+    ? `${venuesFetchCenter.lat.toFixed(4)},${venuesFetchCenter.lng.toFixed(4)},${venueSearchRadiusKm},${venueSportSig}`
     : null;
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || !venuesFetchCenter || !venueFetchKey) return;
+    if (!map || !mapLoaded || !venuesFetchCenter || !venueFetchKey) {
+      onVenuesFetchLoadingChangeRef.current?.(false);
+      return;
+    }
 
-    const addVenueMarkers = (geojson: SportsVenueGeoJSON) => {
+    const addVenueMarkers = (geojson: SportsVenueGeoJSON, onDone?: () => void) => {
       const mapInstance = mapRef.current;
-      if (!mapInstance) return;
+      if (!mapInstance) {
+        onDone?.();
+        return;
+      }
 
-      import("mapbox-gl").then(() => {
+      import("mapbox-gl")
+        .then(() => {
+        try {
         type Cluster = {
           lng: number;
           lat: number;
@@ -943,8 +960,12 @@ export function MapboxMap(props: MapboxMapProps) {
           return R * c;
         };
 
-        geojson.features.forEach((f) => {
-          if (!f.geometry || f.geometry.type !== "Point") return;
+        const pointFeatures = geojson.features.filter((f) => {
+          if (!f.geometry || f.geometry.type !== "Point") return false;
+          return venueMatchesSelectedSports(f.properties.sport, venueSportsFilter);
+        });
+
+        pointFeatures.forEach((f) => {
           const [lng, lat] = f.geometry.coordinates;
 
           let targetCluster: Cluster | null = null;
@@ -1074,6 +1095,15 @@ export function MapboxMap(props: MapboxMapProps) {
           );
 
           const onFillClick = (e: { features?: import("mapbox-gl").MapboxGeoJSONFeature[]; point: { x: number; y: number } }) => {
+            // If the click is on top of a game icon/cluster, ignore venue interactions.
+            const hitGames = mapInstance.queryRenderedFeatures(
+              e.point as unknown as import("mapbox-gl").PointLike,
+              {
+                layers: [L_GAME_ICON, L_GAME_CLUSTERS],
+              }
+            );
+            if (hitGames.length) return;
+
             const feature = e.features?.[0] as
               | import("geojson").Feature<
                   import("geojson").Polygon,
@@ -1112,6 +1142,15 @@ export function MapboxMap(props: MapboxMapProps) {
           mapInstance.on("click", fillLayerId, onFillClick);
 
           mapInstance.on("click", L_VENUE_DOTS, (e) => {
+            // If the click is on top of a game icon/cluster, ignore venue interactions.
+            const hitGames = mapInstance.queryRenderedFeatures(
+              e.point as unknown as import("mapbox-gl").PointLike,
+              {
+                layers: [L_GAME_ICON, L_GAME_CLUSTERS],
+              }
+            );
+            if (hitGames.length) return;
+
             const id = e.features?.[0]?.properties?.id as string | undefined;
             if (!id) return;
             const cl = clusters.find((c) => c.properties.id === id);
@@ -1129,13 +1168,35 @@ export function MapboxMap(props: MapboxMapProps) {
         }
 
         applyMapLayerVisibility();
-      });
+        } finally {
+          onDone?.();
+        }
+      })
+        .catch(() => {
+          onDone?.();
+        });
     };
 
-    const bbox = bboxFromCenterRadius(venuesFetchCenter.lat, venuesFetchCenter.lng, 5);
-    fetchSportsVenuesFromOverpass(bbox).then(addVenueMarkers);
+    let cancelled = false;
+    onVenuesFetchLoadingChangeRef.current?.(true);
+    const bbox = bboxFromCenterRadius(venuesFetchCenter.lat, venuesFetchCenter.lng, venueSearchRadiusKm);
+    fetchSportsVenuesFromOverpass(bbox).then((geojson) => {
+      if (cancelled) return;
+      addVenueMarkers(geojson, () => {
+        if (cancelled) return;
+        // Let React paint loading=true before clearing (cached / fast responses).
+        const done = () => onVenuesFetchLoadingChangeRef.current?.(false);
+        if (typeof requestAnimationFrame !== "undefined") {
+          requestAnimationFrame(() => requestAnimationFrame(done));
+        } else {
+          window.setTimeout(done, 0);
+        }
+      });
+    });
 
     return () => {
+      cancelled = true;
+      onVenuesFetchLoadingChangeRef.current?.(false);
       const m = mapRef.current;
       if (!m) return;
       try {
@@ -1208,7 +1269,10 @@ export function MapboxMap(props: MapboxMapProps) {
               onClose={() => setEventPopup(null)}
               onJoin={onJoinGame}
               onLeave={onLeaveGame}
+              onOpenMessages={onOpenMessagesForGame}
               joined={joinedSet.has(eventPopup.game.id)}
+              isHost={Boolean(currentUserId) && hostSet.has(eventPopup.game.id)}
+              onDeleteHostedGame={onDeleteHostedGame}
             />
           </div>
         </div>
@@ -1230,6 +1294,9 @@ export function MapboxMap(props: MapboxMapProps) {
             <VenueInfoPopup
               venue={selectedVenue}
               openGamesNearbyCount={openGamesNearbyCount}
+              onCreateGame={(venue) => {
+                onCreateGameAtVenue?.(venue, venuePopupPoint ?? undefined);
+              }}
               onClose={() => {
                 onSelectVenue(null);
                 setVenuePopupPoint(null);

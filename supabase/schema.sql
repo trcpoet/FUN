@@ -114,6 +114,7 @@ drop policy if exists "Profiles are viewable by everyone" on public.profiles;
 drop policy if exists "Users can update own profile" on public.profiles;
 drop policy if exists "Games are viewable by everyone" on public.games;
 drop policy if exists "Authenticated users can create games" on public.games;
+drop policy if exists "Hosts can delete own games" on public.games;
 drop policy if exists "Participants are viewable by everyone" on public.game_participants;
 drop policy if exists "Authenticated users can join games" on public.game_participants;
 
@@ -127,6 +128,7 @@ create policy "Users can update own profile" on public.profiles for update using
 
 create policy "Games are viewable by everyone" on public.games for select using (true);
 create policy "Authenticated users can create games" on public.games for insert with check (auth.role() = 'authenticated');
+create policy "Hosts can delete own games" on public.games for delete using (auth.uid() = created_by);
 
 create policy "Participants are viewable by everyone" on public.game_participants for select using (true);
 create policy "Authenticated users can join games" on public.game_participants for insert with check (auth.role() = 'authenticated');

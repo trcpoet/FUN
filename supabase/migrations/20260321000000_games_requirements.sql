@@ -1,19 +1,19 @@
--- Optional short description on games (create modal / social context).
+-- Optional structured host preferences (skill, age, availability, etc.) on games.
 
 do $$
 begin
   if not exists (
-    select 1
-    from information_schema.columns
-    where table_schema = 'public'
-      and table_name = 'games'
-      and column_name = 'description'
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'games' and column_name = 'requirements'
   ) then
-    alter table public.games
-      add column description text;
+    alter table public.games add column requirements jsonb not null default '{}'::jsonb;
   end if;
 end;
 $$;
+
+drop function if exists public.create_game(
+  text, text, double precision, double precision, int, timestamptz, text, text
+);
 
 create or replace function public.create_game(
   p_title text,
@@ -23,7 +23,8 @@ create or replace function public.create_game(
   p_spots_needed int default 2,
   p_starts_at timestamptz default null,
   p_location_label text default null,
-  p_description text default null
+  p_description text default null,
+  p_requirements jsonb default null
 )
 returns uuid
 language plpgsql
@@ -36,7 +37,9 @@ begin
   if auth.uid() is null then
     raise exception 'Must be authenticated to create a game';
   end if;
-  insert into public.games (title, sport, spots_needed, location, created_by, status, starts_at, location_label, description)
+  insert into public.games (
+    title, sport, spots_needed, location, created_by, status, starts_at, location_label, description, requirements
+  )
   values (
     p_title,
     p_sport,
@@ -46,7 +49,12 @@ begin
     'open',
     p_starts_at,
     p_location_label,
-    nullif(trim(coalesce(p_description, '')), '')
+    nullif(trim(coalesce(p_description, '')), ''),
+    case
+      when p_requirements is null then '{}'::jsonb
+      when jsonb_typeof(p_requirements) = 'object' then p_requirements
+      else '{}'::jsonb
+    end
   )
   returning id into new_id;
   insert into public.game_participants (game_id, user_id, role)
@@ -73,6 +81,9 @@ returns table (
   status text,
   location_label text,
   description text,
+  requirements jsonb,
+  participant_count int,
+  spots_remaining int,
   distance_km double precision,
   lat double precision,
   lng double precision
@@ -93,10 +104,18 @@ as $$
     g.status,
     g.location_label,
     g.description,
+    coalesce(g.requirements, '{}'::jsonb) as requirements,
+    coalesce(part.cnt, 0)::int as participant_count,
+    greatest(g.spots_needed - coalesce(part.cnt, 0), 0)::int as spots_remaining,
     (st_distance(g.location, st_point(lng, lat)::geography) / 1000.0) as distance_km,
     st_y(g.location::geometry) as lat,
     st_x(g.location::geometry) as lng
   from public.games g
+  left join lateral (
+    select count(*)::int as cnt
+    from public.game_participants gp
+    where gp.game_id = g.id
+  ) part on true
   where st_dwithin(g.location, st_point(lng, lat)::geography, radius_km * 1000.0)
   order by g.location <-> st_point(lng, lat)::geography
   limit 50;

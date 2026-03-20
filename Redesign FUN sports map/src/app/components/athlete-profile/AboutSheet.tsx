@@ -25,7 +25,9 @@ export function AboutSheet({ open, onOpenChange, side = "right", wide, children,
       >
         <SheetHeader className="px-4 pt-4 pb-2 text-left border-b border-white/10 shrink-0">
           <SheetTitle className="text-lg">About</SheetTitle>
-          <SheetDescription className="text-slate-500">Games, stats, journey, and trust ratings.</SheetDescription>
+          <SheetDescription className="text-slate-500">
+            Location, school, games you&apos;ve played, and your journey.
+          </SheetDescription>
         </SheetHeader>
         <ScrollArea className={cn("flex-1 min-h-0", side === "bottom" ? "h-[calc(88vh-5rem)]" : "h-[calc(100vh-6rem)]")}>
           <div className="px-4 py-4 space-y-8 pb-10">{children}</div>

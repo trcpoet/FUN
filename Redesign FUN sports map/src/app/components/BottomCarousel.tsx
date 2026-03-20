@@ -36,6 +36,8 @@ export type BottomCarouselProps = {
   /** Fly to the game on the map and open the join modal (does not join). */
   onOpenGame: (game: GameRow) => void;
   joinedGameIds: Set<string>;
+  /** Used to show Host vs In on cards (hosts are in game_participants but aren’t “guest joins”). */
+  currentUserId?: string | null;
   liveNowOpen?: boolean;
 };
 
@@ -45,6 +47,7 @@ export const BottomCarousel = ({
   onSelectGame,
   onOpenGame,
   joinedGameIds,
+  currentUserId = null,
   liveNowOpen = false,
 }: BottomCarouselProps) => {
   const isMobile = useIsMobile();
@@ -70,6 +73,7 @@ export const BottomCarousel = ({
         {games.map((game, idx) => {
           const isSelected = selectedGame?.id === game.id;
           const isJoined = joinedGameIds.has(game.id);
+          const isHost = Boolean(currentUserId) && game.created_by === currentUserId;
           return (
             <motion.div
               key={game.id}
@@ -146,12 +150,16 @@ export const BottomCarousel = ({
                     className={cn(
                       "flex items-center justify-center w-9 h-9 rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 z-30",
                       isJoined
-                        ? "bg-slate-600 text-slate-400 cursor-pointer"
+                        ? isHost
+                          ? "bg-amber-600/30 text-amber-200 border border-amber-500/40 cursor-pointer"
+                          : "bg-slate-600 text-slate-400 cursor-pointer"
                         : "bg-orange-500 text-slate-950 shadow-orange-500/30"
                     )}
                   >
                     {isJoined ? (
-                      <span className="text-xs font-bold">In</span>
+                      <span className="text-[10px] font-bold leading-tight text-center px-0.5">
+                        {isHost ? "Host" : "In"}
+                      </span>
                     ) : (
                       <ChevronRight className="w-4 h-4" strokeWidth={3} />
                     )}

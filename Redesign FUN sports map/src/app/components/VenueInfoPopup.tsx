@@ -6,6 +6,7 @@ type VenueInfoPopupProps = {
   venue: VenueSelection;
   openGamesNearbyCount: number;
   onClose: () => void;
+  onCreateGame?: (venue: VenueSelection) => void;
 };
 
 function formatCoords(lat: number, lng: number): string {
@@ -14,8 +15,24 @@ function formatCoords(lat: number, lng: number): string {
   return `${latStr}, ${lngStr}`;
 }
 
-export function VenueInfoPopup({ venue, openGamesNearbyCount, onClose }: VenueInfoPopupProps) {
-  const title = venue.name?.trim() ? venue.name : "Sports venue";
+function prettyLabel(s: string | undefined | null): string | null {
+  const raw = s?.trim();
+  if (!raw) return null;
+  const cleaned = raw.replace(/_/g, " ").replace(/\s+/g, " ");
+  return cleaned;
+}
+
+export function VenueInfoPopup({ venue, openGamesNearbyCount, onClose, onCreateGame }: VenueInfoPopupProps) {
+  // Overpass often lacks a `name` tag for pitches/courts.
+  // Fallback to sport + leisure so we never show the generic "Sports venue".
+  const name = prettyLabel(venue.name);
+  const sport = prettyLabel(venue.sport);
+  const leisure = prettyLabel(venue.leisure);
+
+  const title =
+    name ??
+    (sport && leisure ? `${sport} ${leisure}` : sport ?? leisure ?? "Sports venue");
+
   const sub =
     venue.sport?.trim() || venue.leisure?.trim()
       ? `${venue.sport?.trim() ? venue.sport.trim() : venue.leisure?.trim() ?? ""}${venue.sport?.trim() && venue.leisure?.trim() ? " · " : ""}${
@@ -58,6 +75,20 @@ export function VenueInfoPopup({ venue, openGamesNearbyCount, onClose }: VenueIn
             <MapPin className="w-3 h-3 shrink-0" />
             {formatCoords(venue.center.lat, venue.center.lng)}
           </div>
+
+          {onCreateGame && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCreateGame(venue);
+                onClose();
+              }}
+              className="mt-1 w-full py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
+            >
+              Create game
+            </button>
+          )}
         </div>
       </div>
     </div>

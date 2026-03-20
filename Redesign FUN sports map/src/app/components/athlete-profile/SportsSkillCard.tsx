@@ -1,5 +1,5 @@
 import type { SportSkillEntry, SkillRating } from "../../../lib/athleteProfile";
-import { SportIconRow } from "./SportIconRow";
+import { sportEmoji } from "../../../lib/sportVisuals";
 import { SkillBar } from "./SkillBar";
 import { cn } from "../ui/utils";
 
@@ -53,37 +53,66 @@ export function SportsSkillCard({
         <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">Sports & skills</h2>
       )}
 
-      {(primarySports.length > 0 || secondarySports.length > 0) && (
-        <div className="space-y-2">
-          {primarySports.length > 0 && (
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-slate-600 mb-1.5">Primary</p>
-              <SportIconRow sports={primarySports} />
-            </div>
-          )}
-          {secondarySports.length > 0 && (
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-slate-600 mb-1.5">Secondary</p>
-              <SportIconRow sports={secondarySports} size="sm" />
-            </div>
-          )}
+      {primarySports.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-[10px] uppercase tracking-wider text-slate-600">Primary</p>
+          <ul className="space-y-2">
+            {primarySports.map((sport) => {
+              const row = mergedSkills.find((x) => x.sport === sport && x.primary) ?? {
+                sport,
+                level: null as SportSkillEntry["level"],
+                primary: true,
+              };
+              return (
+                <li
+                  key={sport}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2"
+                >
+                  <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-slate-200">
+                    <span className="shrink-0 text-lg leading-none" aria-hidden>
+                      {sportEmoji(sport)}
+                    </span>
+                    <span className="truncate">{sport}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-slate-500">
+                    Primary · {levelShort(row.level)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
 
-      {mergedSkills.length > 0 && (
-        <ul className="space-y-2">
-          {mergedSkills.map((row) => (
-            <li
-              key={`${row.sport}-${row.primary}`}
-              className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2"
-            >
-              <span className="text-sm text-slate-200 font-medium truncate">{row.sport}</span>
-              <span className="text-xs text-slate-500 shrink-0">
-                {row.primary ? "Primary" : "Secondary"} · {levelShort(row.level)}
-              </span>
-            </li>
-          ))}
-        </ul>
+      {secondarySports.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-[10px] uppercase tracking-wider text-slate-600">Secondary</p>
+          <ul className="space-y-2">
+            {secondarySports.map((sport) => {
+              const row = mergedSkills.find((x) => x.sport === sport && !x.primary) ?? {
+                sport,
+                level: null as SportSkillEntry["level"],
+                primary: false,
+              };
+              return (
+                <li
+                  key={sport}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2"
+                >
+                  <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-slate-200">
+                    <span className="shrink-0 text-lg leading-none" aria-hidden>
+                      {sportEmoji(sport)}
+                    </span>
+                    <span className="truncate">{sport}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-slate-500">
+                    Secondary · {levelShort(row.level)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
 
       {showBars ? (

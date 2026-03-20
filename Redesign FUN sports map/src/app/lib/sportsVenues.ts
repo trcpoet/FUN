@@ -24,8 +24,15 @@ const OVERPASS_URLS = [
   "https://overpass-api.de/api/interpreter",
 ];
 
+/** Throttle duplicate Overpass calls for the *same* bbox only (saves quota). Filter/sport changes reuse cached raw features + client-side filter. */
+const MIN_FETCH_INTERVAL_MS = 60_000;
+let lastBboxKey: string | null = null;
 let lastFetchTime = 0;
-const MIN_FETCH_INTERVAL_MS = 60_000; // 1 min between fetches
+let lastGeojson: SportsVenueGeoJSON = { type: "FeatureCollection", features: [] };
+
+function bboxCacheKey(bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number }): string {
+  return [bbox.minLat, bbox.minLng, bbox.maxLat, bbox.maxLng].map((n) => n.toFixed(5)).join(",");
+}
 
 const KM_TO_DEG_LAT = 1 / 111;
 const KM_TO_DEG_LNG = 1 / (111 * Math.cos((Math.PI * 40) / 180));
@@ -57,6 +64,15 @@ export async function fetchSportsVenuesFromOverpass(bbox: {
 }): Promise<SportsVenueGeoJSON> {
   const { minLat, minLng, maxLat, maxLng } = bbox;
   // Overpass bbox: (south, west, north, east)
+  const cacheKey = bboxCacheKey({ minLat, minLng, maxLat, maxLng });
+  const now = Date.now();
+  if (cacheKey === lastBboxKey && now - lastFetchTime < MIN_FETCH_INTERVAL_MS) {
+    return {
+      type: "FeatureCollection",
+      features: lastGeojson.features,
+    };
+  }
+
   const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
   const query = `
     [out:json][timeout:15];
@@ -69,11 +85,6 @@ export async function fetchSportsVenuesFromOverpass(bbox: {
     out center;
   `.replace(/\n\s+/g, " ");
 
-  const now = Date.now();
-  if (now - lastFetchTime < MIN_FETCH_INTERVAL_MS) {
-    return { type: "FeatureCollection", features: [] };
-  }
-
   for (const OVERPASS_URL of OVERPASS_URLS) {
     try {
       const res = await fetch(OVERPASS_URL, {
@@ -83,27 +94,30 @@ export async function fetchSportsVenuesFromOverpass(bbox: {
       });
       if (res.status === 429) continue; // try next server
       if (!res.ok) return { type: "FeatureCollection", features: [] };
+      const json = await res.json();
+      const features: SportsVenueFeature[] = [];
+      for (const el of json.elements || []) {
+        const lat = el.lat ?? el.center?.lat;
+        const lon = el.lon ?? el.center?.lon;
+        if (lat == null || lon == null) continue;
+        features.push({
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [lon, lat] },
+          properties: {
+            id: `${el.type}/${el.id}`,
+            name: el.tags?.name,
+            sport: el.tags?.sport,
+            leisure: el.tags?.leisure,
+            osm_type: el.type,
+            osm_id: el.id,
+          },
+        });
+      }
+      const collection: SportsVenueGeoJSON = { type: "FeatureCollection", features };
+      lastBboxKey = cacheKey;
       lastFetchTime = Date.now();
-    const json = await res.json();
-    const features: SportsVenueFeature[] = [];
-    for (const el of json.elements || []) {
-      const lat = el.lat ?? el.center?.lat;
-      const lon = el.lon ?? el.center?.lon;
-      if (lat == null || lon == null) continue;
-      features.push({
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [lon, lat] },
-        properties: {
-          id: `${el.type}/${el.id}`,
-          name: el.tags?.name,
-          sport: el.tags?.sport,
-          leisure: el.tags?.leisure,
-          osm_type: el.type,
-          osm_id: el.id,
-        },
-      });
-    }
-    return { type: "FeatureCollection", features };
+      lastGeojson = collection;
+      return collection;
     } catch {
       continue;
     }

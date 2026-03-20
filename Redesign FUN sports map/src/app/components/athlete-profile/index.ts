@@ -19,6 +19,7 @@ export { PostsReelsSection } from "./PostsReelsSection";
 export type { ProfileFeedTab } from "./PostsReelsSection";
 export { PostGrid, PinnedProfileRibbon } from "./PostGrid";
 export { AboutSheet } from "./AboutSheet";
+export { DiscoveredPeopleCarousel } from "./DiscoveredPeopleCarousel";
 export { TrustRatingsBlock } from "./TrustRatingsBlock";
 export { PlayedWithRow } from "./PlayedWithRow";
 export { AthleteBadge } from "./AthleteBadge";

@@ -26,6 +26,8 @@ export type GameRow = {
   status?: "open" | "full" | "completed" | "cancelled";
   location_label?: string | null;
   description?: string | null;
+  /** Host preferences from create-game (skill, age, etc.). */
+  requirements?: Record<string, unknown> | null;
   distance_km: number;
   lat: number;
   lng: number;

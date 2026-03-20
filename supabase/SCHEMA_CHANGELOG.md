@@ -1,5 +1,25 @@
 # Schema changelog
 
+## 2025-03-25 – Host deletes own game
+
+**File:** `migrations/20250325000000_games_host_delete_rls.sql`  
+**Run after:** `games` + RLS enabled.
+
+| Change | Purpose |
+|--------|---------|
+| **Policy `Hosts can delete own games`** | `DELETE` on `public.games` where `auth.uid() = created_by`; cascades remove participants, messages, `game_results` |
+
+Client: `deleteHostedGame(gameId)` in `src/lib/api.ts`; map popup **Delete game** (host only).
+
+## 2025-03-24 – Leave game (delete own `game_participants` row)
+
+**File:** `migrations/20250324000000_game_participants_delete_rls.sql`  
+**Run after:** `game_participants` exists.
+
+| Change | Purpose |
+|--------|---------|
+| **Policy `Users can delete own participation`** | `DELETE` where `auth.uid() = user_id` so **Unjoin** persists; without it, RLS blocks all deletes and the UI can look “stuck joined” after refresh |
+
 ## 2025-03-23 – Profile text search (`search_profiles`)
 
 **File:** `migrations/20250323000000_search_profiles_trgm.sql`
