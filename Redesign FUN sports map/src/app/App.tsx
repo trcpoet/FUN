@@ -1,8 +1,12 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { Suspense, useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import { useNavigate } from "react-router";
-import { MapboxMap, type MapCameraRequest } from "./components/MapboxMap";
-import type { VenueSelection } from "./components/MapboxMap";
+import type { MapCameraRequest, VenueSelection } from "./components/MapboxMap";
+import { prefetchMapboxGl } from "./lib/mapboxCached";
+
+const MapboxMap = React.lazy(() =>
+  import("./components/MapboxMap").then((m) => ({ default: m.MapboxMap }))
+);
 import { TopNavigation } from "./components/TopUI";
 import { BottomCarousel } from "./components/BottomCarousel";
 import { GameMessengerSheet } from "./components/GameMessengerSheet";
@@ -10,14 +14,13 @@ import type { MessengerThreadFocus } from "./components/GameMessengerSheet";
 import { CreateGameModal } from "./components/CreateGameModal";
 import { FiltersModal, type FiltersState, DEFAULT_FILTERS } from "./components/FiltersModal";
 import { useGeolocation } from "../hooks/useGeolocation";
-import { useGamesNearby } from "../hooks/useGamesNearby";
+import { useNearbyMapQueries } from "../hooks/useNearbyMapQueries";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { useUnifiedSearch } from "../hooks/useUnifiedSearch";
 import { SEARCH_DEBOUNCE_MS } from "../lib/searchConstants";
 import type { ForwardGeocodeFeature } from "../lib/geocoding";
 import { gamesMatchingSport, closestGame } from "../lib/sportSearch";
 import type { ProfileSearchRow } from "../lib/supabase";
-import { useProfilesNearby } from "../hooks/useProfilesNearby";
 import { useMyProfile } from "../hooks/useMyProfile";
 import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
@@ -55,20 +58,24 @@ export default function App() {
       ? userCoords.lng
       : mapSearchLocation?.lng ?? userCoords?.lng ?? null;
 
-  const { games, loading: gamesLoading, refetch: refetchGames, error: gamesError } = useGamesNearby(
-    gamesFetchLat,
-    gamesFetchLng,
-    gamesRadiusKm
-  );
   const [appliedFilters, setAppliedFilters] = useState<FiltersState>(DEFAULT_FILTERS);
   const [filtersDraft, setFiltersDraft] = useState<FiltersState>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const { profiles: nearbyProfiles, loading: profilesLoading } = useProfilesNearby(
-    userCoords?.lat ?? null,
-    userCoords?.lng ?? null,
-    appliedFilters.athletesRadiusKm
-  );
+  const {
+    games,
+    profiles: nearbyProfiles,
+    loading: nearbyLoading,
+    refetch: refetchGames,
+    gamesError,
+  } = useNearbyMapQueries({
+    gamesLat: gamesFetchLat,
+    gamesLng: gamesFetchLng,
+    gamesRadiusKm,
+    profilesLat: userCoords?.lat ?? null,
+    profilesLng: userCoords?.lng ?? null,
+    athletesRadiusKm: appliedFilters.athletesRadiusKm,
+  });
   const [venuesFetchLoading, setVenuesFetchLoading] = useState(false);
   const [filterApplySync, setFilterApplySync] = useState(false);
   const filterApplyStartedAtRef = useRef<number | null>(null);
@@ -80,7 +87,7 @@ export default function App() {
   /** Keep "Applying filters" visible briefly so fast API/venue updates still show feedback (React may batch loading toggles). */
   useEffect(() => {
     if (!filterApplySync) return;
-    const idle = !gamesLoading && !profilesLoading && !venuesFetchLoading;
+    const idle = !nearbyLoading && !venuesFetchLoading;
     if (!idle) return;
 
     const minMs = 550;
@@ -96,7 +103,7 @@ export default function App() {
       return () => window.clearTimeout(id);
     }
     finish();
-  }, [filterApplySync, gamesLoading, profilesLoading, venuesFetchLoading]);
+  }, [filterApplySync, nearbyLoading, venuesFetchLoading]);
 
   const showMapLoadingBanner = venuesFetchLoading || filterApplySync;
 
@@ -108,14 +115,11 @@ export default function App() {
     if (venuesFetchLoading) {
       lines.push("Loading sports venues from OpenStreetMap (radius / area)…");
     }
-    if (filterApplySync && gamesLoading) {
-      lines.push("Fetching nearby games for your games search radius…");
-    }
-    if (filterApplySync && profilesLoading) {
-      lines.push("Loading athletes for your athletes radius…");
+    if (filterApplySync && nearbyLoading) {
+      lines.push("Fetching nearby games and athletes…");
     }
     return lines;
-  }, [venuesFetchLoading, filterApplySync, gamesLoading, profilesLoading]);
+  }, [venuesFetchLoading, filterApplySync, nearbyLoading]);
   const { avatarId, avatarUrl, athleteProfile } = useMyProfile();
   const favoriteSport = athleteProfile.favoriteSport?.trim() ?? null;
   const { stats } = useUserStats();
@@ -138,6 +142,10 @@ export default function App() {
   const [messengerFocus, setMessengerFocus] = useState<MessengerThreadFocus | null>(null);
   const [liveNowOpen, setLiveNowOpen] = useState(false);
   const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
+
+  useEffect(() => {
+    prefetchMapboxGl();
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
@@ -345,15 +353,15 @@ export default function App() {
 
   useEffect(() => {
     if (!sportFocus || !userCoords) return;
-    if (gamesLoading) return;
+    if (nearbyLoading) return;
     const matching = gamesMatchingSport(games, sportFocus.sport);
     if (matching.length === 0 && gamesRadiusKm < EXTENDED_GAMES_RADIUS_KM) {
       setGamesRadiusKm(EXTENDED_GAMES_RADIUS_KM);
     }
-  }, [sportFocus, games, gamesLoading, gamesRadiusKm, userCoords]);
+  }, [sportFocus, games, nearbyLoading, gamesRadiusKm, userCoords]);
 
   useEffect(() => {
-    if (!sportFocus || !userCoords || gamesLoading) return;
+    if (!sportFocus || !userCoords || nearbyLoading) return;
     const matching = gamesMatchingSport(games, sportFocus.sport);
     if (matching.length === 0) {
       if (
@@ -394,7 +402,7 @@ export default function App() {
       coordinates.push([userCoords.lng, userCoords.lat]);
       setMapCameraRequest({ id, kind: "fitBounds", coordinates });
     }
-  }, [sportFocus, games, gamesLoading, gamesRadiusKm, userCoords]);
+  }, [sportFocus, games, nearbyLoading, gamesRadiusKm, userCoords]);
 
   const displayGames = useMemo(() => {
     let list = games;
@@ -481,57 +489,66 @@ export default function App() {
 
   return (
     <div className="relative w-full h-screen bg-[#0A0F1C] overflow-hidden font-sans touch-none selection:bg-emerald-500/30">
-      {/* Real map (Mapbox) or placeholder */}
-      <MapboxMap
-        userCoords={userCoords}
-        games={displayGames}
-        mapCameraRequest={mapCameraRequest}
-        nearbyProfiles={nearbyProfiles}
-        currentUserId={currentUserId}
-        selectedGameId={selectedGame?.id ?? null}
-        onSelectGame={setSelectedGame}
-        selectedVenue={selectedVenue}
-        onSelectVenue={setSelectedVenue}
-        venuesCenter={mapSearchLocation ?? userCoords}
-        venueSearchRadiusKm={appliedFilters.venueRadiusKm}
-        venueSportsFilter={appliedFilters.sports}
-        onVenuesFetchLoadingChange={handleVenuesFetchLoading}
-        gamePopupRequest={gamePopupRequest}
-        onJoinGame={handleJoin}
-        onOpenMessagesForGame={handleOpenChatForGame}
-        onLeaveGame={handleLeave}
-        onDeleteHostedGame={handleDeleteHostedGame}
-        joinedGameIds={joinedGameIds}
-        hostGameIds={hostGameIds}
-        onMapDoubleClick={(lat, lng, viewportPoint) => {
-          setCreateGameCoords({ lat, lng });
-          setCreateGameAnchorPoint(viewportPoint ?? null);
-          setCreateGameLocationLabel(null);
-          setCreateGameOpen(true);
-        }}
-        onCreateGameAtVenue={(venue, viewportPoint) => {
-          setCreateGameCoords({ lat: venue.center.lat, lng: venue.center.lng });
-          setCreateGameAnchorPoint(viewportPoint ?? null);
-          const prettyLabel = (s: string | undefined | null) => {
-            const raw = s?.trim();
-            if (!raw) return null;
-            return raw.replace(/_/g, " ").replace(/\s+/g, " ");
-          };
+      {/* Real map (Mapbox) — code-split; mapbox-gl prefetched on mount */}
+      <Suspense
+        fallback={
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0A0F1C] text-slate-400">
+            <Loader2 className="h-8 w-8 animate-spin text-emerald-400" aria-hidden />
+            <p className="text-sm">Loading map…</p>
+          </div>
+        }
+      >
+        <MapboxMap
+          userCoords={userCoords}
+          games={displayGames}
+          mapCameraRequest={mapCameraRequest}
+          nearbyProfiles={nearbyProfiles}
+          currentUserId={currentUserId}
+          selectedGameId={selectedGame?.id ?? null}
+          onSelectGame={setSelectedGame}
+          selectedVenue={selectedVenue}
+          onSelectVenue={setSelectedVenue}
+          venuesCenter={mapSearchLocation ?? userCoords}
+          venueSearchRadiusKm={appliedFilters.venueRadiusKm}
+          venueSportsFilter={appliedFilters.sports}
+          onVenuesFetchLoadingChange={handleVenuesFetchLoading}
+          gamePopupRequest={gamePopupRequest}
+          onJoinGame={handleJoin}
+          onOpenMessagesForGame={handleOpenChatForGame}
+          onLeaveGame={handleLeave}
+          onDeleteHostedGame={handleDeleteHostedGame}
+          joinedGameIds={joinedGameIds}
+          hostGameIds={hostGameIds}
+          onMapDoubleClick={(lat, lng, viewportPoint) => {
+            setCreateGameCoords({ lat, lng });
+            setCreateGameAnchorPoint(viewportPoint ?? null);
+            setCreateGameLocationLabel(null);
+            setCreateGameOpen(true);
+          }}
+          onCreateGameAtVenue={(venue, viewportPoint) => {
+            setCreateGameCoords({ lat: venue.center.lat, lng: venue.center.lng });
+            setCreateGameAnchorPoint(viewportPoint ?? null);
+            const prettyLabel = (s: string | undefined | null) => {
+              const raw = s?.trim();
+              if (!raw) return null;
+              return raw.replace(/_/g, " ").replace(/\s+/g, " ");
+            };
 
-          const name = prettyLabel(venue.name);
-          const sport = prettyLabel(venue.sport);
-          const leisure = prettyLabel(venue.leisure);
-          setCreateGameLocationLabel(
-            name ??
-              (sport && leisure ? `${sport} ${leisure}` : sport ?? leisure ?? "Sports venue")
-          );
-          setCreateGameOpen(true);
-        }}
-        centerOnUserTrigger={centerOnUserTrigger}
-        enable3D={true}
-        userAvatarUrl={null}
-        avatarGlbUrl={avatarGlbUrl}
-      />
+            const name = prettyLabel(venue.name);
+            const sport = prettyLabel(venue.sport);
+            const leisure = prettyLabel(venue.leisure);
+            setCreateGameLocationLabel(
+              name ??
+                (sport && leisure ? `${sport} ${leisure}` : sport ?? leisure ?? "Sports venue")
+            );
+            setCreateGameOpen(true);
+          }}
+          centerOnUserTrigger={centerOnUserTrigger}
+          enable3D={true}
+          userAvatarUrl={null}
+          avatarGlbUrl={avatarGlbUrl}
+        />
+      </Suspense>
 
       {showMapLoadingBanner && (
         <div

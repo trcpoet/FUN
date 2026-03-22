@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
+const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
 
 if (!url || !anonKey) {
   console.warn(
@@ -9,6 +9,7 @@ if (!url || !anonKey) {
   );
 }
 
+/** Trailing spaces / newlines in .env break JWT validation → REST 401. */
 export const supabase = url && anonKey ? createClient(url, anonKey) : null;
 
 export type GameRow = {

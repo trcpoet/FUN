@@ -1,8 +1,44 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { GameRow } from "../../lib/supabase";
 import { cn } from "./MapCanvas";
 import { format } from "date-fns";
-import { MapPin, Clock, Trash2 } from "lucide-react";
+import { MapPin, Clock, Trash2, Navigation } from "lucide-react";
+
+function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const s1 = Math.sin(dLat / 2);
+  const s2 = Math.sin(dLng / 2);
+  const h =
+    s1 * s1 +
+    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * s2 * s2;
+  return R * (2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)));
+}
+
+/** Rough urban driving ETA (no routing API). */
+function estimateDriveMinutes(km: number): number {
+  const avgKmh = 32;
+  return Math.max(1, Math.round((km / avgKmh) * 60));
+}
+
+function formatDistanceShort(km: number): string {
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return `${km.toFixed(km < 10 ? 1 : 0)} km`;
+}
+
+function googleMapsDirectionsUrl(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number }
+): string {
+  const o = `${from.lat},${from.lng}`;
+  const d = `${to.lat},${to.lng}`;
+  return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=driving`;
+}
+
+function googleMapsPlaceUrl(to: { lat: number; lng: number }): string {
+  return `https://www.google.com/maps/search/?api=1&query=${to.lat},${to.lng}`;
+}
 
 function formatCoords(lat: number, lng: number): string {
   const latStr = Math.abs(lat).toFixed(2) + (lat >= 0 ? "°N" : "°S");
@@ -22,6 +58,8 @@ type GameEventPopupProps = {
   isHost?: boolean;
   /** Host-only: delete game for everyone. Return true when the row was removed. */
   onDeleteHostedGame?: (game: GameRow) => Promise<boolean>;
+  /** Viewer location for distance / directions (browser geolocation). */
+  viewerCoords?: { lat: number; lng: number } | null;
 };
 
 export function GameEventPopup({
@@ -33,10 +71,35 @@ export function GameEventPopup({
   joined,
   isHost,
   onDeleteHostedGame,
+  viewerCoords = null,
 }: GameEventPopupProps) {
   const [deleting, setDeleting] = useState(false);
   const hasCoords = typeof game.lat === "number" && typeof game.lng === "number";
   const isFull = game.spots_remaining != null && game.spots_remaining <= 0;
+
+  const routeMeta = useMemo(() => {
+    if (!hasCoords) return null;
+    const dest = { lat: game.lat, lng: game.lng };
+    if (
+      viewerCoords &&
+      Number.isFinite(viewerCoords.lat) &&
+      Number.isFinite(viewerCoords.lng)
+    ) {
+      const km = haversineKm(viewerCoords.lat, viewerCoords.lng, dest.lat, dest.lng);
+      return {
+        km,
+        minutes: estimateDriveMinutes(km),
+        href: googleMapsDirectionsUrl(viewerCoords, dest),
+        hasOrigin: true as const,
+      };
+    }
+    return {
+      km: null as number | null,
+      minutes: null as number | null,
+      href: googleMapsPlaceUrl(dest),
+      hasOrigin: false as const,
+    };
+  }, [hasCoords, game.lat, game.lng, viewerCoords]);
 
   return (
     <div
@@ -46,7 +109,8 @@ export function GameEventPopup({
       }}
     >
       <div className="p-3">
-        <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
           <p className="font-semibold text-white truncate">
             {game.title || "Pickup game"}
           </p>
@@ -80,6 +144,40 @@ export function GameEventPopup({
               </span>
             )}
           </div>
+          </div>
+          {routeMeta && (
+            <a
+              href={routeMeta.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                "shrink-0 flex flex-col items-end gap-0.5 rounded-lg border border-slate-600/80 bg-slate-800/90 px-2 py-1.5 text-right transition-colors",
+                "hover:border-emerald-500/50 hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+              )}
+              aria-label={
+                routeMeta.hasOrigin
+                  ? `Open Google Maps directions, ${formatDistanceShort(routeMeta.km!)} about ${routeMeta.minutes} minutes drive estimated`
+                  : "Open this location in Google Maps"
+              }
+            >
+              <Navigation className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+              {routeMeta.hasOrigin && routeMeta.km != null ? (
+                <>
+                  <span className="text-[11px] font-semibold tabular-nums text-white leading-tight">
+                    {formatDistanceShort(routeMeta.km)}
+                  </span>
+                  <span className="text-[10px] text-slate-400 leading-tight">
+                    ~{routeMeta.minutes} min drive
+                  </span>
+                  <span className="text-[9px] text-slate-500 leading-tight">est.</span>
+                </>
+              ) : (
+                <span className="text-[10px] font-medium text-slate-300 leading-tight max-w-[4.5rem]">
+                  Maps
+                </span>
+              )}
+            </a>
+          )}
         </div>
         <div className="flex gap-2 mt-3">
           {onJoin && !joined && (

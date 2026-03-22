@@ -68,6 +68,8 @@ export function CreateGameModal({
   const [dateTime, setDateTime] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [playerPrefsOpen, setPlayerPrefsOpen] = useState(false);
+  const [req, setReq] = useState<GameRequirementsPayload>(emptyGameRequirements());
 
   useEffect(() => {
     if (open) {
@@ -78,6 +80,8 @@ export function CreateGameModal({
       setSpots(4);
       setDateTime("");
       setError(null);
+      setPlayerPrefsOpen(false);
+      setReq(emptyGameRequirements());
     }
   }, [open]);
 

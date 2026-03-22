@@ -16,6 +16,7 @@ import {
   shouldShowVenueFootprints,
 } from "../map/mapVisibility";
 import * as MapCfg from "../map/mapConfig";
+import { loadMapboxGl } from "../lib/mapboxCached";
 import { registerGameSportImages } from "../map/registerGameSportImages";
 import { getGameMapboxIconId } from "../map/gameSportIcons";
 import { Avatar3DOverlay } from "./Avatar3DOverlay";
@@ -31,9 +32,28 @@ const L_GAME_CLUSTER_LABEL = "fun-games-cluster-label";
 const L_GAME_ICON = "fun-games-sport-icon";
 const L_GAME_COUNT = "fun-games-roster";
 const L_VENUE_DOTS = "venue-dots-core";
+/** Dark bluish-purple halos (outer + inner gradient) — animated via rAF */
+const L_VENUE_DOTS_PULSE = "venue-dots-pulse";
+const L_VENUE_DOTS_PULSE_INNER = "venue-dots-pulse-inner";
 const SRC_VENUE_DOTS = "venue-dots";
 
+function lerpPulseRgb(
+  a: { readonly r: number; readonly g: number; readonly b: number },
+  b: { readonly r: number; readonly g: number; readonly b: number },
+  t: number
+): { r: number; g: number; b: number } {
+  return {
+    r: Math.round(a.r + (b.r - a.r) * t),
+    g: Math.round(a.g + (b.g - a.g) * t),
+    b: Math.round(a.b + (b.b - a.b) * t),
+  };
+}
+
 const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined)?.trim() || undefined;
+/** Studio style URL; override with `VITE_MAPBOX_STYLE_URL` in .env if you publish a new style. */
+const MAP_STYLE_URL =
+  (import.meta.env.VITE_MAPBOX_STYLE_URL as string | undefined)?.trim() ||
+  "mapbox://styles/trcpoet/cmn1l2br1003e01s52y4q9uzt";
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?w=100&h=100&fit=crop";
 /** Default Ready Player Me GLB for 3D avatar when no profile avatar_glb_url is set. */
 const DEFAULT_AVATAR_GLB =
@@ -177,6 +197,7 @@ export function MapboxMap(props: MapboxMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("mapbox-gl").Map | null>(null);
   const playerMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
+  const userMarker2dRef = useRef<import("mapbox-gl").Marker | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [eventPopup, setEventPopup] = useState<{ game: GameRow; point: { x: number; y: number } } | null>(null);
@@ -202,6 +223,12 @@ export function MapboxMap(props: MapboxMapProps) {
   onSelectGameRef.current = onSelectGame;
   onJoinGameRef.current = onJoinGame;
   selectedGameIdRef.current = selectedGameId;
+  const selectedVenuePulseRef = useRef(selectedVenue);
+  selectedVenuePulseRef.current = selectedVenue;
+  /** Phase-integrated pulse + smoothed hz (idle ↔ slow when venue selected) */
+  const venuePulsePhaseRef = useRef(0);
+  const venuePulseHzRef = useRef(MapCfg.VENUE_DOT_PULSE_HZ_IDLE);
+  const venuePulseLastTRef = useRef<number | null>(null);
 
   // Small tap animation for the game sport icon when opening the join modal.
   const bumpGameIcon = (gameId: string) => {
@@ -224,7 +251,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
     let cancelled = false;
 
-    import("mapbox-gl").then((mapboxgl) => {
+    loadMapboxGl().then((mapboxgl) => {
       if (cancelled) return;
       const container = containerRef.current;
       if (!container) return;
@@ -241,7 +268,7 @@ export function MapboxMap(props: MapboxMapProps) {
       try {
         map = new mapboxgl.default.Map({
           container,
-          style: "mapbox://styles/mapbox/dark-v11",
+          style: MAP_STYLE_URL,
           center: userCoords ? [userCoords.lng, userCoords.lat] : [-98, 40],
           zoom: 15,
           pitch: enable3D ? 50 : 0,
@@ -338,7 +365,7 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map || !mapLoaded || !mapCameraRequest) return;
     const req = mapCameraRequest;
 
-    import("mapbox-gl").then((mapboxgl) => {
+    loadMapboxGl().then((mapboxgl) => {
       const m = mapRef.current;
       if (!m) return;
 
@@ -483,7 +510,7 @@ export function MapboxMap(props: MapboxMapProps) {
       ]);
     }
 
-    // Subtle venue center dot emphasis (no extra pulse layers / yellow beacons)
+    // Venue center dot + footprint emphasis (pulse halo is a separate layer)
     if (map.getLayer(L_VENUE_DOTS)) {
       const sel = selectedVenue?.id ?? "";
       map.setPaintProperty(L_VENUE_DOTS, "circle-radius", [
@@ -507,6 +534,117 @@ export function MapboxMap(props: MapboxMapProps) {
     }
   }, [mapLoaded, selectedVenue]);
 
+  /** Dark bluish-purple halos: constant pulse; hz eases down when a venue is selected. */
+  useEffect(() => {
+    if (!mapLoaded) return;
+    let cancelled = false;
+    let rafId = 0;
+    venuePulseLastTRef.current = null;
+
+    const tick = () => {
+      if (cancelled) return;
+      const map = mapRef.current;
+      const now = performance.now() / 1000;
+      if (venuePulseLastTRef.current == null) venuePulseLastTRef.current = now;
+      const dt = Math.min(0.05, Math.max(0, now - venuePulseLastTRef.current));
+      venuePulseLastTRef.current = now;
+
+      const targetHz = selectedVenuePulseRef.current
+        ? MapCfg.VENUE_DOT_PULSE_HZ_SELECTED
+        : MapCfg.VENUE_DOT_PULSE_HZ_IDLE;
+      const sk = MapCfg.VENUE_DOT_PULSE_HZ_SMOOTHING;
+      venuePulseHzRef.current += (targetHz - venuePulseHzRef.current) * Math.min(1, dt * sk);
+
+      venuePulsePhaseRef.current += dt * venuePulseHzRef.current * Math.PI * 2;
+      const ph = venuePulsePhaseRef.current;
+
+      /** Primary grow/shrink: full sine sweep 0→1 (halos expand and contract each cycle) */
+      const sizeOuter = (Math.sin(ph) + 1) * 0.5;
+      const sizeInner =
+        (Math.sin(ph + MapCfg.VENUE_PULSE_INNER_PHASE_LAG_RAD) + 1) * 0.5;
+
+      const gradOuter = (Math.sin(ph) + 1) * 0.5;
+      const gradInner = (Math.sin(ph + Math.PI / 2) + 1) * 0.5;
+      const rgbOuter = lerpPulseRgb(
+        MapCfg.VENUE_PULSE_OUTER_RGB_A,
+        MapCfg.VENUE_PULSE_OUTER_RGB_B,
+        gradOuter
+      );
+      const rgbInner = lerpPulseRgb(
+        MapCfg.VENUE_PULSE_INNER_RGB_A,
+        MapCfg.VENUE_PULSE_INNER_RGB_B,
+        gradInner
+      );
+
+      const rOuter =
+        MapCfg.VENUE_DOT_PULSE_RADIUS_MIN_PX +
+        sizeOuter * (MapCfg.VENUE_DOT_PULSE_RADIUS_MAX_PX - MapCfg.VENUE_DOT_PULSE_RADIUS_MIN_PX);
+      const opOuter =
+        MapCfg.VENUE_DOT_PULSE_OPACITY_MIN +
+        sizeOuter * (MapCfg.VENUE_DOT_PULSE_OPACITY_MAX - MapCfg.VENUE_DOT_PULSE_OPACITY_MIN);
+      const blOuter =
+        MapCfg.VENUE_DOT_PULSE_BLUR_MIN +
+        sizeOuter * (MapCfg.VENUE_DOT_PULSE_BLUR_MAX - MapCfg.VENUE_DOT_PULSE_BLUR_MIN);
+
+      const rInner =
+        MapCfg.VENUE_DOT_PULSE_INNER_RADIUS_MIN_PX +
+        sizeInner * (MapCfg.VENUE_DOT_PULSE_INNER_RADIUS_MAX_PX - MapCfg.VENUE_DOT_PULSE_INNER_RADIUS_MIN_PX);
+      const opInner =
+        MapCfg.VENUE_DOT_PULSE_OPACITY_MIN +
+        sizeInner * (MapCfg.VENUE_DOT_PULSE_INNER_OPACITY_MAX - MapCfg.VENUE_DOT_PULSE_OPACITY_MIN);
+      const blInner =
+        MapCfg.VENUE_DOT_PULSE_INNER_BLUR_MIN +
+        sizeInner * (MapCfg.VENUE_DOT_PULSE_INNER_BLUR_MAX - MapCfg.VENUE_DOT_PULSE_INNER_BLUR_MIN);
+
+      const colOuter = `rgb(${rgbOuter.r},${rgbOuter.g},${rgbOuter.b})`;
+      const colInner = `rgb(${rgbInner.r},${rgbInner.g},${rgbInner.b})`;
+
+      const strokeW =
+        MapCfg.VENUE_DOT_PULSE_STROKE_WIDTH_MIN_PX +
+        sizeOuter *
+          (MapCfg.VENUE_DOT_PULSE_STROKE_WIDTH_MAX_PX - MapCfg.VENUE_DOT_PULSE_STROKE_WIDTH_MIN_PX);
+      const rgbStroke = lerpPulseRgb(
+        MapCfg.VENUE_PULSE_STROKE_RGB_DARK,
+        MapCfg.VENUE_PULSE_STROKE_RGB_LIGHT,
+        sizeOuter
+      );
+      const colStroke = `rgb(${rgbStroke.r},${rgbStroke.g},${rgbStroke.b})`;
+
+      if (map?.getLayer(L_VENUE_DOTS_PULSE)) {
+        const vis = map.getLayoutProperty(L_VENUE_DOTS_PULSE, "visibility");
+        if (vis !== "none") {
+          try {
+            map.setPaintProperty(L_VENUE_DOTS_PULSE, "circle-radius", rOuter);
+            map.setPaintProperty(L_VENUE_DOTS_PULSE, "circle-opacity", opOuter);
+            map.setPaintProperty(L_VENUE_DOTS_PULSE, "circle-blur", blOuter);
+            map.setPaintProperty(L_VENUE_DOTS_PULSE, "circle-color", colOuter);
+            map.setPaintProperty(L_VENUE_DOTS_PULSE, "circle-stroke-width", strokeW);
+            map.setPaintProperty(L_VENUE_DOTS_PULSE, "circle-stroke-color", colStroke);
+          } catch (_) {}
+        }
+      }
+      if (map?.getLayer(L_VENUE_DOTS_PULSE_INNER)) {
+        const vis = map.getLayoutProperty(L_VENUE_DOTS_PULSE_INNER, "visibility");
+        if (vis !== "none") {
+          try {
+            map.setPaintProperty(L_VENUE_DOTS_PULSE_INNER, "circle-radius", rInner);
+            map.setPaintProperty(L_VENUE_DOTS_PULSE_INNER, "circle-opacity", opInner);
+            map.setPaintProperty(L_VENUE_DOTS_PULSE_INNER, "circle-blur", blInner);
+            map.setPaintProperty(L_VENUE_DOTS_PULSE_INNER, "circle-color", colInner);
+          } catch (_) {}
+        }
+      }
+
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+    };
+  }, [mapLoaded]);
+
   /** Geo-anchored games: clustered GL source + symbol/circle layers (no DOM markers). */
   const applyMapLayerVisibility = useCallback(() => {
     const map = mapRef.current;
@@ -528,6 +666,12 @@ export function MapboxMap(props: MapboxMapProps) {
     }
     if (map.getLayer("venue-areas-outline")) {
       map.setLayoutProperty("venue-areas-outline", "visibility", showVenueFp ? "visible" : "none");
+    }
+    if (map.getLayer(L_VENUE_DOTS_PULSE)) {
+      map.setLayoutProperty(L_VENUE_DOTS_PULSE, "visibility", showVenueDot ? "visible" : "none");
+    }
+    if (map.getLayer(L_VENUE_DOTS_PULSE_INNER)) {
+      map.setLayoutProperty(L_VENUE_DOTS_PULSE_INNER, "visibility", showVenueDot ? "visible" : "none");
     }
     if (map.getLayer(L_VENUE_DOTS)) {
       map.setLayoutProperty(L_VENUE_DOTS, "visibility", showVenueDot ? "visible" : "none");
@@ -840,6 +984,8 @@ export function MapboxMap(props: MapboxMapProps) {
     const map = mapRef.current;
     if (!map || !mapLoaded || !userCoords) return;
     if (use3DOverlay) {
+      userMarker2dRef.current?.remove();
+      userMarker2dRef.current = null;
       const wrap = document.querySelector(".user-marker-wrap");
       if (wrap) wrap.closest(".mapboxgl-marker")?.remove();
       return;
@@ -862,12 +1008,21 @@ export function MapboxMap(props: MapboxMapProps) {
     avatar.appendChild(img);
     wrap.appendChild(avatar);
 
-    import("mapbox-gl").then((mapboxgl) => {
-      const marker = new mapboxgl.default.Marker({ element: wrap })
+    let cancelled = false;
+    loadMapboxGl().then((mapboxgl) => {
+      if (cancelled) return;
+      const m = mapRef.current;
+      if (!m || use3DOverlay) return;
+      userMarker2dRef.current?.remove();
+      userMarker2dRef.current = new mapboxgl.default.Marker({ element: wrap })
         .setLngLat([userCoords.lng, userCoords.lat])
-        .addTo(map);
-      return () => marker.remove();
+        .addTo(m);
     });
+    return () => {
+      cancelled = true;
+      userMarker2dRef.current?.remove();
+      userMarker2dRef.current = null;
+    };
   }, [mapLoaded, userCoords, userAvatarUrl, use3DOverlay]);
 
   // —— Other players (DOM markers) ———
@@ -882,7 +1037,7 @@ export function MapboxMap(props: MapboxMapProps) {
       ? nearbyProfiles.filter((p) => p.profile_id !== currentUserId)
       : nearbyProfiles;
 
-    import("mapbox-gl").then((mapboxgl) => {
+    loadMapboxGl().then((mapboxgl) => {
       others.forEach((profile) => {
         const el = document.createElement("div");
         el.className = "player-marker";
@@ -937,9 +1092,7 @@ export function MapboxMap(props: MapboxMapProps) {
         return;
       }
 
-      import("mapbox-gl")
-        .then(() => {
-        try {
+      try {
         type Cluster = {
           lng: number;
           lat: number;
@@ -1080,13 +1233,47 @@ export function MapboxMap(props: MapboxMapProps) {
 
           mapInstance.addLayer(
             {
+              id: L_VENUE_DOTS_PULSE,
+              type: "circle",
+              source: SRC_VENUE_DOTS,
+              paint: {
+                "circle-radius": MapCfg.VENUE_DOT_PULSE_RADIUS_MIN_PX,
+                "circle-color": `rgb(${MapCfg.VENUE_PULSE_OUTER_RGB_A.r},${MapCfg.VENUE_PULSE_OUTER_RGB_A.g},${MapCfg.VENUE_PULSE_OUTER_RGB_A.b})`,
+                "circle-opacity": MapCfg.VENUE_DOT_PULSE_OPACITY_MIN,
+                "circle-blur": MapCfg.VENUE_DOT_PULSE_BLUR_MIN,
+                "circle-stroke-width": MapCfg.VENUE_DOT_PULSE_STROKE_WIDTH_MIN_PX,
+                "circle-stroke-color": `rgb(${MapCfg.VENUE_PULSE_STROKE_RGB_DARK.r},${MapCfg.VENUE_PULSE_STROKE_RGB_DARK.g},${MapCfg.VENUE_PULSE_STROKE_RGB_DARK.b})`,
+                "circle-pitch-alignment": "map",
+              },
+            },
+            beforeGames
+          );
+
+          mapInstance.addLayer(
+            {
+              id: L_VENUE_DOTS_PULSE_INNER,
+              type: "circle",
+              source: SRC_VENUE_DOTS,
+              paint: {
+                "circle-radius": MapCfg.VENUE_DOT_PULSE_INNER_RADIUS_MIN_PX,
+                "circle-color": `rgb(${MapCfg.VENUE_PULSE_INNER_RGB_A.r},${MapCfg.VENUE_PULSE_INNER_RGB_A.g},${MapCfg.VENUE_PULSE_INNER_RGB_A.b})`,
+                "circle-opacity": MapCfg.VENUE_DOT_PULSE_OPACITY_MIN,
+                "circle-blur": MapCfg.VENUE_DOT_PULSE_INNER_BLUR_MIN,
+                "circle-pitch-alignment": "map",
+              },
+            },
+            beforeGames
+          );
+
+          mapInstance.addLayer(
+            {
               id: L_VENUE_DOTS,
               type: "circle",
               source: SRC_VENUE_DOTS,
               paint: {
                 "circle-radius": MapCfg.VENUE_DOT_RADIUS_PX,
                 "circle-color": MapCfg.VENUE_DOT_COLOR,
-                  "circle-opacity": 0.78,
+                "circle-opacity": 0.78,
                 "circle-stroke-width": MapCfg.VENUE_DOT_STROKE_WIDTH,
                 "circle-stroke-color": MapCfg.VENUE_DOT_STROKE,
               },
@@ -1141,8 +1328,10 @@ export function MapboxMap(props: MapboxMapProps) {
 
           mapInstance.on("click", fillLayerId, onFillClick);
 
-          mapInstance.on("click", L_VENUE_DOTS, (e) => {
-            // If the click is on top of a game icon/cluster, ignore venue interactions.
+          const onVenueDotClick = (e: {
+            features?: import("mapbox-gl").MapboxGeoJSONFeature[];
+            point: { x: number; y: number };
+          }) => {
             const hitGames = mapInstance.queryRenderedFeatures(
               e.point as unknown as import("mapbox-gl").PointLike,
               {
@@ -1155,9 +1344,13 @@ export function MapboxMap(props: MapboxMapProps) {
             if (!id) return;
             const cl = clusters.find((c) => c.properties.id === id);
             if (cl) selectVenueFromCluster(cl, e.point);
-          });
+          };
 
-          [fillLayerId, L_VENUE_DOTS].forEach((lid) => {
+          mapInstance.on("click", L_VENUE_DOTS, onVenueDotClick);
+          mapInstance.on("click", L_VENUE_DOTS_PULSE, onVenueDotClick);
+          mapInstance.on("click", L_VENUE_DOTS_PULSE_INNER, onVenueDotClick);
+
+          [fillLayerId, L_VENUE_DOTS_PULSE, L_VENUE_DOTS_PULSE_INNER, L_VENUE_DOTS].forEach((lid) => {
             mapInstance.on("mouseenter", lid, () => {
               mapInstance.getCanvas().style.cursor = "pointer";
             });
@@ -1168,39 +1361,58 @@ export function MapboxMap(props: MapboxMapProps) {
         }
 
         applyMapLayerVisibility();
-        } finally {
-          onDone?.();
-        }
-      })
-        .catch(() => {
-          onDone?.();
-        });
+      } catch (_) {
+        /* ignore */
+      } finally {
+        onDone?.();
+      }
     };
 
     let cancelled = false;
-    onVenuesFetchLoadingChangeRef.current?.(true);
-    const bbox = bboxFromCenterRadius(venuesFetchCenter.lat, venuesFetchCenter.lng, venueSearchRadiusKm);
-    fetchSportsVenuesFromOverpass(bbox).then((geojson) => {
-      if (cancelled) return;
-      addVenueMarkers(geojson, () => {
+    let venueKickoffStarted = false;
+    let idleFallbackId: number | undefined;
+
+    const kickoffVenueFetch = () => {
+      if (venueKickoffStarted || cancelled) return;
+      venueKickoffStarted = true;
+      if (idleFallbackId !== undefined) {
+        clearTimeout(idleFallbackId);
+        idleFallbackId = undefined;
+      }
+      map.off("idle", kickoffVenueFetch);
+
+      onVenuesFetchLoadingChangeRef.current?.(true);
+      const bbox = bboxFromCenterRadius(venuesFetchCenter.lat, venuesFetchCenter.lng, venueSearchRadiusKm);
+      fetchSportsVenuesFromOverpass(bbox).then((geojson) => {
         if (cancelled) return;
-        // Let React paint loading=true before clearing (cached / fast responses).
-        const done = () => onVenuesFetchLoadingChangeRef.current?.(false);
-        if (typeof requestAnimationFrame !== "undefined") {
-          requestAnimationFrame(() => requestAnimationFrame(done));
-        } else {
-          window.setTimeout(done, 0);
-        }
+        addVenueMarkers(geojson, () => {
+          if (cancelled) return;
+          // Let React paint loading=true before clearing (cached / fast responses).
+          const done = () => onVenuesFetchLoadingChangeRef.current?.(false);
+          if (typeof requestAnimationFrame !== "undefined") {
+            requestAnimationFrame(() => requestAnimationFrame(done));
+          } else {
+            window.setTimeout(done, 0);
+          }
+        });
       });
-    });
+    };
+
+    // Defer Overpass until tiles are idle (or 2.5s) so the base map can render first.
+    map.on("idle", kickoffVenueFetch);
+    idleFallbackId = window.setTimeout(kickoffVenueFetch, 2500);
 
     return () => {
       cancelled = true;
+      if (idleFallbackId !== undefined) clearTimeout(idleFallbackId);
+      map.off("idle", kickoffVenueFetch);
       onVenuesFetchLoadingChangeRef.current?.(false);
       const m = mapRef.current;
       if (!m) return;
       try {
         if (m.getLayer(L_VENUE_DOTS)) m.removeLayer(L_VENUE_DOTS);
+        if (m.getLayer(L_VENUE_DOTS_PULSE_INNER)) m.removeLayer(L_VENUE_DOTS_PULSE_INNER);
+        if (m.getLayer(L_VENUE_DOTS_PULSE)) m.removeLayer(L_VENUE_DOTS_PULSE);
         if (m.getLayer("venue-areas-outline")) m.removeLayer("venue-areas-outline");
         if (m.getLayer("venue-areas-fill")) m.removeLayer("venue-areas-fill");
         if (m.getSource(SRC_VENUE_DOTS)) m.removeSource(SRC_VENUE_DOTS);
@@ -1266,6 +1478,7 @@ export function MapboxMap(props: MapboxMapProps) {
           >
             <GameEventPopup
               game={eventPopup.game}
+              viewerCoords={userCoords}
               onClose={() => setEventPopup(null)}
               onJoin={onJoinGame}
               onLeave={onLeaveGame}
