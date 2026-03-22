@@ -51,14 +51,20 @@ export function expectedOsmTokensForDisplaySports(displaySports: string[]): Set<
 /**
  * When `displaySports` is empty → show all venues.
  * Otherwise keep a venue if any OSM token overlaps expected tags for selected sports.
+ * `leisure=sports_centre` often has no `sport=*` in OSM; we still show those when filters are on.
  */
 export function venueMatchesSelectedSports(
   osmSport: string | undefined | null,
   displaySports: string[],
+  leisure?: string | null
 ): boolean {
   if (!displaySports.length) return true;
   const tokens = osmSportTokens(osmSport);
-  if (tokens.length === 0) return false;
+  if (tokens.length === 0) {
+    const l = (leisure ?? "").trim().toLowerCase();
+    if (l === "sports_centre") return true;
+    return false;
+  }
   const expected = expectedOsmTokensForDisplaySports(displaySports);
   return tokens.some((t) => expected.has(t));
 }

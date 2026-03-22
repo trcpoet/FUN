@@ -6,7 +6,8 @@
   "scripts": {
     "build": "npx vite build",
     "dev": "vite",
-    "start": "vite"
+    "start": "vite",
+    "import-osm": "node scripts/import-osm-venues.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

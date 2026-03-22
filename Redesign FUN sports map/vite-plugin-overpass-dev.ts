@@ -39,22 +39,33 @@ export function overpassDevProxy(): Plugin {
             return;
           }
           const body = await readBody(req);
-          for (const url of UPSTREAMS) {
-            try {
-              const r = await fetch(url, {
-                method: "POST",
-                body,
-                headers: { "Content-Type": "text/plain" },
-              });
-              if (r.status === 429 || !r.ok) continue;
-              const text = await r.text();
-              res.setHeader("Content-Type", "application/json; charset=utf-8");
-              res.statusCode = 200;
-              res.end(text);
-              return;
-            } catch {
-              continue;
-            }
+          const controllers = UPSTREAMS.map(() => new AbortController());
+          try {
+            const text = await Promise.any(
+              UPSTREAMS.map((url, i) =>
+                fetch(url, {
+                  method: "POST",
+                  body,
+                  headers: { "Content-Type": "text/plain" },
+                  signal: controllers[i].signal,
+                }).then(async (r) => {
+                  if (r.status === 429 || !r.ok) {
+                    throw new Error(`upstream ${r.status}`);
+                  }
+                  const t = await r.text();
+                  controllers.forEach((c, j) => {
+                    if (j !== i) c.abort();
+                  });
+                  return t;
+                })
+              )
+            );
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.statusCode = 200;
+            res.end(text);
+            return;
+          } catch {
+            /* fall through */
           }
           res.setHeader("Content-Type", "application/json; charset=utf-8");
           res.statusCode = 200;

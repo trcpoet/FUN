@@ -6,6 +6,7 @@
 
 import type { Feature, FeatureCollection, Point } from "geojson";
 import type { GameRow } from "../../lib/supabase";
+import { colocatedGroupId, splitColocatedGames } from "../lib/colocateGames";
 import { getGameMapboxIconId, getSportIconEmoji, resolveSportMapboxSuffix } from "../map/gameSportIcons";
 
 /** Game status for glow color: live => red, soon => orange, scheduled => green */
@@ -23,6 +24,8 @@ export type GameFeatureProperties = {
   sport_emoji: string; // UI / parity with map glyph
   visibility?: "public" | "private";
   title?: string;
+  /** Same-spot games: hidden on symbol layer; shown as HTML cluster pin instead. */
+  marker_kind?: "colocated";
 };
 
 export type GameFeature = Feature<Point, GameFeatureProperties>;
@@ -72,8 +75,39 @@ export function gameToFeature(game: GameRow, _selectedGameId: string | null): Ga
   };
 }
 
+function colocatedGroupToFeature(games: GameRow[]): GameFeature {
+  const g0 = games[0]!;
+  const id = colocatedGroupId(games);
+  const totalSpots = games.reduce((s, g) => s + (g.spots_needed ?? 0), 0);
+  const filled = games.reduce((s, g) => s + (g.participant_count ?? 0), 0);
+  return {
+    type: "Feature",
+    id,
+    geometry: {
+      type: "Point",
+      coordinates: [g0.lng, g0.lat],
+    },
+    properties: {
+      id,
+      marker_kind: "colocated",
+      sport: "multi",
+      sport_map_icon: getGameMapboxIconId(g0.sport),
+      status: getGameStatus(g0.starts_at),
+      players_filled: filled,
+      players_total: totalSpots,
+      players_label: String(games.length),
+      sport_emoji: getSportIconEmoji(g0.sport),
+      title: `${games.length} games`,
+    },
+  };
+}
+
 export function gamesToGeoJSON(games: GameRow[], selectedGameId: string | null): GamesGeoJSON {
-  const features = games.map((g) => gameToFeature(g, selectedGameId));
+  const { singles, groups } = splitColocatedGames(games);
+  const features: GameFeature[] = [
+    ...singles.map((g) => gameToFeature(g, selectedGameId)),
+    ...groups.map((grp) => colocatedGroupToFeature(grp)),
+  ];
   return {
     type: "FeatureCollection",
     features,

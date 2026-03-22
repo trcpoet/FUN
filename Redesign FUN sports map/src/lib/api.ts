@@ -250,13 +250,21 @@ export async function deleteHostedGame(gameId: string): Promise<Error | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Error("Not signed in");
 
-  const { error } = await supabase
+  // `.select()` so we can tell 0-row deletes (RLS / wrong id) from success — otherwise PostgREST can return no error.
+  const { data, error } = await supabase
     .from("games")
     .delete()
     .eq("id", gameId)
-    .eq("created_by", user.id);
+    .eq("created_by", user.id)
+    .select("id");
 
-  return error ? new Error(error.message) : null;
+  if (error) return new Error(error.message);
+  if (!data?.length) {
+    return new Error(
+      "Could not delete this game. If you created it, run the latest Supabase migrations (Hosts can delete own games) or check that created_by matches your account."
+    );
+  }
+  return null;
 }
 
 export async function getGameLatLng(gameId: string): Promise<{ lat: number; lng: number } | null> {

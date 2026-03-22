@@ -1,11 +1,18 @@
 /// <reference types="vite/client" />
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
+import { createRoot } from "react-dom/client";
+
+type ReactRoot = ReturnType<typeof createRoot>;
 import type { GameRow } from "../../lib/supabase";
 import type { ProfileNearbyRow } from "../../lib/supabase";
 import { gamesToGeoJSON } from "../types/mapGeoJSON";
-import { fetchSportsVenuesFromOverpass, bboxFromCenterRadius } from "../lib/sportsVenues";
+import { fetchSportsVenuesWithProgress } from "../lib/sportsVenues";
 import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
-import { venueMatchesSelectedSports } from "../../lib/osmSportTags";
+import type { VenueClusterPoint } from "../lib/sportsVenueTypes";
+import { clusterVenuePoints } from "../lib/venueClusterEngine";
+import { runVenueClusterAsync } from "../lib/venueClusterRunner";
+import { openGamesNearPoint } from "../lib/gamesAtVenue";
+import { splitColocatedGames } from "../lib/colocateGames";
 import { limitGamesForMapViewport } from "../map/mapBounds";
 import {
   getViewportMetrics,
@@ -22,6 +29,8 @@ import { getGameMapboxIconId } from "../map/gameSportIcons";
 import { Avatar3DOverlay } from "./Avatar3DOverlay";
 import { GameEventPopup } from "./GameEventPopup";
 import { VenueInfoPopup } from "./VenueInfoPopup";
+import { ColocatedGamesPin } from "./ColocatedGamesPin";
+import { ColocatedGamesModal } from "./ColocatedGamesModal";
 import { useIsMobile } from "./ui/use-mobile";
 
 /** Layer / source ids: games use GL clustering (geo-anchored, no DOM drift). */
@@ -58,33 +67,6 @@ const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1624280184393-53ce60e2
 /** Default Ready Player Me GLB for 3D avatar when no profile avatar_glb_url is set. */
 const DEFAULT_AVATAR_GLB =
   "https://models.readyplayer.me/64b7d2a3d1b31a0096b5e8c4.glb?quality=low";
-
-function circlePolygon(
-  centerLng: number,
-  centerLat: number,
-  radiusMeters: number,
-  steps = 32
-): import("geojson").Polygon {
-  const coordinates: [number, number][] = [];
-  const earthRadius = 6378137;
-
-  for (let i = 0; i <= steps; i++) {
-    const angle = (2 * Math.PI * i) / steps;
-    const dx = (radiusMeters * Math.cos(angle)) / earthRadius;
-    const dy = (radiusMeters * Math.sin(angle)) / earthRadius;
-
-    const lng = centerLng + (dx * 180) / Math.PI;
-    const lat =
-      centerLat + (dy * 180) / Math.PI / Math.cos((centerLat * Math.PI) / 180);
-
-    coordinates.push([lng, lat]);
-  }
-
-  return {
-    type: "Polygon",
-    coordinates: [coordinates],
-  };
-}
 
 function haversineDistanceMeters(
   lat1: number,
@@ -197,12 +179,15 @@ export function MapboxMap(props: MapboxMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("mapbox-gl").Map | null>(null);
   const playerMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
+  /** HTML markers for multiple games at the same coordinates (cluster pin). */
+  const colocatedMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot }[]>([]);
   const userMarker2dRef = useRef<import("mapbox-gl").Marker | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [eventPopup, setEventPopup] = useState<{ game: GameRow; point: { x: number; y: number } } | null>(null);
   const [venuePopupPoint, setVenuePopupPoint] = useState<{ x: number; y: number } | null>(null);
   const [bumpGameId, setBumpGameId] = useState<string | null>(null);
+  const [colocatedModalGames, setColocatedModalGames] = useState<GameRow[] | null>(null);
   const isMobile = useIsMobile();
   const venueInteractionTsRef = useRef(0);
   const gameInteractionTsRef = useRef(0);
@@ -215,7 +200,20 @@ export function MapboxMap(props: MapboxMapProps) {
   const onJoinGameRef = useRef(onJoinGame);
   const selectedGameIdRef = useRef(selectedGameId);
   const [mapUxHint, setMapUxHint] = useState<string | null>(null);
+  /** Bumps when venue GL layers are first created so hover/selection paint expressions apply. */
+  const [venueLayerEpoch, setVenueLayerEpoch] = useState(0);
   const venuesFetchCenter = venuesCenter ?? userCoords;
+  /** Debounced anchor so rapid search / map moves don’t spam Overpass + Supabase. */
+  const [debouncedVenueFetchCenter, setDebouncedVenueFetchCenter] = useState(venuesFetchCenter);
+  useEffect(() => {
+    if (!venuesFetchCenter) {
+      setDebouncedVenueFetchCenter(null);
+      return;
+    }
+    const tid = window.setTimeout(() => setDebouncedVenueFetchCenter(venuesFetchCenter), 420);
+    return () => clearTimeout(tid);
+  }, [venuesFetchCenter?.lat, venuesFetchCenter?.lng]);
+  const venueClustersRef = useRef<VenueClusterPoint[]>([]);
   const onVenuesFetchLoadingChangeRef = useRef(onVenuesFetchLoadingChange);
   onVenuesFetchLoadingChangeRef.current = onVenuesFetchLoadingChange;
 
@@ -225,6 +223,13 @@ export function MapboxMap(props: MapboxMapProps) {
   selectedGameIdRef.current = selectedGameId;
   const selectedVenuePulseRef = useRef(selectedVenue);
   selectedVenuePulseRef.current = selectedVenue;
+  const bumpGameIdRef = useRef(bumpGameId);
+  bumpGameIdRef.current = bumpGameId;
+  /** GL game icon hover: smooth zoom-out (icon-size has no layout transition in Mapbox). */
+  const gameIconHoverIdRef = useRef<string | null>(null);
+  const gameIconHoverTRef = useRef(0);
+  const gameIconHoverTargetRef = useRef(0);
+  const gameIconHoverRafRef = useRef(0);
   /** Phase-integrated pulse + smoothed hz (idle ↔ slow when venue selected) */
   const venuePulsePhaseRef = useRef(0);
   const venuePulseHzRef = useRef(MapCfg.VENUE_DOT_PULSE_HZ_IDLE);
@@ -236,6 +241,55 @@ export function MapboxMap(props: MapboxMapProps) {
     if (bumpGameTimeoutRef.current != null) window.clearTimeout(bumpGameTimeoutRef.current);
     bumpGameTimeoutRef.current = window.setTimeout(() => setBumpGameId(null), 240);
   };
+
+  const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+
+  /** Individual game sport icons: bump / selection / hover zoom-out (smooth t via rAF). */
+  const applyGameIconLayout = useCallback(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer(L_GAME_ICON)) return;
+    const sid = selectedGameIdRef.current ?? "";
+    const bid = bumpGameIdRef.current ?? "";
+    const hid = gameIconHoverIdRef.current;
+    const base = 0.82;
+    const hoverTarget = base * MapCfg.GAME_ICON_HOVER_MULT;
+    const ht = easeOutCubic(gameIconHoverTRef.current);
+    const hoverSize = hid ? base + (hoverTarget - base) * ht : base;
+    map.setLayoutProperty(L_GAME_ICON, "icon-size", [
+      "case",
+      ["==", ["get", "id"], bid],
+      1.08,
+      ["==", ["get", "id"], sid],
+      0.98,
+      ["==", ["get", "id"], hid ?? ""],
+      hoverSize,
+      base,
+    ]);
+    map.setPaintProperty(L_GAME_ICON, "icon-halo-color", [
+      "case",
+      ["==", ["get", "id"], bid],
+      "rgba(251, 191, 36, 0.72)",
+      ["==", ["get", "id"], sid],
+      "rgba(251, 191, 36, 0.55)",
+      "rgba(0, 0, 0, 0)",
+    ]);
+    map.setPaintProperty(L_GAME_ICON, "icon-halo-width", [
+      "case",
+      ["==", ["get", "id"], bid],
+      3,
+      ["==", ["get", "id"], sid],
+      2,
+      0,
+    ]);
+    map.setPaintProperty(L_GAME_ICON, "icon-halo-blur", [
+      "case",
+      ["==", ["get", "id"], bid],
+      1,
+      ["==", ["get", "id"], sid],
+      0.8,
+      0,
+    ]);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -426,18 +480,48 @@ export function MapboxMap(props: MapboxMapProps) {
     );
   }, [mapLoaded, centerOnUserTrigger, userCoords, enable3D]);
 
-  // —— Venue selection: fly camera + emphasize selected venue area ——
+  /** Map pixel → viewport for `position: fixed` venue card (layout after ref is attached). */
+  const [venueAnchorClient, setVenueAnchorClient] = useState<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!venuePopupPoint || !containerRef.current) {
+      setVenueAnchorClient(null);
+      return;
+    }
+    const r = containerRef.current.getBoundingClientRect();
+    setVenueAnchorClient({ x: r.left + venuePopupPoint.x, y: r.top + venuePopupPoint.y });
+  }, [venuePopupPoint]);
+
+  // —— Venue selection: center map on venue (offset so popup fits above), then project anchor ——
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || !selectedVenue) return;
+    if (!mapLoaded || !map) return;
 
-    map.flyTo({
-      center: [selectedVenue.center.lng, selectedVenue.center.lat],
-      zoom: 17,
+    if (!selectedVenue) {
+      setVenuePopupPoint(null);
+      return;
+    }
+
+    const { lng, lat } = selectedVenue.center;
+    setVenuePopupPoint(null);
+
+    const onMoveEnd = () => {
+      setVenuePopupPoint(map.project([lng, lat]));
+    };
+
+    map.easeTo({
+      center: [lng, lat],
+      zoom: Math.max(map.getZoom(), 16),
       pitch: enable3D ? 50 : 0,
-      duration: 450,
+      bearing: map.getBearing(),
+      offset: [0, 120],
+      duration: 480,
     });
-  }, [mapLoaded, selectedVenue, enable3D]);
+    map.once("moveend", onMoveEnd);
+
+    return () => {
+      map.off("moveend", onMoveEnd);
+    };
+  }, [mapLoaded, selectedVenue?.id, selectedVenue?.center.lng, selectedVenue?.center.lat, enable3D]);
 
   // —— Open game modal from carousel (center + delayed popup) ——
   useEffect(() => {
@@ -461,6 +545,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
     gameInteractionTsRef.current = Date.now();
     setEventPopup(null);
+    setColocatedModalGames(null);
 
     const t = window.setTimeout(() => {
       bumpGameIcon(game.id);
@@ -490,6 +575,8 @@ export function MapboxMap(props: MapboxMapProps) {
         "case",
         ["==", ["get", "id"], sel],
         0.22,
+        ["boolean", ["feature-state", "hover"], false],
+        MapCfg.VENUE_FILL_OPACITY_HOVER,
         0.12,
       ]);
     }
@@ -517,6 +604,8 @@ export function MapboxMap(props: MapboxMapProps) {
         "case",
         ["==", ["get", "id"], sel],
         MapCfg.VENUE_DOT_RADIUS_SELECTED_PX,
+        ["boolean", ["feature-state", "hover"], false],
+        ["*", MapCfg.VENUE_DOT_RADIUS_PX, MapCfg.VENUE_DOT_HOVER_SCALE],
         MapCfg.VENUE_DOT_RADIUS_PX,
       ]);
       map.setPaintProperty(L_VENUE_DOTS, "circle-color", [
@@ -529,10 +618,12 @@ export function MapboxMap(props: MapboxMapProps) {
         "case",
         ["==", ["get", "id"], sel],
         0.95,
+        ["boolean", ["feature-state", "hover"], false],
+        0.5,
         0.55,
       ]);
     }
-  }, [mapLoaded, selectedVenue]);
+  }, [mapLoaded, selectedVenue, venueLayerEpoch]);
 
   /** Dark bluish-purple halos: constant pulse; hz eases down when a venue is selected. */
   useEffect(() => {
@@ -682,6 +773,11 @@ export function MapboxMap(props: MapboxMapProps) {
       if (el) el.style.visibility = showPlayers ? "visible" : "hidden";
     });
 
+    colocatedMarkerEntriesRef.current.forEach(({ marker }) => {
+      const el = marker.getElement();
+      if (el) el.style.visibility = showIndividuals ? "visible" : "hidden";
+    });
+
     const g = gamesRef.current;
     setMapUxHint(
       g.length > 0 && !showClusters && !showIndividuals && zoom < MapCfg.GAME_INDIVIDUAL_MIN_ZOOM
@@ -738,7 +834,11 @@ export function MapboxMap(props: MapboxMapProps) {
       id: L_GAME_ICON,
       type: "symbol",
       source: L_GAME_SOURCE,
-      filter: ["!", ["has", "point_count"]],
+      filter: [
+        "all",
+        ["!", ["has", "point_count"]],
+        ["!=", ["coalesce", ["get", "marker_kind"], ""], "colocated"],
+      ],
       layout: {
         "icon-image": ["coalesce", ["get", "sport_map_icon"], getGameMapboxIconId("other")],
         "icon-size": 0.82,
@@ -752,7 +852,11 @@ export function MapboxMap(props: MapboxMapProps) {
       id: L_GAME_COUNT,
       type: "symbol",
       source: L_GAME_SOURCE,
-      filter: ["!", ["has", "point_count"]],
+      filter: [
+        "all",
+        ["!", ["has", "point_count"]],
+        ["!=", ["coalesce", ["get", "marker_kind"], ""], "colocated"],
+      ],
       layout: {
         "text-field": ["get", "players_label"],
         "text-size": 9,
@@ -802,13 +906,52 @@ export function MapboxMap(props: MapboxMapProps) {
 
     map.on("click", L_GAME_ICON, openGameFromFeature);
 
-    [L_GAME_CLUSTERS, L_GAME_ICON].forEach((id) => {
-      map.on("mouseenter", id, () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", id, () => {
-        map.getCanvas().style.cursor = "";
-      });
+    map.on("mouseenter", L_GAME_CLUSTERS, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", L_GAME_CLUSTERS, () => {
+      map.getCanvas().style.cursor = "";
+    });
+
+    const runGameIconHoverTick = () => {
+      const target = gameIconHoverTargetRef.current;
+      const t = gameIconHoverTRef.current;
+      const sk = MapCfg.GAME_ICON_HOVER_SMOOTH;
+      const newT = t + (target - t) * sk;
+      gameIconHoverTRef.current = newT;
+      applyGameIconLayout();
+      if (Math.abs(target - newT) < 0.003) {
+        gameIconHoverTRef.current = target;
+        applyGameIconLayout();
+        if (target === 0) gameIconHoverIdRef.current = null;
+        gameIconHoverRafRef.current = 0;
+        return;
+      }
+      gameIconHoverRafRef.current = requestAnimationFrame(runGameIconHoverTick);
+    };
+
+    const ensureGameIconHoverLoop = () => {
+      if (!gameIconHoverRafRef.current) {
+        gameIconHoverRafRef.current = requestAnimationFrame(runGameIconHoverTick);
+      }
+    };
+
+    map.on("mouseenter", L_GAME_ICON, (e) => {
+      map.getCanvas().style.cursor = "pointer";
+      const f = e.features?.[0];
+      const gid = f?.properties?.id as string | undefined;
+      if (!gid) return;
+      if (gameIconHoverIdRef.current !== gid) {
+        gameIconHoverIdRef.current = gid;
+        gameIconHoverTRef.current = 0;
+      }
+      gameIconHoverTargetRef.current = 1;
+      ensureGameIconHoverLoop();
+    });
+    map.on("mouseleave", L_GAME_ICON, () => {
+      map.getCanvas().style.cursor = "";
+      gameIconHoverTargetRef.current = 0;
+      ensureGameIconHoverLoop();
     });
 
     let visRaf = 0;
@@ -832,8 +975,15 @@ export function MapboxMap(props: MapboxMapProps) {
       map.off("zoom", scheduleVis);
       map.off("moveend", applyMapLayerVisibility);
       map.off("zoomend", applyMapLayerVisibility);
+      if (gameIconHoverRafRef.current) {
+        cancelAnimationFrame(gameIconHoverRafRef.current);
+        gameIconHoverRafRef.current = 0;
+      }
+      gameIconHoverIdRef.current = null;
+      gameIconHoverTRef.current = 0;
+      gameIconHoverTargetRef.current = 0;
     };
-  }, [mapLoaded, applyMapLayerVisibility]);
+  }, [mapLoaded, applyMapLayerVisibility, applyGameIconLayout]);
 
   /** Push game GeoJSON into clustered source (capped by viewport for performance). */
   useEffect(() => {
@@ -847,45 +997,74 @@ export function MapboxMap(props: MapboxMapProps) {
     applyMapLayerVisibility();
   }, [mapLoaded, games, selectedGameId, applyMapLayerVisibility]);
 
-  /** Selected game: slightly larger icon + warm halo (no circle underlay). */
+  /** Same-coordinate games: single HTML cluster pin (avoids overlapping GL sport icons). */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map?.getLayer(L_GAME_ICON)) return;
-    const sid = selectedGameId ?? "";
-    const bid = bumpGameId ?? "";
-    map.setLayoutProperty(L_GAME_ICON, "icon-size", [
-      "case",
-      ["==", ["get", "id"], bid],
-      1.08,
-      ["==", ["get", "id"], sid],
-      0.98,
-      0.82,
-    ]);
-    map.setPaintProperty(L_GAME_ICON, "icon-halo-color", [
-      "case",
-      ["==", ["get", "id"], bid],
-      "rgba(251, 191, 36, 0.72)",
-      ["==", ["get", "id"], sid],
-      "rgba(251, 191, 36, 0.55)",
-      "rgba(0, 0, 0, 0)",
-    ]);
-    map.setPaintProperty(L_GAME_ICON, "icon-halo-width", [
-      "case",
-      ["==", ["get", "id"], bid],
-      3,
-      ["==", ["get", "id"], sid],
-      2,
-      0,
-    ]);
-    map.setPaintProperty(L_GAME_ICON, "icon-halo-blur", [
-      "case",
-      ["==", ["get", "id"], bid],
-      1,
-      ["==", ["get", "id"], sid],
-      0.8,
-      0,
-    ]);
-  }, [mapLoaded, selectedGameId, bumpGameId]);
+    if (!map || !mapLoaded) return;
+
+    const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
+    const { groups } = splitColocatedGames(capped);
+
+    let cancelled = false;
+    if (groups.length > 0) {
+      loadMapboxGl().then((mapboxgl) => {
+        if (cancelled || mapRef.current !== map) return;
+        const Marker = mapboxgl.default.Marker;
+        const next: { marker: import("mapbox-gl").Marker; root: ReactRoot }[] = [];
+
+        for (const group of groups) {
+          const el = document.createElement("div");
+          el.style.pointerEvents = "auto";
+          const root = createRoot(el);
+          const g0 = group[0]!;
+          root.render(
+            <ColocatedGamesPin
+              games={group}
+              selectedGameId={selectedGameId}
+              bumpGameId={bumpGameId}
+              onPress={() => {
+                gameInteractionTsRef.current = Date.now();
+                setColocatedModalGames(group);
+              }}
+            />
+          );
+          const marker = new Marker({ element: el, anchor: "center" })
+            .setLngLat([g0.lng, g0.lat])
+            .addTo(map);
+          next.push({ marker, root });
+        }
+        colocatedMarkerEntriesRef.current = next;
+        applyMapLayerVisibility();
+      });
+    } else {
+      applyMapLayerVisibility();
+    }
+
+    return () => {
+      cancelled = true;
+      const snapshot = [...colocatedMarkerEntriesRef.current];
+      colocatedMarkerEntriesRef.current = [];
+      for (const { marker } of snapshot) {
+        try {
+          marker.remove();
+        } catch (_) {}
+      }
+      const roots = snapshot.map((s) => s.root);
+      window.setTimeout(() => {
+        for (const root of roots) {
+          try {
+            root.unmount();
+          } catch (_) {}
+        }
+      }, 0);
+    };
+  }, [mapLoaded, games, selectedGameId, bumpGameId, applyMapLayerVisibility]);
+
+  /** Selected / bump / hover: game sport icon layout + halo. */
+  useEffect(() => {
+    if (!mapLoaded) return;
+    applyGameIconLayout();
+  }, [mapLoaded, selectedGameId, bumpGameId, applyGameIconLayout]);
 
   // Map click:
   // - On desktop: close popup only.
@@ -901,6 +1080,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
       if (isMobile && onMapDoubleClick) {
         setEventPopup(null);
+        setColocatedModalGames(null);
         onSelectVenue(null);
         setVenuePopupPoint(null);
 
@@ -931,6 +1111,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
       // Desktop: normal click just closes any open popup
       setEventPopup(null);
+      setColocatedModalGames(null);
       onSelectVenue(null);
       setVenuePopupPoint(null);
     };
@@ -953,6 +1134,7 @@ export function MapboxMap(props: MapboxMapProps) {
       const tapLng = e.lngLat.lng;
 
       setEventPopup(null);
+      setColocatedModalGames(null);
       onSelectVenue(null);
       setVenuePopupPoint(null);
 
@@ -1074,13 +1256,13 @@ export function MapboxMap(props: MapboxMapProps) {
 
   // —— Sports venues: subtle GL polygons + small center dots (no DOM flag markers) ———
   const venueSportSig = venueSportsFilter.slice().sort().join("|");
-  const venueFetchKey = venuesFetchCenter
-    ? `${venuesFetchCenter.lat.toFixed(4)},${venuesFetchCenter.lng.toFixed(4)},${venueSearchRadiusKm},${venueSportSig}`
+  const venueFetchKey = debouncedVenueFetchCenter
+    ? `${debouncedVenueFetchCenter.lat.toFixed(4)},${debouncedVenueFetchCenter.lng.toFixed(4)},${venueSearchRadiusKm},${venueSportSig}`
     : null;
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || !venuesFetchCenter || !venueFetchKey) {
+    if (!map || !mapLoaded || !debouncedVenueFetchCenter || !venueFetchKey) {
       onVenuesFetchLoadingChangeRef.current?.(false);
       return;
     }
@@ -1092,93 +1274,30 @@ export function MapboxMap(props: MapboxMapProps) {
         return;
       }
 
-      try {
-        type Cluster = {
-          lng: number;
-          lat: number;
-          properties: SportsVenueGeoJSON["features"][number]["properties"];
-        };
-
-        const clusters: Cluster[] = [];
-        const maxDistanceMeters = 80;
-        const toRadians = (deg: number) => (deg * Math.PI) / 180;
-        const distanceMeters = (lat1: number, lng1: number, lat2: number, lng2: number) => {
-          const R = 6378137;
-          const dLat = toRadians(lat2 - lat1);
-          const dLng = toRadians(lng2 - lng1);
-          const a =
-            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          return R * c;
-        };
-
-        const pointFeatures = geojson.features.filter((f) => {
-          if (!f.geometry || f.geometry.type !== "Point") return false;
-          return venueMatchesSelectedSports(f.properties.sport, venueSportsFilter);
-        });
-
-        pointFeatures.forEach((f) => {
-          const [lng, lat] = f.geometry.coordinates;
-
-          let targetCluster: Cluster | null = null;
-          for (const cluster of clusters) {
-            if (distanceMeters(lat, lng, cluster.lat, cluster.lng) <= maxDistanceMeters) {
-              targetCluster = cluster;
-              break;
-            }
-          }
-
-          if (targetCluster) {
-            targetCluster.lng = (targetCluster.lng + lng) / 2;
-            targetCluster.lat = (targetCluster.lat + lat) / 2;
-          } else {
-            clusters.push({ lng, lat, properties: f.properties });
-          }
-        });
-
-        const areaFeatures: import("geojson").Feature<
-          import("geojson").Polygon,
-          SportsVenueGeoJSON["features"][number]["properties"]
-        >[] = [];
-
-        clusters.forEach((cluster) => {
-          const polygon = circlePolygon(cluster.lng, cluster.lat, MapCfg.VENUE_AREA_RADIUS_METERS);
-          areaFeatures.push({
-            type: "Feature",
-            geometry: polygon,
-            properties: cluster.properties,
+      const run = async () => {
+        try {
+        let clusterOut;
+        try {
+          clusterOut = await runVenueClusterAsync(geojson, venueSportsFilter);
+        } catch {
+          clusterOut = clusterVenuePoints(geojson, {
+            venueSportsFilter,
+            maxDistanceMeters: 80,
+            venueAreaRadiusMeters: MapCfg.VENUE_AREA_RADIUS_METERS,
           });
-        });
+        }
 
-        const areaCollection: import("geojson").FeatureCollection = {
-          type: "FeatureCollection",
-          features: areaFeatures,
-        };
-
-        const dotFeatures: import("geojson").Feature<
-          import("geojson").Point,
-          { id: string; name?: string }
-        >[] = clusters.map((c) => ({
-          type: "Feature",
-          geometry: { type: "Point", coordinates: [c.lng, c.lat] },
-          properties: { id: c.properties.id, name: c.properties.name },
-        }));
-
-        const dotCollection: import("geojson").FeatureCollection = {
-          type: "FeatureCollection",
-          features: dotFeatures,
-        };
+        venueClustersRef.current = clusterOut.clusters;
+        const { areaCollection, dotCollection } = clusterOut;
 
         const sourceId = "venue-areas";
         const fillLayerId = "venue-areas-fill";
         const outlineLayerId = "venue-areas-outline";
         const beforeGames = mapInstance.getLayer(L_GAME_CLUSTERS) ? L_GAME_CLUSTERS : undefined;
 
-        const selectVenueFromCluster = (cluster: Cluster, mapPoint: { x: number; y: number }) => {
+        const selectVenueFromCluster = (cluster: VenueClusterPoint, _mapPoint: { x: number; y: number }) => {
           venueInteractionTsRef.current = Date.now();
           setEventPopup(null);
-          setVenuePopupPoint(mapPoint);
           onSelectVenue({
             id: cluster.properties.id,
             name: cluster.properties.name,
@@ -1281,6 +1400,57 @@ export function MapboxMap(props: MapboxMapProps) {
             beforeGames
           );
 
+          try {
+            mapInstance.setPaintProperty(fillLayerId, "fill-opacity-transition", {
+              duration: MapCfg.MAP_MARKER_HOVER_TRANSITION_MS,
+              delay: 0,
+            });
+            mapInstance.setPaintProperty(L_VENUE_DOTS, "circle-radius-transition", {
+              duration: MapCfg.MAP_MARKER_HOVER_TRANSITION_MS,
+              delay: 0,
+            });
+            mapInstance.setPaintProperty(L_VENUE_DOTS, "circle-opacity-transition", {
+              duration: MapCfg.MAP_MARKER_HOVER_TRANSITION_MS,
+              delay: 0,
+            });
+          } catch (_) {}
+
+          let venueHoverPointerId: string | null = null;
+          let venueHoverLeaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+          const onVenueMarkerHoverEnter = (e: { features?: import("mapbox-gl").MapboxGeoJSONFeature[] }) => {
+            const id = e.features?.[0]?.properties?.id as string | undefined;
+            if (!id) return;
+            if (venueHoverLeaveTimer != null) {
+              clearTimeout(venueHoverLeaveTimer);
+              venueHoverLeaveTimer = null;
+            }
+            if (venueHoverPointerId && venueHoverPointerId !== id) {
+              try {
+                mapInstance.setFeatureState({ source: sourceId, id: venueHoverPointerId }, { hover: false });
+                mapInstance.setFeatureState({ source: SRC_VENUE_DOTS, id: venueHoverPointerId }, { hover: false });
+              } catch (_) {}
+            }
+            venueHoverPointerId = id;
+            try {
+              mapInstance.setFeatureState({ source: sourceId, id }, { hover: true });
+              mapInstance.setFeatureState({ source: SRC_VENUE_DOTS, id }, { hover: true });
+            } catch (_) {}
+          };
+
+          const onVenueMarkerHoverLeave = () => {
+            venueHoverLeaveTimer = setTimeout(() => {
+              venueHoverLeaveTimer = null;
+              if (!venueHoverPointerId) return;
+              const hid = venueHoverPointerId;
+              venueHoverPointerId = null;
+              try {
+                mapInstance.setFeatureState({ source: sourceId, id: hid }, { hover: false });
+                mapInstance.setFeatureState({ source: SRC_VENUE_DOTS, id: hid }, { hover: false });
+              } catch (_) {}
+            }, MapCfg.VENUE_HOVER_LEAVE_DEBOUNCE_MS);
+          };
+
           const onFillClick = (e: { features?: import("mapbox-gl").MapboxGeoJSONFeature[]; point: { x: number; y: number } }) => {
             // If the click is on top of a game icon/cluster, ignore venue interactions.
             const hitGames = mapInstance.queryRenderedFeatures(
@@ -1310,12 +1480,11 @@ export function MapboxMap(props: MapboxMapProps) {
             );
             center[0] /= ring.length;
             center[1] /= ring.length;
-            const cl = clusters.find((c) => c.properties.id === feature.properties.id);
+            const cl = venueClustersRef.current.find((c) => c.properties.id === feature.properties.id);
             if (cl) selectVenueFromCluster(cl, e.point);
             else {
               venueInteractionTsRef.current = Date.now();
               setEventPopup(null);
-              setVenuePopupPoint({ x: e.point.x, y: e.point.y });
               onSelectVenue({
                 id: feature.properties.id,
                 name: feature.properties.name,
@@ -1342,7 +1511,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
             const id = e.features?.[0]?.properties?.id as string | undefined;
             if (!id) return;
-            const cl = clusters.find((c) => c.properties.id === id);
+            const cl = venueClustersRef.current.find((c) => c.properties.id === id);
             if (cl) selectVenueFromCluster(cl, e.point);
           };
 
@@ -1351,26 +1520,34 @@ export function MapboxMap(props: MapboxMapProps) {
           mapInstance.on("click", L_VENUE_DOTS_PULSE_INNER, onVenueDotClick);
 
           [fillLayerId, L_VENUE_DOTS_PULSE, L_VENUE_DOTS_PULSE_INNER, L_VENUE_DOTS].forEach((lid) => {
-            mapInstance.on("mouseenter", lid, () => {
+            mapInstance.on("mouseenter", lid, (e) => {
               mapInstance.getCanvas().style.cursor = "pointer";
+              onVenueMarkerHoverEnter(e);
             });
             mapInstance.on("mouseleave", lid, () => {
               mapInstance.getCanvas().style.cursor = "";
+              onVenueMarkerHoverLeave();
             });
           });
+
+          setVenueLayerEpoch((n) => n + 1);
         }
 
         applyMapLayerVisibility();
-      } catch (_) {
-        /* ignore */
-      } finally {
-        onDone?.();
-      }
+        } catch (_) {
+          /* ignore */
+        } finally {
+          onDone?.();
+        }
+      };
+
+      void run();
     };
 
     let cancelled = false;
     let venueKickoffStarted = false;
     let idleFallbackId: number | undefined;
+    const venueFetchAbort = new AbortController();
 
     const kickoffVenueFetch = () => {
       if (venueKickoffStarted || cancelled) return;
@@ -1382,20 +1559,52 @@ export function MapboxMap(props: MapboxMapProps) {
       map.off("idle", kickoffVenueFetch);
 
       onVenuesFetchLoadingChangeRef.current?.(true);
-      const bbox = bboxFromCenterRadius(venuesFetchCenter.lat, venuesFetchCenter.lng, venueSearchRadiusKm);
-      fetchSportsVenuesFromOverpass(bbox).then((geojson) => {
-        if (cancelled) return;
-        addVenueMarkers(geojson, () => {
+      const finishLoading = () => {
+        const done = () => onVenuesFetchLoadingChangeRef.current?.(false);
+        if (typeof requestAnimationFrame !== "undefined") {
+          requestAnimationFrame(() => requestAnimationFrame(done));
+        } else {
+          window.setTimeout(done, 0);
+        }
+      };
+
+      fetchSportsVenuesWithProgress(
+        debouncedVenueFetchCenter.lat,
+        debouncedVenueFetchCenter.lng,
+        venueSearchRadiusKm,
+        {
+          signal: venueFetchAbort.signal,
+          sportFilter: venueSportsFilter,
+          onNearRing: (geojson) =>
+            new Promise<void>((resolve) => {
+              if (cancelled) {
+                resolve();
+                return;
+              }
+              addVenueMarkers(geojson, () => {
+                if (cancelled) {
+                  resolve();
+                  return;
+                }
+                finishLoading();
+                resolve();
+              });
+            }),
+        }
+      )
+        .then((geojson) => {
           if (cancelled) return;
-          // Let React paint loading=true before clearing (cached / fast responses).
-          const done = () => onVenuesFetchLoadingChangeRef.current?.(false);
-          if (typeof requestAnimationFrame !== "undefined") {
-            requestAnimationFrame(() => requestAnimationFrame(done));
-          } else {
-            window.setTimeout(done, 0);
-          }
+          addVenueMarkers(geojson, () => {
+            if (cancelled) return;
+            finishLoading();
+          });
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          const name = err instanceof Error ? err.name : "";
+          if (name === "AbortError") return;
+          onVenuesFetchLoadingChangeRef.current?.(false);
         });
-      });
     };
 
     // Defer Overpass until tiles are idle (or 2.5s) so the base map can render first.
@@ -1404,6 +1613,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
     return () => {
       cancelled = true;
+      venueFetchAbort.abort();
       if (idleFallbackId !== undefined) clearTimeout(idleFallbackId);
       map.off("idle", kickoffVenueFetch);
       onVenuesFetchLoadingChangeRef.current?.(false);
@@ -1419,21 +1629,22 @@ export function MapboxMap(props: MapboxMapProps) {
         if (m.getSource("venue-areas")) m.removeSource("venue-areas");
       } catch (_) {}
     };
-  }, [mapLoaded, venueFetchKey, onSelectVenue, applyMapLayerVisibility]);
+  }, [
+    mapLoaded,
+    venueFetchKey,
+    debouncedVenueFetchCenter,
+    venueSearchRadiusKm,
+    venueSportsFilter,
+    onSelectVenue,
+    applyMapLayerVisibility,
+  ]);
 
-  const openGamesNearbyCount = selectedVenue
-    ? games.filter((g) => {
-        const isOpen = g.status === "open" || !g.status;
-        if (!isOpen) return false;
-        const dMeters = haversineDistanceMeters(
-          selectedVenue.center.lat,
-          selectedVenue.center.lng,
-          g.lat,
-          g.lng
-        );
-        return dMeters <= 120;
-      }).length
-    : 0;
+  const gamesAtSelectedVenue = useMemo(() => {
+    if (!selectedVenue) return [];
+    return openGamesNearPoint(games, selectedVenue.center.lat, selectedVenue.center.lng, 120);
+  }, [games, selectedVenue]);
+
+  const openGamesNearbyCount = gamesAtSelectedVenue.length;
 
   if (!MAPBOX_TOKEN || mapError) {
     return (
@@ -1483,40 +1694,64 @@ export function MapboxMap(props: MapboxMapProps) {
               onJoin={onJoinGame}
               onLeave={onLeaveGame}
               onOpenMessages={onOpenMessagesForGame}
-              joined={joinedSet.has(eventPopup.game.id)}
-              isHost={Boolean(currentUserId) && hostSet.has(eventPopup.game.id)}
+              joined={
+                joinedSet.has(eventPopup.game.id) ||
+                (Boolean(currentUserId) && eventPopup.game.created_by === currentUserId)
+              }
+              isHost={
+                Boolean(currentUserId) &&
+                (hostSet.has(eventPopup.game.id) ||
+                  eventPopup.game.created_by === currentUserId)
+              }
               onDeleteHostedGame={onDeleteHostedGame}
             />
           </div>
         </div>
       )}
 
-      {selectedVenue && venuePopupPoint && mapLoaded && containerRef.current && (
+      {selectedVenue && venuePopupPoint && venueAnchorClient && mapLoaded && (
         <div
-          className="absolute inset-0 pointer-events-auto"
+          className="fixed inset-0 z-[999] pointer-events-auto"
           onClick={() => {
             onSelectVenue(null);
             setVenuePopupPoint(null);
           }}
         >
-          <div
-            className="absolute"
-            style={{ left: venuePopupPoint.x, top: venuePopupPoint.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <VenueInfoPopup
-              venue={selectedVenue}
-              openGamesNearbyCount={openGamesNearbyCount}
-              onCreateGame={(venue) => {
-                onCreateGameAtVenue?.(venue, venuePopupPoint ?? undefined);
-              }}
-              onClose={() => {
-                onSelectVenue(null);
-                setVenuePopupPoint(null);
-              }}
-            />
-          </div>
+          <VenueInfoPopup
+            key={`${selectedVenue.center.lat}-${selectedVenue.center.lng}`}
+            venue={selectedVenue}
+            anchorClient={venueAnchorClient}
+            openGamesNearbyCount={openGamesNearbyCount}
+            gamesNearby={gamesAtSelectedVenue}
+            joinedGameIds={joinedSet}
+            onJoinGame={onJoinGame}
+            onOpenChat={onOpenMessagesForGame}
+            onCreateGame={(venue) => {
+              onCreateGameAtVenue?.(venue, venuePopupPoint ?? undefined);
+            }}
+            onClose={() => {
+              onSelectVenue(null);
+              setVenuePopupPoint(null);
+            }}
+          />
         </div>
+      )}
+
+      {colocatedModalGames && colocatedModalGames.length > 0 && (
+        <ColocatedGamesModal
+          games={colocatedModalGames}
+          viewerCoords={userCoords}
+          joinedGameIds={joinedSet}
+          onClose={() => setColocatedModalGames(null)}
+          onJoinGame={(g) => {
+            onJoinGame?.(g);
+            setColocatedModalGames(null);
+          }}
+          onOpenChat={(g) => {
+            onOpenMessagesForGame?.(g);
+            setColocatedModalGames(null);
+          }}
+        />
       )}
 
       {mapLoaded && use3DOverlay && userCoords && mapRef.current && (

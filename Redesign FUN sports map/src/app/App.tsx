@@ -227,6 +227,7 @@ export default function App() {
         title: game.title || "Pickup game",
         sport: game.sport,
       });
+      setMessagesOpen(true);
     }
   };
 

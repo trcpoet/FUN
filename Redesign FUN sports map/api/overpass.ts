@@ -32,27 +32,45 @@ export default async function handler(request: Request): Promise<Response> {
   const body = await request.text();
   const extra = CORS_HEADERS;
 
-  for (const url of UPSTREAMS) {
+  /** Race mirrors: return first 200; cancel slower requests to save upstream load. */
+  const postFirstOk = async (): Promise<string | null> => {
+    const controllers = UPSTREAMS.map(() => new AbortController());
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        body,
-        headers: { "Content-Type": "text/plain" },
-      });
-      if (res.status === 429) continue;
-      if (!res.ok) continue;
-      const text = await res.text();
-      return new Response(text, {
-        status: 200,
-        headers: {
-          ...extra,
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
-        },
-      });
+      const text = await Promise.any(
+        UPSTREAMS.map((url, i) =>
+          fetch(url, {
+            method: "POST",
+            body,
+            headers: { "Content-Type": "text/plain" },
+            signal: controllers[i].signal,
+          }).then(async (res) => {
+            if (res.status === 429 || !res.ok) {
+              throw new Error(`upstream ${res.status}`);
+            }
+            const t = await res.text();
+            controllers.forEach((c, j) => {
+              if (j !== i) c.abort();
+            });
+            return t;
+          })
+        )
+      );
+      return text;
     } catch {
-      continue;
+      return null;
     }
+  };
+
+  const text = await postFirstOk();
+  if (text != null) {
+    return new Response(text, {
+      status: 200,
+      headers: {
+        ...extra,
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
+      },
+    });
   }
 
   return new Response(JSON.stringify({ elements: [] }), {

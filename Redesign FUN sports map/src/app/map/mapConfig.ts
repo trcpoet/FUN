@@ -27,6 +27,19 @@ export const VENUE_MARKER_BASE_RADIUS_PX = VENUE_DOT_RADIUS_PX;
 /** Default footprint fill strength (also set on layer; tune 0.08–0.18). */
 export const VENUE_MARKER_FILL_OPACITY_DEFAULT = 0.12;
 
+/** Hover: slightly shrink dot / icon (slow zoom-out feel). */
+export const VENUE_DOT_HOVER_SCALE = 0.88;
+/** Footprint opacity when hovering (between default 0.12 and selected 0.22). */
+export const VENUE_FILL_OPACITY_HOVER = 0.16;
+/** Mapbox paint transition duration for venue dot + footprint hover (ms). */
+export const MAP_MARKER_HOVER_TRANSITION_MS = 750;
+/** Game sport icon: multiply base layout size (0.82) when hovered (under 1 = zoom out). */
+export const GAME_ICON_HOVER_MULT = 0.92;
+/** Per-frame smoothing toward hover in/out (lower = slower). ~0.045 ≈ ~0.6–1s settle. */
+export const GAME_ICON_HOVER_SMOOTH = 0.045;
+/** Mouseleave debounce when moving between venue polygon and dot (avoids hover flicker). */
+export const VENUE_HOVER_LEAVE_DEBOUNCE_MS = 60;
+
 export const VENUE_DOT_RADIUS_HOVER_PX = 5;
 export const VENUE_DOT_RADIUS_SELECTED_PX = 7.5;
 export const VENUE_DOT_COLOR = "rgb(71, 85, 105)"; // slate-600 — darker for contrast on the basemap
