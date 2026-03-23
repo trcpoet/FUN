@@ -5,7 +5,7 @@
  * Tuning: GAME_ICON_RASTER_SIZE, font stack, shadow for contrast on the basemap.
  */
 
-const GAME_ICON_RASTER_SIZE = 72;
+const GAME_ICON_RASTER_SIZE = 84;
 
 /**
  * Draw centered emoji on transparent pixels for `map.addImage` (no circular badge — map uses symbol layer only).

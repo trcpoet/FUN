@@ -33,10 +33,62 @@ export const VENUE_DOT_HOVER_SCALE = 0.88;
 export const VENUE_FILL_OPACITY_HOVER = 0.16;
 /** Mapbox paint transition duration for venue dot + footprint hover (ms). */
 export const MAP_MARKER_HOVER_TRANSITION_MS = 750;
-/** Game sport icon: multiply base layout size (0.82) when hovered (under 1 = zoom out). */
+/** Mapbox `icon-size` for individual game sport symbols (was ~0.82; larger = bigger emoji on map). */
+export const GAME_ICON_LAYOUT_BASE = 0.96;
+/** Selected game icon scale (vs `GAME_ICON_LAYOUT_BASE`). */
+export const GAME_ICON_LAYOUT_SELECTED = 1.15;
+/** Legacy peak scale (unused for click — tap uses dip below base; kept for tuning reference). */
+export const GAME_ICON_LAYOUT_BUMP_PEAK = 1.26;
+/** During GL tap: `icon-size` multiplies base by this at the deepest “press” (zoom out, then return). */
+export const GAME_ICON_GL_CLICK_DIP_MULT = 0.86;
+/** Game sport icon: multiply base layout size when hovered (under 1 = zoom out). */
 export const GAME_ICON_HOVER_MULT = 0.92;
-/** Per-frame smoothing toward hover in/out (lower = slower). ~0.045 ≈ ~0.6–1s settle. */
-export const GAME_ICON_HOVER_SMOOTH = 0.045;
+/**
+ * Exponential smoothing time constant (ms) for hover zoom in/out (rAF + dt).
+ * Higher = slower, smoother settle (especially when leaving after a click).
+ */
+export const GAME_ICON_HOVER_TAU_MS = 1050;
+
+/** Individual game sport icons (GL): subtle rotation wobble amplitude (degrees). */
+export const GAME_ICON_ROTATE_AMPLITUDE_DEG = 5;
+/** Full oscillation period (ms) for the sport icon rotation wobble. */
+export const GAME_ICON_ROTATE_PERIOD_MS = 5200;
+/** GL click: slow zoom-out → return (ms). One half-sine on `icon-size` dip. */
+export const GAME_ICON_BUMP_DURATION_MS = 1400;
+/**
+ * HTML pins: same gesture, longer so the DOM scale read matches GL (rAF + `htmlPinPressScale`).
+ */
+export const GAME_ICON_HTML_BUMP_DURATION_MS = 4200;
+/** Max scale loss at bottom of press (1 = full shrink). */
+export const GAME_ICON_HTML_PRESS_DEPTH = 0.12;
+
+/** Smoothstep — eases both ends of normalized time (0–1). */
+export function smoothstep01(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * 0→1→0 envelope for GL `icon-size` click dip: slow in/out (smoothstep time) × sine hump.
+ */
+export function glIconClickBumpPulse(elapsedMs: number, totalMs: number): number {
+  const u = Math.min(1, Math.max(0, elapsedMs / totalMs));
+  return Math.sin(smoothstep01(u) * Math.PI);
+}
+
+/**
+ * Smooth press/release: sin²(π·τ) has **zero derivative** at τ=0 and τ=1 (unlike plain sin).
+ * τ is double-smoothstepped from linear time so zoom-out / return feels deliberate, not snappy.
+ */
+export function htmlPinPressScale(
+  elapsedMs: number,
+  totalMs: number,
+  pressDepth = GAME_ICON_HTML_PRESS_DEPTH
+): number {
+  const u = Math.min(1, Math.max(0, elapsedMs / totalMs));
+  const tau = smoothstep01(smoothstep01(u));
+  return 1 - pressDepth * Math.sin(Math.PI * tau) ** 2;
+}
 /** Mouseleave debounce when moving between venue polygon and dot (avoids hover flicker). */
 export const VENUE_HOVER_LEAVE_DEBOUNCE_MS = 60;
 

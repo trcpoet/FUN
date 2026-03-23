@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { format, isSameDay, startOfToday } from "date-fns";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Calendar } from "./ui/calendar";
 import {
   Trophy,
   Users,
@@ -14,6 +17,7 @@ import {
   ChevronDown,
   SlidersHorizontal,
 } from "lucide-react";
+import { motion, useAnimate } from "motion/react";
 import { supabase } from "../../lib/supabase";
 import { getSportsForPicker, filterSportsByQuery } from "../../lib/sportDisplay";
 import {
@@ -47,6 +51,62 @@ export type CreateGameModalProps = {
 
 const ALL_SPORTS = getSportsForPicker();
 
+const SPORT_ROW_EASE: [number, number, number, number] = [0.22, 0.1, 0.22, 1];
+
+/** Pointer-driven press so release always eases back (whileTap alone feels abrupt). */
+function SportOptionRow({
+  selected,
+  icon,
+  label,
+  onSelect,
+}: {
+  selected: boolean;
+  icon: string;
+  label: string;
+  onSelect: () => void;
+}) {
+  const [scope, animate] = useAnimate();
+
+  const settle = () => {
+    if (!scope.current) return;
+    void animate(scope.current, { scale: 1 }, { duration: 0.72, ease: SPORT_ROW_EASE });
+  };
+
+  const press = () => {
+    if (!scope.current) return;
+    void animate(scope.current, { scale: 0.96 }, { duration: 0.58, ease: SPORT_ROW_EASE });
+  };
+
+  return (
+    <motion.button
+      ref={scope}
+      type="button"
+      role="option"
+      aria-selected={selected}
+      initial={{ scale: 1 }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        press();
+      }}
+      onPointerUp={settle}
+      onPointerLeave={settle}
+      onPointerCancel={settle}
+      onClick={onSelect}
+      className={cn(
+        "w-full flex min-h-[2.5rem] items-center gap-2.5 rounded-lg py-2 px-2.5 text-left text-sm transition-colors",
+        selected
+          ? "text-violet-100 ring-1 ring-violet-500/50"
+          : "text-slate-300 hover:bg-white/5"
+      )}
+    >
+      <span className="shrink-0 text-xl leading-none" aria-hidden>
+        {icon}
+      </span>
+      <span className="min-w-0 truncate font-medium">{label}</span>
+    </motion.button>
+  );
+}
+
 function toggleStr(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
@@ -66,6 +126,10 @@ export function CreateGameModal({
   const [sportQuery, setSportQuery] = useState("");
   const [spots, setSpots] = useState<number>(4);
   const [dateTime, setDateTime] = useState("");
+  /** Popover date/time picker (replaces native datetime-local so we can use a "Done" label, not OS "Today"). */
+  const [whenPickerOpen, setWhenPickerOpen] = useState(false);
+  const [pickDate, setPickDate] = useState<Date | undefined>(undefined);
+  const [pickTime, setPickTime] = useState("12:00");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [playerPrefsOpen, setPlayerPrefsOpen] = useState(false);
@@ -92,11 +156,74 @@ export function CreateGameModal({
     [sportQuery]
   );
 
-  const minDateTime = useMemo(() => {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-    return d.toISOString().slice(0, 16);
+  const combineLocalDateTime = useCallback((d: Date, timeHHmm: string): string => {
+    const parts = timeHHmm.split(":").map((x) => parseInt(x, 10));
+    const hh = Number.isFinite(parts[0]) ? parts[0]! : 0;
+    const mm = Number.isFinite(parts[1]) ? parts[1]! : 0;
+    const out = new Date(d);
+    out.setHours(hh, mm, 0, 0);
+    return format(out, "yyyy-MM-dd'T'HH:mm");
   }, []);
+
+  const syncPickerFromDateTimeString = useCallback(() => {
+    if (dateTime.trim()) {
+      const d = new Date(dateTime.trim());
+      if (!Number.isNaN(d.getTime())) {
+        setPickDate(d);
+        setPickTime(format(d, "HH:mm"));
+        return;
+      }
+    }
+    const now = new Date();
+    setPickDate(now);
+    setPickTime(format(now, "HH:mm"));
+  }, [dateTime]);
+
+  const handleWhenOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) syncPickerFromDateTimeString();
+      setWhenPickerOpen(open);
+    },
+    [syncPickerFromDateTimeString]
+  );
+
+  const applyWhenDone = useCallback(() => {
+    if (!pickDate) {
+      setWhenPickerOpen(false);
+      return;
+    }
+    const combined = combineLocalDateTime(pickDate, pickTime);
+    const asDate = new Date(combined);
+    if (Number.isNaN(asDate.getTime())) {
+      setError("Please enter a valid date and time.");
+      return;
+    }
+    if (asDate.getTime() < Date.now()) {
+      setError("Pick a date and time in the future.");
+      return;
+    }
+    setDateTime(combined);
+    setError(null);
+    setWhenPickerOpen(false);
+  }, [pickDate, pickTime, combineLocalDateTime]);
+
+  const clearWhen = useCallback(() => {
+    setDateTime("");
+    setError(null);
+    setWhenPickerOpen(false);
+  }, []);
+
+  const whenTriggerLabel = useMemo(() => {
+    if (!dateTime.trim()) return "Optional — tap to set time";
+    const d = new Date(dateTime.trim());
+    if (Number.isNaN(d.getTime())) return "Invalid — tap to fix";
+    return format(d, "MMM d, yyyy · h:mm a");
+  }, [dateTime]);
+
+  const minTimeHHmm = useMemo(() => {
+    if (!pickDate || !isSameDay(pickDate, new Date())) return undefined;
+    return format(new Date(), "HH:mm");
+  }, [pickDate]);
 
   const handleSubmit = async () => {
     if (!supabase || !userCoords) {
@@ -281,27 +408,13 @@ export function CreateGameModal({
                 <p className="text-slate-500 text-xs py-3 text-center">No sports match &quot;{sportQuery}&quot;</p>
               ) : (
                 filteredSports.map((s) => (
-                  <button
+                  <SportOptionRow
                     key={s.id}
-                    type="button"
-                    role="option"
-                    aria-selected={sport === s.id}
-                    onClick={() => setSport(s.id)}
-                    className={cn(
-                      "w-full flex min-h-[2.5rem] items-center gap-2.5 rounded-lg py-2 px-2.5 text-left text-sm transition-all",
-                      sport === s.id
-                        ? "bg-violet-500/15 text-violet-100 ring-1 ring-violet-500/35"
-                        : "text-slate-300 hover:bg-white/5"
-                    )}
-                  >
-                    <span
-                      className="shrink-0 text-xl leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
-                      aria-hidden
-                    >
-                      {s.icon}
-                    </span>
-                    <span className="min-w-0 truncate font-medium">{s.label}</span>
-                  </button>
+                    selected={sport === s.id}
+                    icon={s.icon}
+                    label={s.label}
+                    onSelect={() => setSport(s.id)}
+                  />
                 ))
               )}
             </div>
@@ -360,19 +473,71 @@ export function CreateGameModal({
               When
             </div>
             <div className="rounded-2xl border border-white/6 bg-gradient-to-b from-slate-900/60 to-slate-950/80 p-1 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
-              <input
-                type="datetime-local"
-                value={dateTime}
-                onChange={(e) => setDateTime(e.target.value)}
-                min={minDateTime}
-                className={cn(
-                  "w-full rounded-xl border-0 bg-slate-950/50 px-3 py-2.5 text-sm text-slate-200",
-                  "placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-violet-500/35",
-                  "[color-scheme:dark] accent-violet-500/70"
-                )}
-                style={{ colorScheme: "dark" }}
-                aria-label="Date and time of the game"
-              />
+              <Popover open={whenPickerOpen} onOpenChange={handleWhenOpenChange}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      "w-full rounded-xl border-0 bg-slate-950/50 px-3 py-2.5 text-sm text-left text-slate-200",
+                      "focus:outline-none focus:ring-1 focus:ring-violet-500/35",
+                      !dateTime.trim() && "text-slate-500"
+                    )}
+                    aria-label="Date and time of the game"
+                  >
+                    {whenTriggerLabel}
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="z-[100] w-auto max-w-[min(100vw-1.5rem,20rem)] border border-slate-700 bg-slate-900 p-0 text-slate-100 shadow-xl"
+                >
+                  <div className="border-b border-slate-800 p-1">
+                    <Calendar
+                      mode="single"
+                      selected={pickDate}
+                      onSelect={setPickDate}
+                      disabled={{ before: startOfToday() }}
+                      initialFocus
+                      className="bg-transparent text-slate-100"
+                    />
+                  </div>
+                  <div className="space-y-3 p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                        Time
+                      </span>
+                      <input
+                        type="time"
+                        value={pickTime}
+                        min={minTimeHHmm}
+                        onChange={(e) => setPickTime(e.target.value)}
+                        className={cn(
+                          "flex-1 rounded-lg border border-white/10 bg-slate-950/80 px-2 py-1.5 text-sm text-slate-200",
+                          "focus:outline-none focus:ring-1 focus:ring-violet-500/40 [color-scheme:dark]"
+                        )}
+                        aria-label="Time of the game"
+                      />
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-8 text-xs text-slate-400 hover:text-slate-200"
+                        onClick={clearWhen}
+                      >
+                        Clear
+                      </Button>
+                      <Button
+                        type="button"
+                        className="h-8 rounded-lg bg-violet-600 px-4 text-xs font-semibold text-white hover:bg-violet-500"
+                        onClick={applyWhenDone}
+                      >
+                        Done
+                      </Button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
             <p className="text-slate-600 text-[10px] mt-1.5">Optional — leave blank for &quot;time TBD&quot;</p>
           </div>

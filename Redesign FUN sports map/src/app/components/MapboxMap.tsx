@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 type ReactRoot = ReturnType<typeof createRoot>;
 import type { GameRow } from "../../lib/supabase";
 import type { ProfileNearbyRow } from "../../lib/supabase";
+import { isVenueGame } from "../../lib/mapGameTimer";
 import { gamesToGeoJSON } from "../types/mapGeoJSON";
 import { fetchSportsVenuesWithProgress } from "../lib/sportsVenues";
 import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
@@ -30,6 +31,7 @@ import { Avatar3DOverlay } from "./Avatar3DOverlay";
 import { GameEventPopup } from "./GameEventPopup";
 import { VenueInfoPopup } from "./VenueInfoPopup";
 import { ColocatedGamesPin } from "./ColocatedGamesPin";
+import { RandomLocationGamePin } from "./RandomLocationGamePin";
 import { ColocatedGamesModal } from "./ColocatedGamesModal";
 import { useIsMobile } from "./ui/use-mobile";
 
@@ -64,9 +66,6 @@ const MAP_STYLE_URL =
   (import.meta.env.VITE_MAPBOX_STYLE_URL as string | undefined)?.trim() ||
   "mapbox://styles/trcpoet/cmn1l2br1003e01s52y4q9uzt";
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?w=100&h=100&fit=crop";
-/** Default Ready Player Me GLB for 3D avatar when no profile avatar_glb_url is set. */
-const DEFAULT_AVATAR_GLB =
-  "https://models.readyplayer.me/64b7d2a3d1b31a0096b5e8c4.glb?quality=low";
 
 function haversineDistanceMeters(
   lat1: number,
@@ -134,6 +133,8 @@ type MapboxMapProps = {
   centerOnUserTrigger?: number;
   /** True while OpenStreetMap (Overpass) venue fetch is in progress. */
   onVenuesFetchLoadingChange?: (loading: boolean) => void;
+  /** Incremented every minute so game pin labels refresh (countdown / expiry). */
+  mapMinuteEpoch?: number;
 };
 
 export type VenueSelection = {
@@ -171,6 +172,7 @@ export function MapboxMap(props: MapboxMapProps) {
     onCreateGameAtVenue,
     centerOnUserTrigger,
     onVenuesFetchLoadingChange,
+    mapMinuteEpoch = 0,
   } = props;
   const currentUserId = props.currentUserId ?? null;
   const joinedSet = joinedGameIds ?? new Set<string>();
@@ -181,6 +183,7 @@ export function MapboxMap(props: MapboxMapProps) {
   const playerMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
   /** HTML markers for multiple games at the same coordinates (cluster pin). */
   const colocatedMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot }[]>([]);
+  const randomGameMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot }[]>([]);
   const userMarker2dRef = useRef<import("mapbox-gl").Marker | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -194,7 +197,6 @@ export function MapboxMap(props: MapboxMapProps) {
   const lastHandledGamePopupNonceRef = useRef<number | null>(null);
   const initialUserFlyDoneRef = useRef(false);
   const gameLayersInitedRef = useRef(false);
-  const bumpGameTimeoutRef = useRef<number | null>(null);
   const gamesRef = useRef(games);
   const onSelectGameRef = useRef(onSelectGame);
   const onJoinGameRef = useRef(onJoinGame);
@@ -229,73 +231,104 @@ export function MapboxMap(props: MapboxMapProps) {
   const gameIconHoverIdRef = useRef<string | null>(null);
   const gameIconHoverTRef = useRef(0);
   const gameIconHoverTargetRef = useRef(0);
-  const gameIconHoverRafRef = useRef(0);
+  /** Smooth click pulse (replaces instant 1.08 bump). */
+  const bumpAnimationRef = useRef<{ gameId: string; startMs: number } | null>(null);
+  /** performance.now() for dt-based exponential smoothing (frame-rate independent). */
+  const gameIconHoverLastTsRef = useRef<number | null>(null);
   /** Phase-integrated pulse + smoothed hz (idle ↔ slow when venue selected) */
   const venuePulsePhaseRef = useRef(0);
   const venuePulseHzRef = useRef(MapCfg.VENUE_DOT_PULSE_HZ_IDLE);
   const venuePulseLastTRef = useRef<number | null>(null);
 
-  // Small tap animation for the game sport icon when opening the join modal.
+  // Smooth tap pulse on the game sport icon when opening the join modal (see GAME_ICON_BUMP_DURATION_MS).
   const bumpGameIcon = (gameId: string) => {
+    bumpAnimationRef.current = { gameId, startMs: performance.now() };
     setBumpGameId(gameId);
-    if (bumpGameTimeoutRef.current != null) window.clearTimeout(bumpGameTimeoutRef.current);
-    bumpGameTimeoutRef.current = window.setTimeout(() => setBumpGameId(null), 240);
+    bumpGameIdRef.current = gameId;
   };
 
-  const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+  /** 0–1 easing with flat derivatives at endpoints (smooth hover zoom in/out). */
+  const smootherstep = (t: number) => {
+    const x = Math.min(1, Math.max(0, t));
+    return x * x * x * (x * (x * 6 - 15) + 10);
+  };
 
-  /** Individual game sport icons: bump / selection / hover zoom-out (smooth t via rAF). */
+  /** Individual game sport icons: bump pulse / selection / hover + icon-rotate (must stay in one update so Mapbox doesn’t drop rotation). */
   const applyGameIconLayout = useCallback(() => {
     const map = mapRef.current;
     if (!map?.getLayer(L_GAME_ICON)) return;
     const sid = selectedGameIdRef.current ?? "";
-    const bid = bumpGameIdRef.current ?? "";
     const hid = gameIconHoverIdRef.current;
-    const base = 0.82;
+    const base = MapCfg.GAME_ICON_LAYOUT_BASE;
+    const bumpLow = base * MapCfg.GAME_ICON_GL_CLICK_DIP_MULT;
+
+    let bumpAnimId: string | null = null;
+    let bumpPulse = 0;
+    const anim = bumpAnimationRef.current;
+    if (anim) {
+      const elapsed = performance.now() - anim.startMs;
+      const dur = MapCfg.GAME_ICON_BUMP_DURATION_MS;
+      if (elapsed >= dur) {
+        bumpAnimationRef.current = null;
+        setBumpGameId(null);
+        bumpPulse = 0;
+      } else {
+        bumpPulse = MapCfg.glIconClickBumpPulse(elapsed, dur);
+        bumpAnimId = anim.gameId;
+      }
+    }
+
+    /** Zoom out (smaller icon-size) at peak pulse, then return — matches HTML `htmlPinPressScale`. */
+    const bumpSize = base - (base - bumpLow) * bumpPulse;
     const hoverTarget = base * MapCfg.GAME_ICON_HOVER_MULT;
-    const ht = easeOutCubic(gameIconHoverTRef.current);
+    const ht = smootherstep(gameIconHoverTRef.current);
     const hoverSize = hid ? base + (hoverTarget - base) * ht : base;
-    map.setLayoutProperty(L_GAME_ICON, "icon-size", [
-      "case",
-      ["==", ["get", "id"], bid],
-      1.08,
+
+    const glowW = bumpPulse * 3;
+    const glowBlur = bumpPulse * 1;
+
+    const sizeCase: unknown[] = ["case"];
+    if (bumpAnimId) {
+      sizeCase.push(["==", ["get", "id"], bumpAnimId], bumpSize);
+    }
+    sizeCase.push(
       ["==", ["get", "id"], sid],
-      0.98,
+      MapCfg.GAME_ICON_LAYOUT_SELECTED,
       ["==", ["get", "id"], hid ?? ""],
       hoverSize,
-      base,
-    ]);
-    map.setPaintProperty(L_GAME_ICON, "icon-halo-color", [
-      "case",
-      ["==", ["get", "id"], bid],
-      "rgba(251, 191, 36, 0.72)",
-      ["==", ["get", "id"], sid],
-      "rgba(251, 191, 36, 0.55)",
-      "rgba(0, 0, 0, 0)",
-    ]);
-    map.setPaintProperty(L_GAME_ICON, "icon-halo-width", [
-      "case",
-      ["==", ["get", "id"], bid],
-      3,
-      ["==", ["get", "id"], sid],
-      2,
-      0,
-    ]);
-    map.setPaintProperty(L_GAME_ICON, "icon-halo-blur", [
-      "case",
-      ["==", ["get", "id"], bid],
-      1,
-      ["==", ["get", "id"], sid],
-      0.8,
-      0,
-    ]);
-  }, []);
+      base
+    );
+    map.setLayoutProperty(L_GAME_ICON, "icon-size", sizeCase as import("mapbox-gl").PropertyValueSpecification<number>);
 
-  useEffect(() => {
-    return () => {
-      if (bumpGameTimeoutRef.current != null) window.clearTimeout(bumpGameTimeoutRef.current);
-    };
-  }, []);
+    const haloColorCase: unknown[] = ["case"];
+    if (bumpAnimId && bumpPulse > 0.02) {
+      haloColorCase.push(["==", ["get", "id"], bumpAnimId], "rgba(251, 191, 36, 0.72)");
+    }
+    haloColorCase.push(["==", ["get", "id"], sid], "rgba(251, 191, 36, 0.55)", "rgba(0, 0, 0, 0)");
+    map.setPaintProperty(L_GAME_ICON, "icon-halo-color", haloColorCase as import("mapbox-gl").PropertyValueSpecification<string>);
+
+    const haloWCase: unknown[] = ["case"];
+    if (bumpAnimId && bumpPulse > 0.02) {
+      haloWCase.push(["==", ["get", "id"], bumpAnimId], glowW);
+    }
+    haloWCase.push(["==", ["get", "id"], sid], 2, 0);
+    map.setPaintProperty(L_GAME_ICON, "icon-halo-width", haloWCase as import("mapbox-gl").PropertyValueSpecification<number>);
+
+    const haloBlurCase: unknown[] = ["case"];
+    if (bumpAnimId && bumpPulse > 0.02) {
+      haloBlurCase.push(["==", ["get", "id"], bumpAnimId], glowBlur);
+    }
+    haloBlurCase.push(["==", ["get", "id"], sid], 0.8, 0);
+    map.setPaintProperty(L_GAME_ICON, "icon-halo-blur", haloBlurCase as import("mapbox-gl").PropertyValueSpecification<number>);
+
+    const tNow = performance.now();
+    const rotAmp = MapCfg.GAME_ICON_ROTATE_AMPLITUDE_DEG;
+    const rotPeriod = MapCfg.GAME_ICON_ROTATE_PERIOD_MS;
+    const iconRotate = Math.sin((tNow / rotPeriod) * Math.PI * 2) * rotAmp;
+    try {
+      map.setLayoutProperty(L_GAME_ICON, "icon-rotate", iconRotate);
+    } catch (_) {}
+  }, [setBumpGameId]);
 
   // —— Map init: sports-first dark basemap, terrain, fog ———
   useEffect(() => {
@@ -778,6 +811,11 @@ export function MapboxMap(props: MapboxMapProps) {
       if (el) el.style.visibility = showIndividuals ? "visible" : "hidden";
     });
 
+    randomGameMarkerEntriesRef.current.forEach(({ marker }) => {
+      const el = marker.getElement();
+      if (el) el.style.visibility = showIndividuals ? "visible" : "hidden";
+    });
+
     const g = gamesRef.current;
     setMapUxHint(
       g.length > 0 && !showClusters && !showIndividuals && zoom < MapCfg.GAME_INDIVIDUAL_MIN_ZOOM
@@ -841,7 +879,10 @@ export function MapboxMap(props: MapboxMapProps) {
       ],
       layout: {
         "icon-image": ["coalesce", ["get", "sport_map_icon"], getGameMapboxIconId("other")],
-        "icon-size": 0.82,
+        "icon-size": MapCfg.GAME_ICON_LAYOUT_BASE,
+        "icon-rotate": 0,
+        "icon-rotation-alignment": "viewport",
+        "icon-pitch-alignment": "viewport",
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
       },
@@ -858,8 +899,9 @@ export function MapboxMap(props: MapboxMapProps) {
         ["!=", ["coalesce", ["get", "marker_kind"], ""], "colocated"],
       ],
       layout: {
-        "text-field": ["get", "players_label"],
+        "text-field": ["coalesce", ["get", "map_label"], ["get", "players_label"]],
         "text-size": 9,
+        "text-line-height": 1.1,
         "text-offset": [0, 1.35],
         "text-anchor": "top",
         "text-allow-overlap": true,
@@ -913,29 +955,6 @@ export function MapboxMap(props: MapboxMapProps) {
       map.getCanvas().style.cursor = "";
     });
 
-    const runGameIconHoverTick = () => {
-      const target = gameIconHoverTargetRef.current;
-      const t = gameIconHoverTRef.current;
-      const sk = MapCfg.GAME_ICON_HOVER_SMOOTH;
-      const newT = t + (target - t) * sk;
-      gameIconHoverTRef.current = newT;
-      applyGameIconLayout();
-      if (Math.abs(target - newT) < 0.003) {
-        gameIconHoverTRef.current = target;
-        applyGameIconLayout();
-        if (target === 0) gameIconHoverIdRef.current = null;
-        gameIconHoverRafRef.current = 0;
-        return;
-      }
-      gameIconHoverRafRef.current = requestAnimationFrame(runGameIconHoverTick);
-    };
-
-    const ensureGameIconHoverLoop = () => {
-      if (!gameIconHoverRafRef.current) {
-        gameIconHoverRafRef.current = requestAnimationFrame(runGameIconHoverTick);
-      }
-    };
-
     map.on("mouseenter", L_GAME_ICON, (e) => {
       map.getCanvas().style.cursor = "pointer";
       const f = e.features?.[0];
@@ -946,12 +965,10 @@ export function MapboxMap(props: MapboxMapProps) {
         gameIconHoverTRef.current = 0;
       }
       gameIconHoverTargetRef.current = 1;
-      ensureGameIconHoverLoop();
     });
     map.on("mouseleave", L_GAME_ICON, () => {
       map.getCanvas().style.cursor = "";
       gameIconHoverTargetRef.current = 0;
-      ensureGameIconHoverLoop();
     });
 
     let visRaf = 0;
@@ -975,13 +992,10 @@ export function MapboxMap(props: MapboxMapProps) {
       map.off("zoom", scheduleVis);
       map.off("moveend", applyMapLayerVisibility);
       map.off("zoomend", applyMapLayerVisibility);
-      if (gameIconHoverRafRef.current) {
-        cancelAnimationFrame(gameIconHoverRafRef.current);
-        gameIconHoverRafRef.current = 0;
-      }
       gameIconHoverIdRef.current = null;
       gameIconHoverTRef.current = 0;
       gameIconHoverTargetRef.current = 0;
+      gameIconHoverLastTsRef.current = null;
     };
   }, [mapLoaded, applyMapLayerVisibility, applyGameIconLayout]);
 
@@ -995,7 +1009,7 @@ export function MapboxMap(props: MapboxMapProps) {
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
     src.setData(gamesToGeoJSON(capped, selectedGameId));
     applyMapLayerVisibility();
-  }, [mapLoaded, games, selectedGameId, applyMapLayerVisibility]);
+  }, [mapLoaded, games, selectedGameId, mapMinuteEpoch, applyMapLayerVisibility]);
 
   /** Same-coordinate games: single HTML cluster pin (avoids overlapping GL sport icons). */
   useEffect(() => {
@@ -1058,13 +1072,129 @@ export function MapboxMap(props: MapboxMapProps) {
         }
       }, 0);
     };
-  }, [mapLoaded, games, selectedGameId, bumpGameId, applyMapLayerVisibility]);
+  }, [mapLoaded, games, selectedGameId, bumpGameId, mapMinuteEpoch, applyMapLayerVisibility]);
+
+  /** Map-tap games (no venue label): HTML pin with dd/hh/mm/ss pill — not drawn on GL symbol layer. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
+    const { singles } = splitColocatedGames(capped);
+    const randomSingles = singles.filter((g) => !isVenueGame(g));
+
+    let cancelled = false;
+    if (randomSingles.length > 0) {
+      loadMapboxGl().then((mapboxgl) => {
+        if (cancelled || mapRef.current !== map) return;
+        const Marker = mapboxgl.default.Marker;
+        const next: { marker: import("mapbox-gl").Marker; root: ReactRoot }[] = [];
+
+        for (const game of randomSingles) {
+          const el = document.createElement("div");
+          el.style.pointerEvents = "auto";
+          const root = createRoot(el);
+          root.render(
+            <RandomLocationGamePin
+              game={game}
+              selectedGameId={selectedGameId}
+              bumpGameId={bumpGameId}
+              onPress={() => {
+                gameInteractionTsRef.current = Date.now();
+                onSelectGameRef.current(game);
+                bumpGameIcon(game.id);
+                const p = map.project([game.lng, game.lat]);
+                setEventPopup({ game, point: { x: p.x, y: p.y } });
+              }}
+            />
+          );
+          const marker = new Marker({ element: el, anchor: "center" })
+            .setLngLat([game.lng, game.lat])
+            .addTo(map);
+          next.push({ marker, root });
+        }
+        randomGameMarkerEntriesRef.current = next;
+        applyMapLayerVisibility();
+      });
+    } else {
+      applyMapLayerVisibility();
+    }
+
+    return () => {
+      cancelled = true;
+      const snapshot = [...randomGameMarkerEntriesRef.current];
+      randomGameMarkerEntriesRef.current = [];
+      for (const { marker } of snapshot) {
+        try {
+          marker.remove();
+        } catch (_) {}
+      }
+      const roots = snapshot.map((s) => s.root);
+      window.setTimeout(() => {
+        for (const root of roots) {
+          try {
+            root.unmount();
+          } catch (_) {}
+        }
+      }, 0);
+    };
+  }, [mapLoaded, games, selectedGameId, bumpGameId, mapMinuteEpoch, applyMapLayerVisibility]);
 
   /** Selected / bump / hover: game sport icon layout + halo. */
   useEffect(() => {
     if (!mapLoaded) return;
     applyGameIconLayout();
   }, [mapLoaded, selectedGameId, bumpGameId, applyGameIconLayout]);
+
+  /**
+   * Single rAF loop: hover smoothing + applyGameIconLayout (icon-size, halo, icon-rotate).
+   * Keeps rotation in sync with layout updates so Mapbox doesn’t drop icon-rotate.
+   */
+  useEffect(() => {
+    if (!mapLoaded) return;
+    let cancelled = false;
+    let raf = 0;
+    const tick = (now: number) => {
+      if (cancelled) return;
+      const m = mapRef.current;
+      if (!m?.getLayer(L_GAME_ICON)) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      try {
+        if (m.getLayoutProperty(L_GAME_ICON, "visibility") === "none") {
+          raf = requestAnimationFrame(tick);
+          return;
+        }
+      } catch (_) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+
+      const last = gameIconHoverLastTsRef.current;
+      const dt = last == null ? 16 : Math.min(48, Math.max(0, now - last));
+      gameIconHoverLastTsRef.current = now;
+
+      const target = gameIconHoverTargetRef.current;
+      const ht = gameIconHoverTRef.current;
+      const tau = MapCfg.GAME_ICON_HOVER_TAU_MS;
+      const alpha = 1 - Math.exp(-dt / tau);
+      gameIconHoverTRef.current = ht + (target - ht) * alpha;
+      if (Math.abs(target - gameIconHoverTRef.current) < 0.0012) {
+        gameIconHoverTRef.current = target;
+        if (target === 0) gameIconHoverIdRef.current = null;
+      }
+
+      applyGameIconLayout();
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      gameIconHoverLastTsRef.current = null;
+    };
+  }, [mapLoaded, applyGameIconLayout]);
 
   // Map click:
   // - On desktop: close popup only.
@@ -1127,6 +1257,8 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map || !mapLoaded || !onMapDoubleClick || isMobile) return;
 
     const handler = (e: { lngLat: { lat: number; lng: number }; point: { x: number; y: number } }) => {
+      if (Date.now() - venueInteractionTsRef.current < 400) return;
+
       const container = map.getContainer();
       const rect = container.getBoundingClientRect();
 
@@ -1158,8 +1290,8 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [mapLoaded, onMapDoubleClick, isMobile, onSelectVenue]);
 
-  const glbUrl = avatarGlbUrl ?? userAvatarUrl ?? DEFAULT_AVATAR_GLB;
-  const use3DOverlay = enable3D && !!userCoords && !!glbUrl && !use2DAvatar;
+  /** 3D overlay only when we have a real GLB URL (Ready Player Me). Never treat 2D profile image URLs as GLB. */
+  const use3DOverlay = enable3D && !!userCoords && !!avatarGlbUrl && !use2DAvatar;
 
   // —— 2D user marker when not using 3D overlay ———
   useEffect(() => {
@@ -1754,11 +1886,11 @@ export function MapboxMap(props: MapboxMapProps) {
         />
       )}
 
-      {mapLoaded && use3DOverlay && userCoords && mapRef.current && (
+      {mapLoaded && use3DOverlay && userCoords && mapRef.current && avatarGlbUrl && (
         <Avatar3DOverlay
           map={mapRef.current}
           userCoords={userCoords}
-          glbUrl={glbUrl}
+          glbUrl={avatarGlbUrl}
         />
       )}
     </div>

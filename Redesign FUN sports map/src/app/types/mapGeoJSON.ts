@@ -6,6 +6,7 @@
 
 import type { Feature, FeatureCollection, Point } from "geojson";
 import type { GameRow } from "../../lib/supabase";
+import { isVenueGame } from "../../lib/mapGameTimer";
 import { colocatedGroupId, splitColocatedGames } from "../lib/colocateGames";
 import { getGameMapboxIconId, getSportIconEmoji, resolveSportMapboxSuffix } from "../map/gameSportIcons";
 
@@ -21,6 +22,8 @@ export type GameFeatureProperties = {
   players_filled: number;
   players_total: number;
   players_label: string; // e.g. "3/10"
+  /** Roster text under GL icon (venue games only; random-location games use HTML pins). */
+  map_label: string;
   sport_emoji: string; // UI / parity with map glyph
   visibility?: "public" | "private";
   title?: string;
@@ -49,11 +52,13 @@ export function getGameStatus(startsAt: string | null): GameStatus {
   return "scheduled";
 }
 
-/** Map GameRow to GeoJSON feature. Uses `participant_count` from `get_games_nearby` when present. */
+/** Map GameRow to GeoJSON feature (venue / non-colocated games only). Uses `participant_count` from `get_games_nearby` when present. */
 export function gameToFeature(game: GameRow, _selectedGameId: string | null): GameFeature {
   const players_filled = game.participant_count ?? 0;
   const players_total = game.spots_needed;
   const status = getGameStatus(game.starts_at);
+  const players_label = `${players_filled}/${players_total}`;
+  const map_label = players_label;
   return {
     type: "Feature",
     id: game.id,
@@ -68,7 +73,8 @@ export function gameToFeature(game: GameRow, _selectedGameId: string | null): Ga
       status,
       players_filled,
       players_total,
-      players_label: `${players_filled}/${players_total}`,
+      players_label,
+      map_label,
       sport_emoji: getSportIconEmoji(game.sport),
       title: game.title,
     },
@@ -80,6 +86,8 @@ function colocatedGroupToFeature(games: GameRow[]): GameFeature {
   const id = colocatedGroupId(games);
   const totalSpots = games.reduce((s, g) => s + (g.spots_needed ?? 0), 0);
   const filled = games.reduce((s, g) => s + (g.participant_count ?? 0), 0);
+  const players_label = String(games.length);
+  const map_label = players_label;
   return {
     type: "Feature",
     id,
@@ -95,17 +103,23 @@ function colocatedGroupToFeature(games: GameRow[]): GameFeature {
       status: getGameStatus(g0.starts_at),
       players_filled: filled,
       players_total: totalSpots,
-      players_label: String(games.length),
+      players_label,
+      map_label,
       sport_emoji: getSportIconEmoji(g0.sport),
       title: `${games.length} games`,
     },
   };
 }
 
+/**
+ * GeoJSON for Mapbox GL: venue-only singles + colocated cluster points.
+ * Random-location singles (no `location_label`) are rendered as HTML markers with a countdown pill.
+ */
 export function gamesToGeoJSON(games: GameRow[], selectedGameId: string | null): GamesGeoJSON {
   const { singles, groups } = splitColocatedGames(games);
+  const venueSingles = singles.filter(isVenueGame);
   const features: GameFeature[] = [
-    ...singles.map((g) => gameToFeature(g, selectedGameId)),
+    ...venueSingles.map((g) => gameToFeature(g, selectedGameId)),
     ...groups.map((grp) => colocatedGroupToFeature(grp)),
   ];
   return {

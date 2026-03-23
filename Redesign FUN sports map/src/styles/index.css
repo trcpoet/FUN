@@ -66,3 +66,18 @@
   height: 100%;
   object-fit: cover;
 }
+
+/* Individual / colocated game sport emojis: subtle wobble (matches GL icon-rotate on map) */
+@keyframes game-sport-icon-wobble {
+  0% {
+    transform: rotate(-5deg);
+  }
+  100% {
+    transform: rotate(5deg);
+  }
+}
+.game-sport-icon-wobble {
+  display: inline-block;
+  animation: game-sport-icon-wobble 5.2s ease-in-out infinite alternate;
+  transform-origin: center center;
+}

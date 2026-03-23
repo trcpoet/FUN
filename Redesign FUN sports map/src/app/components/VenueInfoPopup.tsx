@@ -1,8 +1,8 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { X, MapPin, Activity, ChevronRight, MessageCircle } from "lucide-react";
-import { format } from "date-fns";
 import type { VenueSelection } from "./MapboxMap";
 import type { GameRow } from "../../lib/supabase";
+import { formatVenueGameTimerSummary } from "../../lib/mapGameTimer";
 import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";
 import { getSportIconEmoji } from "../map/gameSportIcons";
 
@@ -49,25 +49,34 @@ export function VenueInfoPopup({
   onOpenChat,
 }: VenueInfoPopupProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
   /** Extra offset after measuring so the card stays inside the viewport. */
   const [nudge, setNudge] = useState({ x: 0, y: 0 });
 
+  /** Reset then measure after layout — never put `nudge` in deps (subpixel drift caused infinite updates). */
   useLayoutEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const maxX = window.innerWidth - VIEW_MARGIN;
-    const maxY = window.innerHeight - VIEW_MARGIN;
-    let dx = 0;
-    let dy = 0;
-    if (rect.left < VIEW_MARGIN) dx = VIEW_MARGIN - rect.left;
-    if (rect.right > maxX) dx += maxX - rect.right;
-    if (rect.top < VIEW_MARGIN) dy = VIEW_MARGIN - rect.top;
-    if (rect.bottom > maxY) dy += maxY - rect.bottom;
-    if (dx !== 0 || dy !== 0) {
-      setNudge((n) => ({ x: n.x + dx, y: n.y + dy }));
-    }
-  }, [anchorClient.x, anchorClient.y, nudge.x, nudge.y]);
+    setNudge({ x: 0, y: 0 });
+    const raf = requestAnimationFrame(() => {
+      const el = rootRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const maxX = window.innerWidth - VIEW_MARGIN;
+      const maxY = window.innerHeight - VIEW_MARGIN;
+      let dx = 0;
+      let dy = 0;
+      if (rect.left < VIEW_MARGIN) dx = VIEW_MARGIN - rect.left;
+      if (rect.right > maxX) dx += maxX - rect.right;
+      if (rect.top < VIEW_MARGIN) dy = VIEW_MARGIN - rect.top;
+      if (rect.bottom > maxY) dy += maxY - rect.bottom;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      setNudge({ x: dx, y: dy });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [anchorClient.x, anchorClient.y]);
   const name = prettyLabel(venue.name);
   const sport = prettyLabel(venue.sport);
   const leisure = prettyLabel(venue.leisure);
@@ -162,10 +171,7 @@ export function VenueInfoPopup({
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm text-slate-100 truncate">{g.title || "Pickup"}</p>
                                 <p className="text-[11px] text-slate-500">
-                                  {g.starts_at
-                                    ? format(new Date(g.starts_at), "MMM d · h:mm a")
-                                    : "Time TBD"}{" "}
-                                  · {distanceMiles(g)} mi
+                                  {formatVenueGameTimerSummary(g, now)} · {distanceMiles(g)} mi
                                 </p>
                               </div>
                               {joined ? (

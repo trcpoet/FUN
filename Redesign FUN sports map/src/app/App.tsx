@@ -28,6 +28,7 @@ import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl } from "../lib/api";
 import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow } from "../lib/supabase";
+import { filterGamesVisibleOnMap } from "../lib/mapGameTimer";
 
 const DEFAULT_AVATAR_IMAGE =
   "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=100";
@@ -38,6 +39,13 @@ const EXTENDED_GAMES_RADIUS_KM = 120;
 
 export default function App() {
   const { coords: userCoords, error: locationError } = useGeolocation();
+
+  /** Minute tick: drop expired untimed games from UI and refresh map countdown labels. */
+  const [mapMinuteEpoch, setMapMinuteEpoch] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setMapMinuteEpoch((n) => n + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebouncedValue(searchQuery, SEARCH_DEBOUNCE_MS);
@@ -406,14 +414,14 @@ export default function App() {
   }, [sportFocus, games, nearbyLoading, gamesRadiusKm, userCoords]);
 
   const displayGames = useMemo(() => {
-    let list = games;
+    let list = filterGamesVisibleOnMap(games, Date.now());
     if (sportFocus) list = gamesMatchingSport(list, sportFocus.sport);
     if (appliedFilters.sports.length > 0) {
       const allow = new Set(appliedFilters.sports);
       list = list.filter((g) => allow.has(g.sport));
     }
     return list;
-  }, [games, sportFocus, appliedFilters.sports]);
+  }, [games, sportFocus, appliedFilters.sports, mapMinuteEpoch]);
 
   useEffect(() => {
     if (!selectedGame) return;
@@ -502,6 +510,7 @@ export default function App() {
         <MapboxMap
           userCoords={userCoords}
           games={displayGames}
+          mapMinuteEpoch={mapMinuteEpoch}
           mapCameraRequest={mapCameraRequest}
           nearbyProfiles={nearbyProfiles}
           currentUserId={currentUserId}
@@ -546,7 +555,7 @@ export default function App() {
           }}
           centerOnUserTrigger={centerOnUserTrigger}
           enable3D={true}
-          userAvatarUrl={null}
+          userAvatarUrl={avatarUrl ?? null}
           avatarGlbUrl={avatarGlbUrl}
         />
       </Suspense>
@@ -631,7 +640,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => navigate("/profile")}
-              className="w-full h-full rounded-full border-2 border-slate-700/50 bg-slate-800/80 backdrop-blur-md overflow-hidden flex items-center justify-center shadow-lg"
+              className="w-full h-full cursor-pointer rounded-full border-2 border-slate-700/50 bg-slate-800/80 backdrop-blur-md overflow-hidden flex items-center justify-center shadow-lg transition-[box-shadow,transform,border-color] duration-200 ease-out hover:border-cyan-400/55 hover:ring-2 hover:ring-cyan-400/35 hover:shadow-[0_0_20px_rgba(34,211,238,0.25)] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]"
               aria-label="Profile"
             >
               <img
