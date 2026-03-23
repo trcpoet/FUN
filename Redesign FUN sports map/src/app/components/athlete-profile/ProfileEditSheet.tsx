@@ -1277,36 +1277,35 @@ export function ProfileEditSheet({
               </Collapsible>
             </section>
             )}
+            <div className="border-t border-white/[0.08] pt-8 mt-8 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+              <div className="mx-auto flex w-full max-w-md flex-col items-stretch justify-center gap-2 sm:max-w-2xl sm:flex-row sm:justify-center sm:gap-3">
+                <Button
+                  type="button"
+                  className="h-11 w-full bg-emerald-600 text-sm text-white hover:bg-emerald-700 sm:w-auto sm:min-w-[11rem]"
+                  disabled={saving}
+                  onClick={() => void handleSave()}
+                >
+                  {saving ? "Saving…" : "Save profile"}
+                </Button>
+                {onSignOut ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full border-red-500/35 text-sm text-red-300 hover:bg-red-500/10 hover:text-red-200 sm:w-auto sm:min-w-[11rem]"
+                    onClick={() => {
+                      void Promise.resolve(onSignOut());
+                      onOpenChange(false);
+                    }}
+                  >
+                    <LogOut className="mr-2 size-4" />
+                    Log out
+                  </Button>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
         </div>
-        </div>
-
-        <div className="shrink-0 border-t border-white/[0.08] bg-[#0A0F1C]/98 px-4 py-3 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md supports-[backdrop-filter]:bg-[#0A0F1C]/92 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 sm:flex-row sm:justify-end sm:gap-3">
-            <Button
-              type="button"
-              className="h-11 w-full bg-emerald-600 text-sm text-white hover:bg-emerald-700 sm:min-w-[11rem]"
-              disabled={saving}
-              onClick={() => void handleSave()}
-            >
-              {saving ? "Saving…" : "Save profile"}
-            </Button>
-            {onSignOut ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 w-full border-red-500/35 text-sm text-red-300 hover:bg-red-500/10 hover:text-red-200 sm:min-w-[11rem]"
-                onClick={() => {
-                  void Promise.resolve(onSignOut());
-                  onOpenChange(false);
-                }}
-              >
-                <LogOut className="mr-2 size-4" />
-                Log out
-              </Button>
-            ) : null}
-          </div>
         </div>
         </div>
       </SheetContent>
