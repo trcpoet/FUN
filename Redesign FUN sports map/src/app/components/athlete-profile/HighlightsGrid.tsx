@@ -9,9 +9,11 @@ type Props = {
   highlights: HighlightEntry[];
   onAdd?: () => void;
   className?: string;
+  /** Classes for the reel grid (e.g. responsive column count). */
+  gridClassName?: string;
 };
 
-export function HighlightsGrid({ highlights, onAdd, className }: Props) {
+export function HighlightsGrid({ highlights, onAdd, className, gridClassName }: Props) {
   const [visible, setVisible] = useState(PAGE);
 
   useEffect(() => {
@@ -21,8 +23,13 @@ export function HighlightsGrid({ highlights, onAdd, className }: Props) {
   if (highlights.length === 0) {
     return (
       <div className={cn("space-y-2", className)}>
-        <div className="grid grid-cols-3 gap-[2px] rounded-lg overflow-hidden bg-white/[0.06]">
-          {Array.from({ length: 9 }, (_, i) => i).map((i) => (
+        <div
+          className={cn(
+            "grid gap-[2px] rounded-lg overflow-hidden bg-white/[0.06] grid-cols-2 md:grid-cols-3",
+            gridClassName,
+          )}
+        >
+          {Array.from({ length: 6 }, (_, i) => i).map((i) => (
             <button
               key={i}
               type="button"
@@ -42,7 +49,12 @@ export function HighlightsGrid({ highlights, onAdd, className }: Props) {
 
   return (
     <div className={cn("space-y-3", className)}>
-      <div className="grid grid-cols-3 gap-[2px] rounded-lg overflow-hidden bg-white/[0.06]">
+      <div
+        className={cn(
+          "grid gap-[2px] rounded-lg overflow-hidden bg-white/[0.06] grid-cols-2 md:grid-cols-3",
+          gridClassName,
+        )}
+      >
         {slice.map((cell) => {
           const thumb = cell.thumbUrl?.trim();
           const isVideo = cell.mediaKind === "video" && thumb;

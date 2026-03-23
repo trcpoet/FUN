@@ -1,23 +1,26 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { useUserStats } from "../../hooks/useUserStats";
+import { useNotifications } from "../../hooks/useNotifications";
 import { signOut, getMyBadges, uploadAvatarImage } from "../../lib/api";
 import { useIsMobile } from "../components/ui/use-mobile";
 import {
-  ProfileHero,
-  ProfileActionRow,
-  ExperienceTimeline,
   ProfileEditSheet,
-  ProfileStickyBar,
-  StoriesRail,
   PostsReelsSection,
   AddPostOrReelDialog,
   type AddFeedKind,
   AboutSheet,
-  DiscoveredPeopleCarousel,
   ProfileBadgesSection,
+  ExperienceTimeline,
   type UserBadgeWithDetail,
+  ProfileHubHeader,
+  ProfileHubHero,
+  PerformanceStatsStrip,
+  ProfileComposerCard,
+  QuickStatusPostDialog,
+  ProfileActionRow,
+  DiscoveredPeopleCarousel,
 } from "../components/athlete-profile";
 import { mergeAthleteProfile } from "../../lib/athleteProfile";
 import { cn } from "../components/ui/utils";
@@ -27,17 +30,20 @@ export default function Profile() {
   const { user } = useAuth();
   const { displayName, avatarUrl, updateProfile, refetch, athleteProfile, loading } = useMyProfile();
   const { stats } = useUserStats();
+  const { notifications, markRead } = useNotifications({ limit: 12 });
   const isMobile = useIsMobile();
   const [badges, setBadges] = useState<UserBadgeWithDetail[]>([]);
   const [editOpen, setEditOpen] = useState(false);
   const [addFeedOpen, setAddFeedOpen] = useState(false);
   const [addFeedKind, setAddFeedKind] = useState<AddFeedKind>("post");
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [shareCopiedAt, setShareCopiedAt] = useState<number | null>(null);
   const [editDisplayName, setEditDisplayName] = useState("");
-  const [sticky, setSticky] = useState(false);
-  const heroRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
 
   useEffect(() => {
     let cancelled = false;
@@ -53,144 +59,143 @@ export default function Profile() {
     if (editOpen) setEditDisplayName(displayName ?? "");
   }, [editOpen, displayName]);
 
-  useEffect(() => {
-    const hero = heroRef.current;
-    if (!hero || loading) return;
-    const obs = new IntersectionObserver(
-      ([e]) => {
-        setSticky(!e.isIntersecting);
-      },
-      { threshold: 0, rootMargin: "-52px 0px 0px 0px" },
-    );
-    obs.observe(hero);
-    return () => obs.disconnect();
-  }, [loading]);
-
   const handleSignOut = async () => {
     await signOut();
     navigate("/login", { replace: true });
   };
 
-  const handleShare = () => {
+  const handleShare = async () => {
     const url = user?.id
       ? `${window.location.origin}/athlete/${user.id}`
       : `${window.location.origin}/profile`;
     const handle = athleteProfile.handle?.replace(/^@/, "") || "";
     const sports = (athleteProfile.primarySports ?? []).slice(0, 2).join(" · ");
     const lvl = stats?.level ?? 1;
-    const block = [
-      `${displayName?.trim() || "Player"}${handle ? ` @${handle}` : ""} · FUN`,
-      [sports && `Sports: ${sports}`, `Lvl ${lvl}`].filter(Boolean).join(" · "),
-      url,
-    ]
-      .filter(Boolean)
-      .join("\n");
-    void navigator.clipboard.writeText(block).catch(() => navigator.clipboard.writeText(url));
+    const headline = `${displayName?.trim() || "Player"}${handle ? ` @${handle}` : ""} · FUN`;
+    const detail = [sports && `Sports: ${sports}`, `Lvl ${lvl}`].filter(Boolean).join(" · ");
+    const textBlock = [headline, detail].filter(Boolean).join("\n");
+    const fullBlock = [textBlock, url].join("\n");
+
+    const shareData: ShareData = { title: headline, text: textBlock, url };
+    const canNativeShare =
+      typeof navigator.share === "function" &&
+      (!navigator.canShare || navigator.canShare(shareData));
+
+    if (canNativeShare) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        /* fall through to clipboard */
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(fullBlock);
+      setShareCopiedAt(Date.now());
+      window.setTimeout(() => setShareCopiedAt(null), 2500);
+    } catch {
+      try {
+        await navigator.clipboard.writeText(url);
+        setShareCopiedAt(Date.now());
+        window.setTimeout(() => setShareCopiedAt(null), 2500);
+      } catch {
+        window.prompt("Copy this profile link:", url);
+      }
+    }
   };
 
   const fallbackInitial = (displayName?.trim() || "?")[0].toUpperCase();
   const primarySports = athleteProfile.primarySports ?? [];
   const pinnedPost = (athleteProfile.posts ?? []).find((p) => p.pinned) ?? null;
 
-  const shellClass = cn(
-    "mx-auto w-full px-4 pb-24 pt-0",
-    isMobile ? "max-w-lg" : "max-w-6xl md:px-10 lg:px-14",
-  );
+  const openAddPost = () => {
+    setAddFeedKind("post");
+    setAddFeedOpen(true);
+  };
+
+  const openAddReel = () => {
+    setAddFeedKind("reel");
+    setAddFeedOpen(true);
+  };
+
+  /* pt-14 clears fixed header on all breakpoints (hero no longer extends under the bar). */
+  const shellClass = cn("mx-auto w-full max-w-lg px-3 pb-28 pt-14 md:max-w-6xl md:px-8");
 
   return (
-    <div className="min-h-screen w-full bg-[#080c14] text-white">
-      <ProfileStickyBar
-        visible={sticky && !loading}
-        displayName={displayName?.trim() || "Player"}
-        avatarUrl={avatarUrl}
-        fallbackInitial={fallbackInitial}
+    <div className="min-h-screen w-full bg-[#0D1117] text-white">
+      <ProfileHubHeader
         onBack={() => navigate("/")}
         onOpenSettings={() => setEditOpen(true)}
-        onShare={handleShare}
+        notifications={notifications}
+        unreadCount={unreadCount}
+        onMarkRead={markRead}
       />
 
       <div className={shellClass}>
         {loading ? (
-          <div className="mt-4 rounded-2xl bg-white/[0.04] h-64 animate-pulse" />
+          <div className="mt-4 space-y-4 md:mt-0">
+            <div className="h-48 animate-pulse rounded-2xl bg-white/[0.04]" />
+            <div className="h-16 animate-pulse rounded-xl bg-white/[0.04]" />
+            <div className="h-32 animate-pulse rounded-xl bg-white/[0.04]" />
+          </div>
         ) : (
-          <>
-            <div ref={heroRef}>
-              <div className={cn(!isMobile && "rounded-b-3xl overflow-hidden")}>
-                <ProfileHero
-                  displayName={displayName?.trim() || "Player"}
-                  handle={athleteProfile.handle ?? null}
-                  city={athleteProfile.city ?? null}
-                  avatarUrl={avatarUrl}
-                  favoriteSport={athleteProfile.favoriteSport ?? null}
-                  fallbackInitial={fallbackInitial}
-                  primarySports={primarySports}
-                  sportsSkills={athleteProfile.sportsSkills ?? []}
-                  snapshot={athleteProfile.snapshot}
-                  skillRatings={athleteProfile.skillRatings ?? []}
-                  bio={athleteProfile.bio ?? null}
-                  level={stats?.level ?? 1}
-                  xp={stats?.xp ?? 0}
-                  tierLabel={athleteProfile.athleteTierLabel ?? null}
-                  availability={athleteProfile.availability ?? null}
-                  verified={!!athleteProfile.verified}
-                  sportsmanshipBadge={!!athleteProfile.sportsmanshipBadge}
-                  lastGameIso={stats?.last_game_date ?? null}
-                  onBack={() => navigate("/")}
-                  onOpenSettings={() => setEditOpen(true)}
-                  minimal
-                  isDesktop={!isMobile}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-5 pt-4">
-              <ProfileActionRow
-                isOwnProfile
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <ProfileHubHero
+                displayName={displayName?.trim() || "Player"}
+                handle={athleteProfile.handle ?? null}
+                avatarUrl={avatarUrl}
+                fallbackInitial={fallbackInitial}
+                verified={!!athleteProfile.verified}
+                bio={athleteProfile.bio ?? null}
+                performanceMetrics={athleteProfile.performanceMetrics ?? []}
+                primarySports={primarySports}
+                onShare={() => void handleShare()}
                 onAbout={() => setAboutOpen(true)}
-                onShare={handleShare}
-                discoverExpanded={discoverOpen}
-                onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
               />
-
-              <div className="space-y-2">
-                {user?.id ? (
-                  <DiscoveredPeopleCarousel
-                    expanded={discoverOpen}
-                    onClose={() => setDiscoverOpen(false)}
-                    excludeUserId={user.id}
-                    primarySports={primarySports}
-                  />
-                ) : null}
-
-                <StoriesRail
-                  stories={athleteProfile.stories ?? []}
-                  allowCreate
-                  onCreateStory={async (story) => {
-                    const err = await updateProfile({
-                      athlete_profile: mergeAthleteProfile(athleteProfile, {
-                        stories: [...(athleteProfile.stories ?? []), story],
-                      }),
-                    });
-                    if (err) throw new Error(err.message);
-                  }}
-                />
-              </div>
-
-              <PostsReelsSection
-                reels={athleteProfile.highlights ?? []}
-                posts={athleteProfile.posts ?? []}
-                pinnedPost={pinnedPost}
-                onAddReel={() => {
-                  setAddFeedKind("reel");
-                  setAddFeedOpen(true);
-                }}
-                onAddPost={() => {
-                  setAddFeedKind("post");
-                  setAddFeedOpen(true);
-                }}
-              />
+              {shareCopiedAt !== null ? (
+                <p className="text-right text-xs text-emerald-400/95" role="status">
+                  Copied to clipboard
+                </p>
+              ) : null}
             </div>
-          </>
+
+            <ProfileActionRow
+              isOwnProfile
+              discoverExpanded={discoverOpen}
+              onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
+            />
+
+            {user?.id ? (
+              <DiscoveredPeopleCarousel
+                expanded={discoverOpen}
+                onClose={() => setDiscoverOpen(false)}
+                excludeUserId={user.id}
+                primarySports={primarySports}
+              />
+            ) : null}
+
+            <div className="hidden md:block">
+              <PerformanceStatsStrip metrics={athleteProfile.performanceMetrics ?? []} primarySports={primarySports} />
+            </div>
+
+            <ProfileComposerCard
+              onPhoto={openAddPost}
+              onVideo={openAddReel}
+              onStatus={() => setStatusDialogOpen(true)}
+            />
+
+            <PostsReelsSection
+              variant="hub"
+              reels={athleteProfile.highlights ?? []}
+              posts={athleteProfile.posts ?? []}
+              pinnedPost={pinnedPost}
+              onAddReel={openAddReel}
+              onAddPost={openAddPost}
+            />
+          </div>
         )}
 
         <AboutSheet
@@ -242,16 +247,16 @@ export default function Profile() {
           )}
 
           <div>
-            <h3 className="text-sm font-semibold text-white mb-3">Games</h3>
+            <h3 className="mb-3 text-sm font-semibold text-white">Games</h3>
             {stats ? (
               <div className="space-y-2 text-sm text-slate-300">
                 <p>
                   Games played{" "}
-                  <span className="text-white font-semibold tabular-nums">{stats.games_played_total}</span>
+                  <span className="font-semibold tabular-nums text-white">{stats.games_played_total}</span>
                 </p>
                 <p>
                   Current streak{" "}
-                  <span className="text-white font-semibold tabular-nums">{stats.current_streak_days} days</span>
+                  <span className="font-semibold tabular-nums text-white">{stats.current_streak_days} days</span>
                 </p>
               </div>
             ) : (
@@ -260,7 +265,7 @@ export default function Profile() {
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold text-white mb-3">Journey</h3>
+            <h3 className="mb-3 text-sm font-semibold text-white">Journey</h3>
             <ExperienceTimeline
               items={athleteProfile.experience ?? []}
               hideHeading
@@ -272,6 +277,20 @@ export default function Profile() {
             <ProfileBadgesSection badges={badges} className="border-0 rounded-none bg-transparent" />
           </div>
         </AboutSheet>
+
+        <QuickStatusPostDialog
+          open={statusDialogOpen}
+          onOpenChange={setStatusDialogOpen}
+          onSave={async (post) => {
+            const err = await updateProfile({
+              athlete_profile: mergeAthleteProfile(athleteProfile, {
+                posts: [...(athleteProfile.posts ?? []), post],
+              }),
+            });
+            if (err) throw new Error(err.message);
+            await refetch();
+          }}
+        />
 
         <AddPostOrReelDialog
           open={addFeedOpen}
@@ -293,6 +312,7 @@ export default function Profile() {
               });
               if (err) throw new Error(err.message);
             }
+            await refetch();
           }}
         />
 
@@ -319,6 +339,7 @@ export default function Profile() {
               athlete_profile: next,
             });
             if (err) throw new Error(err.message);
+            await refetch();
           }}
         />
       </div>

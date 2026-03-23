@@ -6,6 +6,8 @@ import { cn } from "../ui/utils";
 
 export type ProfileFeedTab = "all" | "posts" | "reels";
 
+export type HubFeedTab = "posts" | "reels" | "statuses" | "tagged";
+
 type Props = {
   /** Saved as `highlights` in athlete_profile — shown as Reels. */
   reels: HighlightEntry[];
@@ -13,6 +15,8 @@ type Props = {
   pinnedPost: ActivityPost | null;
   onAddReel: () => void;
   onAddPost: () => void;
+  /** Performance Hub layout: Instagram-style tabs + cyan accent. */
+  variant?: "default" | "hub";
   className?: string;
 };
 
@@ -88,7 +92,7 @@ function CombinedGrid({
 
   if (items.length === 0) {
     return (
-      <div className="grid grid-cols-3 gap-[2px] rounded-lg overflow-hidden bg-white/[0.06]">
+      <div className="grid grid-cols-2 gap-[2px] rounded-lg overflow-hidden bg-white/[0.06] md:grid-cols-3">
         <button
           type="button"
           onClick={onAddPost}
@@ -103,7 +107,7 @@ function CombinedGrid({
         >
           Add reel
         </button>
-        {Array.from({ length: 7 }, (_, i) => i).map((i) => (
+        {Array.from({ length: 4 }, (_, i) => i).map((i) => (
           <div key={i} className="aspect-square bg-white/[0.02]" aria-hidden />
         ))}
       </div>
@@ -111,7 +115,7 @@ function CombinedGrid({
   }
 
   return (
-    <div className="grid grid-cols-3 gap-[2px] rounded-lg overflow-hidden bg-white/[0.06]">
+    <div className="grid grid-cols-2 gap-[2px] rounded-lg overflow-hidden bg-white/[0.06] md:grid-cols-3">
       {items.map((it, idx) =>
         it.kind === "reel" ? (
           <ReelCell key={`reel-${it.reel.id}-${idx}`} cell={it.reel} />
@@ -129,15 +133,82 @@ const TABS: { id: ProfileFeedTab; label: string }[] = [
   { id: "reels", label: "Reels" },
 ];
 
+const HUB_TABS: { id: HubFeedTab; label: string }[] = [
+  { id: "posts", label: "Posts" },
+  { id: "reels", label: "Reels" },
+  { id: "statuses", label: "Statuses" },
+  { id: "tagged", label: "Tagged" },
+];
+
 export function PostsReelsSection({
   reels,
   posts,
   pinnedPost,
   onAddReel,
   onAddPost,
+  variant = "default",
   className,
 }: Props) {
   const [tab, setTab] = useState<ProfileFeedTab>("all");
+  const [hubTab, setHubTab] = useState<HubFeedTab>("posts");
+
+  const mediaPosts = useMemo(
+    () => posts.filter((p) => !p.pinned && Boolean(p.mediaUrl?.trim())),
+    [posts],
+  );
+  const statusPosts = useMemo(
+    () => posts.filter((p) => !p.pinned && !p.mediaUrl?.trim()),
+    [posts],
+  );
+
+  if (variant === "hub") {
+    const accent = "bg-[#00F5FF]";
+    return (
+      <section id="profile-posts-reels" className={cn("space-y-0", className)}>
+        <div className="flex items-stretch overflow-x-auto border-t border-white/[0.08] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {HUB_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setHubTab(t.id)}
+              className={cn(
+                "min-w-[5.5rem] flex-1 shrink-0 py-3 text-[11px] font-bold uppercase tracking-wider transition-colors relative sm:min-w-0 sm:text-xs",
+                hubTab === t.id ? "text-[#00F5FF]" : "text-slate-500 hover:text-slate-300",
+              )}
+            >
+              {t.label}
+              {hubTab === t.id && (
+                <span className={cn("absolute bottom-0 left-3 right-3 h-0.5 rounded-full", accent)} aria-hidden />
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="pt-3 space-y-2">
+          {hubTab === "posts" && (
+            <>
+              {pinnedPost && <PinnedProfileRibbon post={pinnedPost} />}
+              <PostGrid posts={mediaPosts} onAdd={onAddPost} />
+            </>
+          )}
+
+          {hubTab === "reels" && (
+            <HighlightsGrid highlights={reels} onAdd={onAddReel} gridClassName="rounded-xl" />
+          )}
+
+          {hubTab === "statuses" && (
+            <PostGrid posts={statusPosts} onAdd={onAddPost} />
+          )}
+
+          {hubTab === "tagged" && (
+            <div className="rounded-xl border border-dashed border-white/[0.1] bg-[#161B22]/50 px-4 py-12 text-center text-sm text-slate-500">
+              When friends tag you in posts, they&apos;ll show up here.
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section id="profile-posts-reels" className={cn("space-y-0", className)}>

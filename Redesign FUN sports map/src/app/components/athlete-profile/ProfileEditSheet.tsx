@@ -13,7 +13,6 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet";
-import { ScrollArea } from "../ui/scroll-area";
 import { Slider } from "../ui/slider";
 import { Switch } from "../ui/switch";
 import {
@@ -164,7 +163,7 @@ function trustMeterPercent(d: AthleteProfilePayload): { pct: number; label: stri
 
 function sectionCard(className?: string) {
   return cn(
-    "rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+    "rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
     className,
   );
 }
@@ -331,7 +330,7 @@ export function ProfileEditSheet({
         side="bottom"
         className="flex h-[92vh] flex-col gap-0 overflow-hidden rounded-t-2xl border-white/10 bg-[#0A0F1C] p-0 text-white"
       >
-        <SheetHeader className="shrink-0 space-y-3 border-b border-white/10 px-4 pb-3 pt-2 text-left">
+        <SheetHeader className="shrink-0 space-y-3 border-b border-white/[0.06] bg-[#0A0F1C] px-4 pb-3 pt-2 text-left shadow-[inset_0_-1px_0_0_rgba(255,255,255,0.03)]">
           <div className="flex flex-wrap items-start justify-between gap-2 pr-10">
             <div>
               <SheetTitle className="text-lg text-white">Profile settings</SheetTitle>
@@ -370,11 +369,14 @@ export function ProfileEditSheet({
           </div>
         </SheetHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain sm:flex-row sm:overflow-hidden">
         <div
           className={cn(
-            "shrink-0 border-b border-white/10 bg-gradient-to-b from-slate-800/40 via-[#0A0F1C] to-[#0A0F1C] px-4 py-4 max-h-[min(52vh,28rem)] overflow-y-auto sm:max-h-none sm:w-[min(44%,17.5rem)] sm:max-w-[280px] sm:border-b-0 sm:border-r sm:py-5 sm:overflow-y-auto",
-            previewAsPublic && "from-emerald-950/50 via-[#0c1528] to-[#0A0F1C]",
+            "shrink-0 border-b border-white/[0.06] bg-gradient-to-b px-4 py-4 sm:w-[min(44%,17.5rem)] sm:max-w-[280px] sm:border-b-0 sm:border-r sm:border-white/[0.06] sm:py-5",
+            previewAsPublic
+              ? "from-emerald-950/35 via-[#0c1528]/60 to-[#0A0F1C]"
+              : "from-white/[0.04] via-[#0A0F1C] to-[#0A0F1C]",
           )}
         >
           <div className="flex w-full max-w-sm flex-col items-start text-left sm:max-w-none">
@@ -437,7 +439,8 @@ export function ProfileEditSheet({
               @{(draft.handle ?? "").replace(/^@/, "") || "handle"}
             </p>
             <p className="mt-1 max-w-[16rem] text-left text-xs leading-relaxed text-slate-500">
-              Tap the green button to choose a new photo. Saves when you tap Save profile.
+              Tap the green button to choose a new photo. Use <span className="text-slate-400">Save profile</span> at
+              the bottom when you&apos;re done.
             </p>
             {avatarFile ? (
               <Button
@@ -458,7 +461,7 @@ export function ProfileEditSheet({
                 Revert to current photo
               </Button>
             ) : null}
-            <div className="mt-4 w-full space-y-2 border-t border-white/10 pt-3">
+            <div className="mt-4 w-full space-y-2 border-t border-white/[0.08] pt-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
                 <span>Preview</span>
                 <span className="tabular-nums">
@@ -498,35 +501,11 @@ export function ProfileEditSheet({
                 ))}
               </div>
             </div>
-            <div className="mt-5 flex w-full flex-col items-center gap-2 border-t border-white/10 pt-4">
-              <Button
-                type="button"
-                className="h-10 w-full max-w-[13.5rem] bg-emerald-600 text-sm text-white hover:bg-emerald-700"
-                disabled={saving}
-                onClick={() => void handleSave()}
-              >
-                {saving ? "Saving…" : "Save profile"}
-              </Button>
-              {onSignOut ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 w-full max-w-[13.5rem] border-red-500/35 text-sm text-red-300 hover:bg-red-500/10 hover:text-red-200"
-                  onClick={() => {
-                    void Promise.resolve(onSignOut());
-                    onOpenChange(false);
-                  }}
-                >
-                  <LogOut className="mr-2 size-4" />
-                  Log out
-                </Button>
-              ) : null}
-            </div>
           </div>
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/10 px-2 py-2">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-visible sm:overflow-hidden">
+        <div className="sticky top-0 z-20 flex shrink-0 gap-1 overflow-x-auto border-b border-white/[0.06] bg-[#0A0F1C]/95 px-2 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-[#0A0F1C]/85">
           {(
             [
               ["identity", "Identity", User],
@@ -552,7 +531,7 @@ export function ProfileEditSheet({
           ))}
         </div>
 
-        <ScrollArea className="min-h-0 flex-1">
+        <div className="min-h-0 flex-1 overflow-visible px-0 sm:min-h-0 sm:overflow-y-auto">
           <div className="space-y-6 px-4 py-4 pb-8">
             {err && (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
@@ -698,13 +677,18 @@ export function ProfileEditSheet({
                   className="bg-white/5 border-white/10"
                 />
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
+
+              <div className="border-t border-white/[0.07] pt-4">
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  Badges &amp; visibility
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
                 <div
                   className={cn(
-                    "rounded-2xl border p-4 motion-safe:transition-colors motion-safe:duration-200",
+                    "rounded-xl border p-4 motion-safe:transition-colors motion-safe:duration-200",
                     draft.verified
-                      ? "border-amber-400/35 bg-gradient-to-br from-amber-500/10 to-transparent"
-                      : "border-white/10 bg-white/[0.02]",
+                      ? "border-amber-400/30 bg-gradient-to-br from-amber-500/10 to-transparent"
+                      : "border-white/[0.08] bg-white/[0.02]",
                   )}
                 >
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -724,10 +708,10 @@ export function ProfileEditSheet({
                 </div>
                 <div
                   className={cn(
-                    "rounded-2xl border p-4 motion-safe:transition-colors motion-safe:duration-200",
+                    "rounded-xl border p-4 motion-safe:transition-colors motion-safe:duration-200",
                     draft.sportsmanshipBadge
-                      ? "border-emerald-400/35 bg-gradient-to-br from-emerald-500/10 to-transparent"
-                      : "border-white/10 bg-white/[0.02]",
+                      ? "border-emerald-400/30 bg-gradient-to-br from-emerald-500/10 to-transparent"
+                      : "border-white/[0.08] bg-white/[0.02]",
                   )}
                 >
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -744,6 +728,7 @@ export function ProfileEditSheet({
                       onCheckedChange={(v) => setDraft((d) => ({ ...d, sportsmanshipBadge: v }))}
                     />
                   </div>
+                </div>
                 </div>
               </div>
             </section>
@@ -1293,7 +1278,35 @@ export function ProfileEditSheet({
             </section>
             )}
           </div>
-        </ScrollArea>
+        </div>
+        </div>
+        </div>
+
+        <div className="shrink-0 border-t border-white/[0.08] bg-[#0A0F1C]/98 px-4 py-3 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md supports-[backdrop-filter]:bg-[#0A0F1C]/92 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 sm:flex-row sm:justify-end sm:gap-3">
+            <Button
+              type="button"
+              className="h-11 w-full bg-emerald-600 text-sm text-white hover:bg-emerald-700 sm:min-w-[11rem]"
+              disabled={saving}
+              onClick={() => void handleSave()}
+            >
+              {saving ? "Saving…" : "Save profile"}
+            </Button>
+            {onSignOut ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full border-red-500/35 text-sm text-red-300 hover:bg-red-500/10 hover:text-red-200 sm:min-w-[11rem]"
+                onClick={() => {
+                  void Promise.resolve(onSignOut());
+                  onOpenChange(false);
+                }}
+              >
+                <LogOut className="mr-2 size-4" />
+                Log out
+              </Button>
+            ) : null}
+          </div>
         </div>
         </div>
       </SheetContent>

@@ -180,6 +180,67 @@ export async function sendGameMessage(gameId: string, body: string): Promise<{
   };
 }
 
+export type GameChatMember = {
+  user_id: string;
+  role: "host" | "player";
+  joined_at: string;
+  display_name: string | null;
+  avatar_url: string | null;
+};
+
+/** Roster for the game chat sidebar. Two queries avoid PostgREST embed when FK isn’t in schema cache. */
+export async function fetchGameChatMembers(gameId: string): Promise<{
+  data: GameChatMember[] | null;
+  error: Error | null;
+}> {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+
+  const { data: parts, error: partsErr } = await supabase
+    .from("game_participants")
+    .select("user_id, role, joined_at")
+    .eq("game_id", gameId);
+
+  if (partsErr) return { data: null, error: new Error(partsErr.message) };
+
+  type PartRow = { user_id: string; role: "host" | "player"; joined_at: string };
+  const partRows = (parts ?? []) as PartRow[];
+  const userIds = [...new Set(partRows.map((p) => p.user_id))];
+
+  const profileById = new Map<string, { display_name: string | null; avatar_url: string | null }>();
+  if (userIds.length > 0) {
+    const { data: profs, error: profErr } = await supabase
+      .from("profiles")
+      .select("id, display_name, avatar_url")
+      .in("id", userIds);
+
+    if (profErr) return { data: null, error: new Error(profErr.message) };
+
+    for (const row of profs ?? []) {
+      const r = row as { id: string; display_name: string | null; avatar_url: string | null };
+      profileById.set(r.id, { display_name: r.display_name, avatar_url: r.avatar_url });
+    }
+  }
+
+  const members: GameChatMember[] = partRows.map((r) => {
+    const p = profileById.get(r.user_id);
+    return {
+      user_id: r.user_id,
+      role: r.role,
+      joined_at: r.joined_at,
+      display_name: p?.display_name ?? null,
+      avatar_url: p?.avatar_url ?? null,
+    };
+  });
+
+  members.sort((a, b) => {
+    if (a.role === "host" && b.role !== "host") return -1;
+    if (a.role !== "host" && b.role === "host") return 1;
+    return new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime();
+  });
+
+  return { data: members, error: null };
+}
+
 /** Subscribe to new rows for one game. Returns cleanup to unsubscribe. */
 export function subscribeGameMessages(
   gameId: string,

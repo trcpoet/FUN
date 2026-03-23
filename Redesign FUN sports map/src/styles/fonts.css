@@ -1,0 +1,25 @@
+/**
+ * Profile / app header wordmark — Bungee (loaded from index.html).
+ * Skew + stacked neon edge + glow for a sporty energy look.
+ */
+.fun-brand-wordmark {
+  font-family: "Bungee", cursive;
+  font-size: clamp(1.35rem, 5vw, 1.85rem);
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: #00f5ff;
+  text-shadow:
+    0 0 22px rgba(0, 245, 255, 0.55),
+    0 0 42px rgba(0, 200, 255, 0.25),
+    0 2px 0 #0891b2,
+    0 4px 0 #0e7490,
+    0 6px 14px rgba(0, 0, 0, 0.55);
+  transform: skewX(-11deg);
+  display: inline-block;
+  -webkit-font-smoothing: antialiased;
+}
+
+.fun-brand-wordmark--desktop {
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
+}

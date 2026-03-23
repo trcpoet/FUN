@@ -81,3 +81,48 @@
   animation: game-sport-icon-wobble 5.2s ease-in-out infinite alternate;
   transform-origin: center center;
 }
+
+/* Profile header — back-to-map (globe): gradient + hover so it reads as a control */
+@keyframes header-map-btn-gradient {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+button.header-map-btn {
+  position: relative;
+  background-image: linear-gradient(
+    135deg,
+    rgba(0, 245, 255, 0.12) 0%,
+    rgba(139, 92, 246, 0.1) 40%,
+    rgba(236, 72, 153, 0.08) 70%,
+    rgba(0, 245, 255, 0.12) 100%
+  );
+  background-size: 200% 200%;
+  border: 1px solid rgba(0, 245, 255, 0.28);
+  transition:
+    box-shadow 0.3s ease,
+    transform 0.2s ease,
+    border-color 0.3s ease;
+}
+button.header-map-btn:hover {
+  animation: header-map-btn-gradient 2.2s ease-in-out infinite;
+  border-color: rgba(0, 245, 255, 0.55);
+  box-shadow:
+    0 0 0 1px rgba(0, 245, 255, 0.35),
+    0 0 22px rgba(0, 245, 255, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transform: scale(1.06);
+}
+button.header-map-btn:active {
+  transform: scale(0.96);
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  button.header-map-btn:hover {
+    animation: none;
+  }
+}

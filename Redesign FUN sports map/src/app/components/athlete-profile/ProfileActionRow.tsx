@@ -4,7 +4,8 @@ import { cn } from "../ui/utils";
 
 type Props = {
   isOwnProfile?: boolean;
-  onAbout: () => void;
+  /** Used on other users’ profiles (own profile uses About in the hero next to the handle). */
+  onAbout?: () => void;
   onShare?: () => void;
   /** Toggles discover carousel (own profile). */
   onDiscoverPeople?: () => void;
@@ -59,10 +60,18 @@ export function ProfileActionRow({
           <Trophy className="size-4 mr-1.5 opacity-80" />
           Invite
         </Button>
-        <Button type="button" variant="outline" size="sm" className="h-10 border-white/12 bg-white/[0.04]" onClick={onAbout}>
-          <Info className="size-4 mr-1.5" />
-          About
-        </Button>
+        {onAbout ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-10 border-white/12 bg-white/[0.04]"
+            onClick={onAbout}
+          >
+            <Info className="size-4 mr-1.5" />
+            About
+          </Button>
+        ) : null}
         {onShare && (
           <Button type="button" variant="ghost" size="icon" className="h-10 text-slate-400" onClick={onShare} aria-label="Share">
             <Share2 className="size-4" />
@@ -73,29 +82,7 @@ export function ProfileActionRow({
   }
 
   return (
-    <div className={cn("flex items-center gap-2", className)}>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="size-9 shrink-0 border-white/12 bg-white/[0.04] text-slate-200"
-        onClick={onAbout}
-        aria-label="About"
-      >
-        <Info className="size-4" />
-      </Button>
-      {onShare && (
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="size-9 shrink-0 border-white/12 bg-white/[0.04] text-slate-200"
-          onClick={onShare}
-          aria-label="Share profile"
-        >
-          <Share2 className="size-4" />
-        </Button>
-      )}
+    <div className={cn("flex flex-col items-end gap-2", className)}>
       {onDiscoverPeople && (
         <Button
           type="button"

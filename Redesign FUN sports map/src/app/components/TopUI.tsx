@@ -15,6 +15,34 @@ const NAV_ITEMS = [
   { id: 'settings', label: 'Settings', Icon: Settings, active: false },
 ];
 
+/** Glass morphism for map toolbar round controls (search, filter). */
+const MAP_GLASS_ICON_BTN =
+  "w-12 h-12 rounded-full shrink-0 flex items-center justify-center transition-all duration-200 " +
+  "border border-white/20 bg-gradient-to-b from-white/[0.2] to-white/[0.04] " +
+  "backdrop-blur-2xl backdrop-saturate-150 " +
+  "shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_10px_36px_rgba(0,0,0,0.35),0_0_0_1px_rgba(255,255,255,0.05)] " +
+  "text-slate-200 hover:text-emerald-300 " +
+  "hover:border-emerald-400/45 hover:from-emerald-500/18 hover:to-white/[0.08] " +
+  "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_14px_44px_rgba(16,185,129,0.18)]";
+
+/** Same glass look, smaller (location + game chats). */
+const MAP_GLASS_ICON_BTN_SM_BASE =
+  "w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition-all duration-200 " +
+  "border border-white/20 bg-gradient-to-b from-white/[0.2] to-white/[0.04] " +
+  "backdrop-blur-2xl backdrop-saturate-150 " +
+  "shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_8px_28px_rgba(0,0,0,0.35),0_0_0_1px_rgba(255,255,255,0.05)] " +
+  "text-slate-200 ";
+
+const MAP_GLASS_ICON_BTN_SM_EMERALD =
+  MAP_GLASS_ICON_BTN_SM_BASE +
+  "hover:text-emerald-300 hover:border-emerald-400/45 hover:from-emerald-500/18 hover:to-white/[0.08] " +
+  "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_40px_rgba(16,185,129,0.18)]";
+
+const MAP_GLASS_ICON_BTN_SM_SKY =
+  MAP_GLASS_ICON_BTN_SM_BASE +
+  "hover:text-sky-300 hover:border-sky-400/45 hover:from-sky-500/18 hover:to-white/[0.08] " +
+  "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_40px_rgba(14,165,233,0.18)]";
+
 export type SportSearchHitRow = {
   sport: string;
   nearbyCount: number;
@@ -318,7 +346,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   key="search-icon"
                   type="button"
                   onClick={() => setSearchExpanded(true)}
-                  className="w-12 h-12 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-xl flex items-center justify-center text-slate-400 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors shadow-lg shrink-0"
+                  className={MAP_GLASS_ICON_BTN}
                   aria-label="Open search"
                 >
                   <Search className="w-5 h-5" />
@@ -331,7 +359,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
           <motion.button
             whileTap={{ scale: 0.95 }}
             type="button"
-            className="w-12 h-12 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-md shrink-0 flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors shadow-lg"
+            className={MAP_GLASS_ICON_BTN}
             aria-label="Filter"
             onClick={onOpenFilters}
           >
@@ -407,7 +435,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                 type="button"
                 whileTap={{ scale: 0.95 }}
                 onClick={onCenterOnUser}
-                className="w-10 h-10 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-md flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors shadow-lg"
+                className={MAP_GLASS_ICON_BTN_SM_EMERALD}
                 aria-label="Center map on my location"
               >
                 <Navigation className="w-5 h-5" />
@@ -418,12 +446,12 @@ export const TopNavigation = (props: TopNavigationProps) => {
                 type="button"
                 whileTap={{ scale: 0.95 }}
                 onClick={onOpenMessages}
-                className="relative w-10 h-10 rounded-full border border-slate-700/50 bg-slate-800/60 backdrop-blur-md flex items-center justify-center text-slate-300 hover:text-sky-400 hover:border-sky-500/50 transition-colors shadow-lg"
+                className={cn("relative", MAP_GLASS_ICON_BTN_SM_SKY)}
                 aria-label="Game chats"
               >
                 <MessageCircle className="w-5 h-5" />
                 {joinedGameCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-sky-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C]">
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-sky-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
                     {joinedGameCount > 9 ? "9+" : joinedGameCount}
                   </span>
                 )}

@@ -40,8 +40,8 @@ export function PostGrid({ posts, onAdd, className }: Props) {
 
   if (gridPosts.length === 0) {
     return (
-      <div className={cn("grid grid-cols-3 gap-[2px]", className)}>
-        {Array.from({ length: 9 }, (_, i) => i).map((i) => (
+      <div className={cn("grid gap-[2px] rounded-lg overflow-hidden bg-white/[0.06] grid-cols-2 md:grid-cols-3", className)}>
+        {Array.from({ length: 6 }, (_, i) => i).map((i) => (
           <button
             key={i}
             type="button"
@@ -56,7 +56,7 @@ export function PostGrid({ posts, onAdd, className }: Props) {
   }
 
   return (
-    <div className={cn("grid grid-cols-3 gap-[2px]", className)}>
+    <div className={cn("grid gap-[2px] rounded-lg overflow-hidden bg-white/[0.06] grid-cols-2 md:grid-cols-3", className)}>
       {gridPosts.map((p) => {
         const src = p.mediaUrl?.trim();
         const isVideo = p.mediaKind === "video";

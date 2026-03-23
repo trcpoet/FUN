@@ -234,6 +234,10 @@ export default function App() {
         gameId: game.id,
         title: game.title || "Pickup game",
         sport: game.sport,
+        startsAt: game.starts_at,
+        createdAt: game.created_at,
+        participantCount: game.participant_count,
+        spotsRemaining: game.spots_remaining,
       });
       setMessagesOpen(true);
     }
@@ -244,6 +248,10 @@ export default function App() {
       gameId: game.id,
       title: game.title || "Pickup game",
       sport: game.sport,
+      startsAt: game.starts_at,
+      createdAt: game.created_at,
+      participantCount: game.participant_count,
+      spotsRemaining: game.spots_remaining,
     });
     setMessagesOpen(true);
   };
