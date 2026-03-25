@@ -249,6 +249,9 @@ export function MapboxMap(props: MapboxMapProps) {
     bumpGameIdRef.current = gameId;
   };
 
+  const selectedVenueIdRef = useRef<string | null>(null);
+  selectedVenueIdRef.current = selectedVenue?.id ?? null;
+
   /** 0–1 easing with flat derivatives at endpoints (smooth hover zoom in/out). */
   const smootherstep = (t: number) => {
     const x = Math.min(1, Math.max(0, t));
@@ -331,6 +334,25 @@ export function MapboxMap(props: MapboxMapProps) {
     }
     haloBlurCase.push(["==", ["get", "id"], sid], 0.8, 0);
     map.setPaintProperty(L_GAME_ICON, "icon-halo-blur", haloBlurCase as import("mapbox-gl").PropertyValueSpecification<number>);
+
+    // De-emphasize non-selected games when a game or venue is selected.
+    const hasSelection = Boolean(sid) || Boolean(selectedVenueIdRef.current);
+    try {
+      map.setPaintProperty(L_GAME_ICON, "icon-opacity", [
+        "case",
+        ["==", ["get", "id"], sid],
+        1,
+        hasSelection ? 0.55 : 0.92,
+      ]);
+    } catch (_) {}
+    try {
+      map.setPaintProperty(L_GAME_COUNT, "text-opacity", [
+        "case",
+        ["==", ["get", "id"], sid],
+        1,
+        hasSelection ? 0.6 : 0.92,
+      ]);
+    } catch (_) {}
 
     const tNow = performance.now();
     const rotAmp = MapCfg.GAME_ICON_ROTATE_AMPLITUDE_DEG;

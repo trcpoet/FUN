@@ -124,25 +124,25 @@ export function CreateGameSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="bg-slate-900 border-slate-700 text-white rounded-t-2xl max-h-[70vh] flex flex-col p-4"
+        className="rounded-t-3xl max-h-[72vh] flex flex-col p-4 border-border/80 bg-popover/95 text-popover-foreground backdrop-blur-xl"
         aria-describedby="create-game-desc"
       >
         <SheetDescription id="create-game-desc" className="sr-only">
           Create a new pickup game. Choose sport, players, and name.
         </SheetDescription>
-        <SheetHeader className="text-left pb-1.5 border-b border-slate-700/50 px-0">
-          <div className="flex items-center gap-1.5 text-slate-400 text-xs">
+        <SheetHeader className="text-left pb-2 border-b border-border/70 px-0">
+          <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
             {STEPS.map((s, i) => (
               <span key={s.key}>
                 {i > 0 && " → "}
-                <span className={i === step ? "text-emerald-400 font-semibold" : ""}>
+                <span className={i === step ? "text-primary font-semibold" : ""}>
                   {i + 1}
                 </span>
               </span>
             ))}
           </div>
-          <SheetTitle className="text-white text-base flex items-center gap-1.5 pt-0.5">
-            {React.createElement(STEPS[step]?.icon ?? Trophy, { className: "w-4 h-4 text-emerald-400 shrink-0" })}
+          <SheetTitle className="text-foreground text-base flex items-center gap-1.5 pt-0.5">
+            {React.createElement(STEPS[step]?.icon ?? Trophy, { className: "w-4 h-4 text-primary shrink-0" })}
             {currentStepTitle}
           </SheetTitle>
         </SheetHeader>
@@ -258,9 +258,11 @@ export function CreateGameSheet({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="e.g. Friday Night Lights"
-                  className="h-11 text-base bg-slate-800 border-slate-600 text-white placeholder-slate-500 rounded-xl"
+                  className="text-base"
                 />
-                <p className="text-slate-400 text-xs mt-1.5">Optional — or leave blank for &quot;Pickup game&quot;</p>
+                <p className="text-muted-foreground text-xs mt-1.5">
+                  Optional — or leave blank for &quot;Pickup game&quot;
+                </p>
               </motion.div>
             )}
 
@@ -271,20 +273,20 @@ export function CreateGameSheet({
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
-                className="rounded-xl border border-slate-700 bg-slate-800/60 p-3 space-y-1"
+                className="rounded-2xl border border-border/80 bg-card/70 p-3 space-y-1 shadow-[var(--shadow-control)]"
               >
-                <p className="flex min-h-[2rem] items-center gap-2 text-slate-300">
+                <p className="flex min-h-[2rem] items-center gap-2 text-foreground/90">
                   <span
                     className="shrink-0 text-2xl leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
                     aria-hidden
                   >
                     {SPORTS.find((x) => x.id === sport)?.icon ?? "🎯"}
                   </span>
-                  <span className="font-semibold text-white text-sm">{sport}</span>
+                  <span className="font-semibold text-foreground text-sm">{sport}</span>
                 </p>
-                <p className="text-slate-400 text-xs">
-                  <span className="text-white font-medium">{spots}</span> spots
-                  · <span className="text-white font-medium">{title.trim() || "Pickup game"}</span>
+                <p className="text-muted-foreground text-xs">
+                  <span className="text-foreground font-semibold">{spots}</span> spots
+                  · <span className="text-foreground font-semibold">{title.trim() || "Pickup game"}</span>
                 </p>
               </motion.div>
             )}
@@ -292,18 +294,23 @@ export function CreateGameSheet({
         </div>
 
         {error && (
-          <p className="text-sm text-red-400 px-1 pb-2" role="alert">
-            {error}
-          </p>
+          <div
+            className="mx-0.5 mb-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-foreground"
+            role="alert"
+            aria-live="assertive"
+          >
+            <span className="font-semibold text-destructive">Fix this:</span>{" "}
+            <span className="text-foreground/90">{error}</span>
+          </div>
         )}
 
-        <SheetFooter className="flex-row gap-2 border-t border-slate-700/50 pt-3 mt-auto">
+        <SheetFooter className="flex-row gap-2 border-t border-border/70 pt-3 mt-auto">
           {step > 0 ? (
             <Button
               type="button"
               variant="outline"
               onClick={handleBack}
-              className="border-slate-600 text-slate-300 hover:bg-slate-800 h-9 text-sm rounded-lg"
+              className="h-11 text-sm rounded-xl"
             >
               Back
             </Button>
@@ -314,7 +321,7 @@ export function CreateGameSheet({
             type="button"
             onClick={handleNext}
             disabled={!canNext || loading}
-            className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white h-9 text-sm font-semibold rounded-lg"
+            className="flex-1 h-11 text-sm rounded-xl"
           >
             {loading ? "Creating…" : stepKey === "confirm" ? "Create game" : "Next"}
             {stepKey !== "confirm" && <ChevronRight className="w-4 h-4 ml-0.5" />}

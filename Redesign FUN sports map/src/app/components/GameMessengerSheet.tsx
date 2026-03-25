@@ -330,7 +330,8 @@ export function GameMessengerSheet({
       <SheetContent
         side="right"
         className={cn(
-          "h-full border-slate-700 bg-[#0c1222] text-slate-100 p-0 gap-0 sm:max-w-none flex flex-col overflow-hidden",
+          "h-full p-0 gap-0 sm:max-w-none flex flex-col overflow-hidden",
+          "border-border/80 bg-popover/95 text-popover-foreground backdrop-blur-xl",
           (threadExpanded && focusThread) || (inboxExpanded && showList)
             ? "!left-0 !right-0 !w-full !max-w-full !rounded-none"
             : "w-[20vw] min-w-[300px] max-w-[420px] rounded-l-2xl",

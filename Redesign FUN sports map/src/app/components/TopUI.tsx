@@ -391,10 +391,14 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   type="button"
                   onClick={() => setNavOpen((v) => !v)}
                   className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors",
+                    "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold",
+                    "border border-border/80 bg-popover/70 backdrop-blur-xl",
+                    "shadow-[var(--shadow-control)]",
+                    "transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
+                    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
                     navOpen
-                      ? "bg-slate-600/80 text-white border-slate-500"
-                      : "text-slate-400 hover:text-white border-slate-600 hover:border-slate-500 bg-slate-800/60"
+                      ? "text-foreground border-ring/50"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent"
                   )}
                 >
                   Menu
@@ -406,7 +410,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                       aria-hidden
                       onClick={() => setNavOpen(false)}
                     />
-                    <div className="absolute top-full right-0 mt-2 w-52 rounded-xl bg-slate-800/95 border border-slate-600 shadow-xl py-2 z-[60] pointer-events-auto backdrop-blur-md">
+                    <div className="absolute top-full right-0 mt-2 w-56 rounded-2xl bg-popover/95 border border-border/80 shadow-[var(--shadow-panel)] py-2 z-[60] pointer-events-auto backdrop-blur-xl">
                       {NAV_ITEMS.map(({ id, label, Icon, active }) => (
                         <button
                           key={id}
@@ -414,7 +418,9 @@ export const TopNavigation = (props: TopNavigationProps) => {
                           onClick={() => setNavOpen(false)}
                           className={cn(
                             "w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors first:rounded-t-lg last:rounded-b-lg",
-                            active ? "text-emerald-400 bg-emerald-500/10" : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+                            active
+                              ? "text-primary bg-accent"
+                              : "text-muted-foreground hover:text-foreground hover:bg-accent/70"
                           )}
                         >
                           <Icon className="w-4 h-4 shrink-0" />

@@ -60,8 +60,8 @@ function PillsRow(props: {
             className={cn(
               "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
               active
-                ? "border-emerald-400 bg-emerald-500/90 text-slate-950"
-                : "border-slate-700 bg-slate-800/60 text-slate-300 hover:border-emerald-400/70 hover:text-white",
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border/80 bg-card/50 text-muted-foreground hover:bg-accent hover:text-foreground",
             )}
           >
             {opt}
@@ -89,8 +89,8 @@ function KmPillsRow(props: {
             className={cn(
               "rounded-full border px-3 py-1.5 text-xs font-medium tabular-nums transition-colors",
               active
-                ? "border-emerald-400 bg-emerald-500/90 text-slate-950"
-                : "border-slate-700 bg-slate-800/60 text-slate-300 hover:border-emerald-400/70 hover:text-white",
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border/80 bg-card/50 text-muted-foreground hover:bg-accent hover:text-foreground",
             )}
           >
             {km} km
@@ -120,35 +120,35 @@ export function FiltersModal(props: FiltersModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg border-slate-700 bg-[#020617]/95 text-slate-100">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-base font-semibold">Map filters</DialogTitle>
         </DialogHeader>
 
         <div className="mt-3 flex max-h-[70vh] flex-col gap-5 overflow-y-auto pr-1">
-          <p className="text-xs text-slate-500">
-            Sports narrow both <span className="text-slate-400">games</span> and{" "}
-            <span className="text-slate-400">venue pitches</span> (OSM tags). Radii control how far the map loads each
+          <p className="text-xs text-muted-foreground">
+            Sports narrow both <span className="text-foreground/80">games</span> and{" "}
+            <span className="text-foreground/80">venue pitches</span> (OSM tags). Radii control how far the map loads each
             layer.
           </p>
 
           <section className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-slate-400">Sports</Label>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Sports</Label>
             <PillsRow options={SPORT_OPTIONS} selected={value.sports} onChange={(sports) => update({ sports })} />
           </section>
 
           <section className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-slate-400">Games search radius</Label>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Games search radius</Label>
             <KmPillsRow value={value.gamesRadiusKm} onChange={(gamesRadiusKm) => update({ gamesRadiusKm })} />
           </section>
 
           <section className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-slate-400">Sports venues radius</Label>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Sports venues radius</Label>
             <KmPillsRow value={value.venueRadiusKm} onChange={(venueRadiusKm) => update({ venueRadiusKm })} />
           </section>
 
           <section className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-slate-400">Athletes on map radius</Label>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Athletes on map radius</Label>
             <KmPillsRow value={value.athletesRadiusKm} onChange={(athletesRadiusKm) => update({ athletesRadiusKm })} />
           </section>
         </div>
@@ -158,7 +158,6 @@ export function FiltersModal(props: FiltersModalProps) {
             type="button"
             variant="outline"
             size="sm"
-            className="border-slate-600 text-slate-300"
             onClick={handleClear}
           >
             Clear
@@ -168,12 +167,11 @@ export function FiltersModal(props: FiltersModalProps) {
               type="button"
               variant="outline"
               size="sm"
-              className="border-slate-600 text-slate-300"
               onClick={() => onOpenChange(false)}
             >
               Cancel
             </Button>
-            <Button type="button" size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={handleApply}>
+            <Button type="button" size="sm" onClick={handleApply}>
               Apply
             </Button>
           </div>
