@@ -181,10 +181,12 @@ export function MapboxMap(props: MapboxMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("mapbox-gl").Map | null>(null);
   const playerMarkersRef = useRef<import("mapbox-gl").Marker[]>([]);
+  const playerMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; scaleEl: HTMLDivElement }[]>([]);
   /** HTML markers for multiple games at the same coordinates (cluster pin). */
-  const colocatedMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot }[]>([]);
-  const randomGameMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot }[]>([]);
+  const colocatedMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[]>([]);
+  const randomGameMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[]>([]);
   const userMarker2dRef = useRef<import("mapbox-gl").Marker | null>(null);
+  const userMarker2dScaleElRef = useRef<HTMLDivElement | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [eventPopup, setEventPopup] = useState<{ game: GameRow; point: { x: number; y: number } } | null>(null);
@@ -259,7 +261,16 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map?.getLayer(L_GAME_ICON)) return;
     const sid = selectedGameIdRef.current ?? "";
     const hid = gameIconHoverIdRef.current;
-    const base = MapCfg.GAME_ICON_LAYOUT_BASE;
+    const z = map.getZoom?.() ?? 13;
+    const zoomScale = (() => {
+      // Screen-space "3D" feel: bigger when zoomed in, smaller when zoomed out.
+      // Tuned so it doesn't explode at street-level zoom.
+      const z0 = 10.5;
+      const z1 = 16.5;
+      const t = Math.min(1, Math.max(0, (z - z0) / (z1 - z0)));
+      return 0.78 + (1.28 - 0.78) * t;
+    })();
+    const base = MapCfg.GAME_ICON_LAYOUT_BASE * zoomScale;
     const bumpLow = base * MapCfg.GAME_ICON_GL_CLICK_DIP_MULT;
 
     let bumpAnimId: string | null = null;
@@ -824,6 +835,35 @@ export function MapboxMap(props: MapboxMapProps) {
     );
   }, []);
 
+  /** Zoom-based scaling for DOM markers (HTML pins + avatar + nearby players). */
+  const applyDomMarkerScale = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const z = map.getZoom?.() ?? 13;
+    const z0 = 10.5;
+    const z1 = 16.5;
+    const t = Math.min(1, Math.max(0, (z - z0) / (z1 - z0)));
+    const s = 0.78 + (1.28 - 0.78) * t;
+
+    for (const ent of colocatedMarkerEntriesRef.current) {
+      ent.scaleEl.style.transform = `scale(${s})`;
+      ent.scaleEl.style.transformOrigin = "center";
+    }
+    for (const ent of randomGameMarkerEntriesRef.current) {
+      ent.scaleEl.style.transform = `scale(${s})`;
+      ent.scaleEl.style.transformOrigin = "center";
+    }
+    for (const ent of playerMarkerEntriesRef.current) {
+      ent.scaleEl.style.transform = `scale(${s})`;
+      ent.scaleEl.style.transformOrigin = "center";
+    }
+    const userScaleEl = userMarker2dScaleElRef.current;
+    if (userScaleEl) {
+      userScaleEl.style.transform = `scale(${s})`;
+      userScaleEl.style.transformOrigin = "center";
+    }
+  }, []);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || gameLayersInitedRef.current) return;
@@ -899,18 +939,49 @@ export function MapboxMap(props: MapboxMapProps) {
         ["!=", ["coalesce", ["get", "marker_kind"], ""], "colocated"],
       ],
       layout: {
-        "text-field": ["coalesce", ["get", "map_label"], ["get", "players_label"]],
-        "text-size": 9,
-        "text-line-height": 1.1,
-        "text-offset": [0, 1.35],
+        "text-field": [
+          "let",
+          "rem",
+          ["max", 0, ["-", ["get", "players_total"], ["get", "players_filled"]]],
+          [
+            "case",
+            [">", ["var", "rem"], 0],
+            [
+              "format",
+              ["to-string", ["get", "players_filled"]],
+              { "font-scale": 1.15, "text-color": "#ffffff" },
+              "/",
+              { "font-scale": 0.9, "text-color": "#cbd5e1" },
+              ["to-string", ["get", "players_total"]],
+              { "font-scale": 0.9, "text-color": "#cbd5e1" },
+              ["concat", "  +", ["to-string", ["var", "rem"]]],
+              { "font-scale": 0.85, "text-color": "#fde68a" }
+            ],
+            [
+              "format",
+              ["to-string", ["get", "players_filled"]],
+              { "font-scale": 1.15, "text-color": "#ffffff" },
+              "/",
+              { "font-scale": 0.9, "text-color": "#cbd5e1" },
+              ["to-string", ["get", "players_total"]],
+              { "font-scale": 0.9, "text-color": "#cbd5e1" },
+              "  FULL",
+              { "font-scale": 0.85, "text-color": "#a7f3d0" }
+            ]
+          ]
+        ],
+        "text-size": 11,
+        "text-line-height": 1.05,
+        "text-offset": [0, 1.55],
         "text-anchor": "top",
         "text-allow-overlap": true,
         "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Regular"],
       },
       paint: {
-        "text-color": "#cbd5e1",
-        "text-halo-color": "rgba(15,23,42,0.85)",
-        "text-halo-width": 1,
+        "text-color": "#e2e8f0",
+        "text-halo-color": "rgba(2,6,23,0.92)",
+        "text-halo-width": 1.35,
+        "text-halo-blur": 0.35,
       },
     });
 
@@ -977,6 +1048,7 @@ export function MapboxMap(props: MapboxMapProps) {
       visRaf = requestAnimationFrame(() => {
         visRaf = 0;
         applyMapLayerVisibility();
+        applyDomMarkerScale();
       });
     };
 
@@ -986,6 +1058,7 @@ export function MapboxMap(props: MapboxMapProps) {
     map.on("zoomend", applyMapLayerVisibility);
 
     applyMapLayerVisibility();
+    applyDomMarkerScale();
 
     return () => {
       map.off("move", scheduleVis);
@@ -997,7 +1070,7 @@ export function MapboxMap(props: MapboxMapProps) {
       gameIconHoverTargetRef.current = 0;
       gameIconHoverLastTsRef.current = null;
     };
-  }, [mapLoaded, applyMapLayerVisibility, applyGameIconLayout]);
+  }, [mapLoaded, applyMapLayerVisibility, applyDomMarkerScale, applyGameIconLayout]);
 
   /** Push game GeoJSON into clustered source (capped by viewport for performance). */
   useEffect(() => {
@@ -1024,12 +1097,15 @@ export function MapboxMap(props: MapboxMapProps) {
       loadMapboxGl().then((mapboxgl) => {
         if (cancelled || mapRef.current !== map) return;
         const Marker = mapboxgl.default.Marker;
-        const next: { marker: import("mapbox-gl").Marker; root: ReactRoot }[] = [];
+        const next: { marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[] = [];
 
         for (const group of groups) {
-          const el = document.createElement("div");
-          el.style.pointerEvents = "auto";
-          const root = createRoot(el);
+          const outer = document.createElement("div");
+          outer.style.pointerEvents = "auto";
+          const scaleEl = document.createElement("div");
+          scaleEl.style.willChange = "transform";
+          outer.appendChild(scaleEl);
+          const root = createRoot(scaleEl);
           const g0 = group[0]!;
           root.render(
             <ColocatedGamesPin
@@ -1042,16 +1118,18 @@ export function MapboxMap(props: MapboxMapProps) {
               }}
             />
           );
-          const marker = new Marker({ element: el, anchor: "center" })
+          const marker = new Marker({ element: outer, anchor: "center" })
             .setLngLat([g0.lng, g0.lat])
             .addTo(map);
-          next.push({ marker, root });
+          next.push({ marker, root, scaleEl });
         }
         colocatedMarkerEntriesRef.current = next;
         applyMapLayerVisibility();
+        applyDomMarkerScale();
       });
     } else {
       applyMapLayerVisibility();
+      applyDomMarkerScale();
     }
 
     return () => {
@@ -1088,12 +1166,15 @@ export function MapboxMap(props: MapboxMapProps) {
       loadMapboxGl().then((mapboxgl) => {
         if (cancelled || mapRef.current !== map) return;
         const Marker = mapboxgl.default.Marker;
-        const next: { marker: import("mapbox-gl").Marker; root: ReactRoot }[] = [];
+        const next: { marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[] = [];
 
         for (const game of randomSingles) {
-          const el = document.createElement("div");
-          el.style.pointerEvents = "auto";
-          const root = createRoot(el);
+          const outer = document.createElement("div");
+          outer.style.pointerEvents = "auto";
+          const scaleEl = document.createElement("div");
+          scaleEl.style.willChange = "transform";
+          outer.appendChild(scaleEl);
+          const root = createRoot(scaleEl);
           root.render(
             <RandomLocationGamePin
               game={game}
@@ -1108,16 +1189,18 @@ export function MapboxMap(props: MapboxMapProps) {
               }}
             />
           );
-          const marker = new Marker({ element: el, anchor: "center" })
+          const marker = new Marker({ element: outer, anchor: "center" })
             .setLngLat([game.lng, game.lat])
             .addTo(map);
-          next.push({ marker, root });
+          next.push({ marker, root, scaleEl });
         }
         randomGameMarkerEntriesRef.current = next;
         applyMapLayerVisibility();
+        applyDomMarkerScale();
       });
     } else {
       applyMapLayerVisibility();
+      applyDomMarkerScale();
     }
 
     return () => {
@@ -1306,6 +1389,7 @@ export function MapboxMap(props: MapboxMapProps) {
     }
 
     const avatarUrl = userAvatarUrl || DEFAULT_AVATAR;
+    const outer = document.createElement("div");
     const wrap = document.createElement("div");
     wrap.className = "user-marker-wrap";
     const ring1 = document.createElement("div");
@@ -1321,6 +1405,8 @@ export function MapboxMap(props: MapboxMapProps) {
     img.alt = "You";
     avatar.appendChild(img);
     wrap.appendChild(avatar);
+    outer.appendChild(wrap);
+    userMarker2dScaleElRef.current = wrap;
 
     let cancelled = false;
     loadMapboxGl().then((mapboxgl) => {
@@ -1328,16 +1414,18 @@ export function MapboxMap(props: MapboxMapProps) {
       const m = mapRef.current;
       if (!m || use3DOverlay) return;
       userMarker2dRef.current?.remove();
-      userMarker2dRef.current = new mapboxgl.default.Marker({ element: wrap })
+      userMarker2dRef.current = new mapboxgl.default.Marker({ element: outer })
         .setLngLat([userCoords.lng, userCoords.lat])
         .addTo(m);
+      applyDomMarkerScale();
     });
     return () => {
       cancelled = true;
       userMarker2dRef.current?.remove();
       userMarker2dRef.current = null;
+      userMarker2dScaleElRef.current = null;
     };
-  }, [mapLoaded, userCoords, userAvatarUrl, use3DOverlay]);
+  }, [mapLoaded, userCoords, userAvatarUrl, use3DOverlay, applyDomMarkerScale]);
 
   // —— Other players (DOM markers) ———
   useEffect(() => {
@@ -1346,6 +1434,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
     playerMarkersRef.current.forEach((m) => m.remove());
     playerMarkersRef.current = [];
+    playerMarkerEntriesRef.current = [];
 
     const others = currentUserId
       ? nearbyProfiles.filter((p) => p.profile_id !== currentUserId)
@@ -1353,6 +1442,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
     loadMapboxGl().then((mapboxgl) => {
       others.forEach((profile) => {
+        const outer = document.createElement("div");
         const el = document.createElement("div");
         el.className = "player-marker";
         el.style.cursor = "pointer";
@@ -1363,6 +1453,7 @@ export function MapboxMap(props: MapboxMapProps) {
         el.style.boxShadow = "0 0 12px rgba(16, 185, 129, 0.4)";
         el.style.overflow = "hidden";
         el.style.background = "var(--tw-slate-700, #334155)";
+        el.style.willChange = "transform";
         const img = document.createElement("img");
         img.src = profile.avatar_url || DEFAULT_AVATAR;
         img.alt = profile.display_name || "Player";
@@ -1371,20 +1462,24 @@ export function MapboxMap(props: MapboxMapProps) {
         img.style.objectFit = "cover";
         el.appendChild(img);
         el.title = profile.display_name || "Player";
+        outer.appendChild(el);
 
-        const marker = new mapboxgl.default.Marker({ element: el })
+        const marker = new mapboxgl.default.Marker({ element: outer })
           .setLngLat([profile.lng, profile.lat])
           .addTo(map);
         playerMarkersRef.current.push(marker);
+        playerMarkerEntriesRef.current.push({ marker, scaleEl: el });
       });
       applyMapLayerVisibility();
+      applyDomMarkerScale();
     });
 
     return () => {
       playerMarkersRef.current.forEach((m) => m.remove());
       playerMarkersRef.current = [];
+      playerMarkerEntriesRef.current = [];
     };
-  }, [mapLoaded, nearbyProfiles, currentUserId, applyMapLayerVisibility]);
+  }, [mapLoaded, nearbyProfiles, currentUserId, applyMapLayerVisibility, applyDomMarkerScale]);
 
   // —— Sports venues: subtle GL polygons + small center dots (no DOM flag markers) ———
   const venueSportSig = venueSportsFilter.slice().sort().join("|");
@@ -1524,7 +1619,7 @@ export function MapboxMap(props: MapboxMapProps) {
               paint: {
                 "circle-radius": MapCfg.VENUE_DOT_RADIUS_PX,
                 "circle-color": MapCfg.VENUE_DOT_COLOR,
-                "circle-opacity": 0.78,
+                "circle-opacity": 0.55,
                 "circle-stroke-width": MapCfg.VENUE_DOT_STROKE_WIDTH,
                 "circle-stroke-color": MapCfg.VENUE_DOT_STROKE,
               },

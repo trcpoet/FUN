@@ -39,6 +39,9 @@ const EXTENDED_GAMES_RADIUS_KM = 120;
 
 export default function App() {
   const { coords: userCoords, error: locationError } = useGeolocation();
+  // For this experiment: keep the app usable even if location is blocked.
+  // (Browsers control permission prompts; we can't force "Allow", but we can fall back.)
+  const effectiveUserCoords = userCoords ?? { lat: 40.758, lng: -73.9855 }; // Times Square
 
   /** Minute tick: drop expired untimed games from UI and refresh map countdown labels. */
   const [mapMinuteEpoch, setMapMinuteEpoch] = useState(0);
@@ -60,11 +63,11 @@ export default function App() {
   const gamesFetchLat =
     sportFocus && userCoords
       ? userCoords.lat
-      : mapSearchLocation?.lat ?? userCoords?.lat ?? null;
+      : mapSearchLocation?.lat ?? effectiveUserCoords.lat;
   const gamesFetchLng =
     sportFocus && userCoords
       ? userCoords.lng
-      : mapSearchLocation?.lng ?? userCoords?.lng ?? null;
+      : mapSearchLocation?.lng ?? effectiveUserCoords.lng;
 
   const [appliedFilters, setAppliedFilters] = useState<FiltersState>(DEFAULT_FILTERS);
   const [filtersDraft, setFiltersDraft] = useState<FiltersState>(DEFAULT_FILTERS);
@@ -516,7 +519,7 @@ export default function App() {
         }
       >
         <MapboxMap
-          userCoords={userCoords}
+          userCoords={effectiveUserCoords}
           games={displayGames}
           mapMinuteEpoch={mapMinuteEpoch}
           mapCameraRequest={mapCameraRequest}
@@ -526,7 +529,7 @@ export default function App() {
           onSelectGame={setSelectedGame}
           selectedVenue={selectedVenue}
           onSelectVenue={setSelectedVenue}
-          venuesCenter={mapSearchLocation ?? userCoords}
+          venuesCenter={mapSearchLocation ?? effectiveUserCoords}
           venueSearchRadiusKm={appliedFilters.venueRadiusKm}
           venueSportsFilter={appliedFilters.sports}
           onVenuesFetchLoadingChange={handleVenuesFetchLoading}
@@ -589,9 +592,9 @@ export default function App() {
         </div>
       )}
 
-      {locationError && (
+      {locationError && userCoords == null && (
         <div className="absolute top-20 left-4 right-4 z-50 rounded-lg bg-amber-900/80 text-amber-200 text-sm px-3 py-2">
-          Location: {locationError}. Allow location to see nearby games.
+          Location: {locationError}. Using a default location for now — allow location for accurate nearby games.
         </div>
       )}
 
@@ -691,7 +694,7 @@ export default function App() {
             setCreateGameLocationLabel(null);
           }
         }}
-        userCoords={createGameCoords ?? userCoords}
+        userCoords={createGameCoords ?? effectiveUserCoords}
         locationLabel={createGameLocationLabel}
         anchorPoint={createGameAnchorPoint}
         onSuccess={() => {

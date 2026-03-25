@@ -25,6 +25,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Cursor / MCP (project-local)
+.mcp.local.json
+
 # Vite
 *.local
 
