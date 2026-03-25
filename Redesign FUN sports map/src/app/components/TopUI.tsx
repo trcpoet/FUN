@@ -1,14 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Filter, Navigation, MapPinned, X, MessageCircle, Rss, EyeOff, Shield, Globe } from 'lucide-react';
+import { Search, Filter, Navigation, MapPinned, X, MessageCircle, Rss, EyeOff, Shield, Globe, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useIsMobile } from './ui/use-mobile';
 import { useNavigate } from "react-router";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 import type { ForwardGeocodeFeature } from '../../lib/geocoding';
 import type { ProfileSearchRow } from '../../lib/supabase';
+import type { NotificationRow } from '../../lib/supabase';
 import type { SearchSectionId } from '../../lib/mergeSearchResults';
 import { sportEmojiFor } from '../../lib/sportDisplay';
 import type { LocationVisibilityMode } from "../../lib/locationVisibility";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 /** Glass morphism for map toolbar round controls (search, filter). */
 const MAP_GLASS_ICON_BTN =
@@ -67,8 +69,14 @@ export type TopNavigationProps = {
   onOpenFilters?: () => void;
   /** Open game chat inbox (threads for joined games). */
   onOpenMessages?: () => void;
-  /** Badge on messenger (e.g. number of joined games). */
-  joinedGameCount?: number;
+  /** Notifications list shown in bell dropdown. */
+  notifications?: NotificationRow[];
+  /** Unread notification count shown as badge. */
+  notificationsUnreadCount?: number;
+  /** Mark a notification read. */
+  onMarkNotificationRead?: (id: string) => void;
+  /** Navigate to the full notifications view (Feed tab). */
+  onOpenNotifications?: () => void;
   /** Unified search: places + sports + people (pass from App). */
   mapSearch?: UnifiedMapSearchBarProps | null;
   locationVisibility?: LocationVisibilityMode;
@@ -108,7 +116,10 @@ export const TopNavigation = (props: TopNavigationProps) => {
     onCenterOnUser,
     onOpenFilters,
     onOpenMessages,
-    joinedGameCount = 0,
+    notifications = [],
+    notificationsUnreadCount = 0,
+    onMarkNotificationRead,
+    onOpenNotifications,
     mapSearch = null,
     locationVisibility = "public",
     onLocationVisibilityChange,
@@ -440,7 +451,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
             </button>
           </div>
 
-          {/* Location, then game chats — stacked under Live Now row */}
+          {/* Location, notifications, chats — stacked under Live Now row */}
           <div className="flex flex-col items-end gap-1.5">
             {onCenterOnUser && (
               <motion.button
@@ -453,6 +464,65 @@ export const TopNavigation = (props: TopNavigationProps) => {
                 <Navigation className="w-5 h-5" />
               </motion.button>
             )}
+            <Popover>
+              <PopoverTrigger asChild>
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.95 }}
+                  className={cn("relative", MAP_GLASS_ICON_BTN_SM_SKY)}
+                  aria-label="Notifications"
+                >
+                  <Bell className="w-5 h-5" />
+                  {notificationsUnreadCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
+                      {notificationsUnreadCount > 9 ? "9+" : notificationsUnreadCount}
+                    </span>
+                  )}
+                </motion.button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                side="left"
+                className="w-[min(22rem,calc(100vw-2rem))] border border-border/80 bg-popover/95 text-popover-foreground backdrop-blur-xl"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold">Notifications</p>
+                  {onOpenNotifications ? (
+                    <button
+                      type="button"
+                      onClick={onOpenNotifications}
+                      className="text-xs font-semibold text-emerald-400 hover:text-emerald-300"
+                    >
+                      See all
+                    </button>
+                  ) : null}
+                </div>
+                <div className="mt-3 space-y-1">
+                  {notifications.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No notifications yet.</p>
+                  ) : (
+                    notifications.slice(0, 6).map((n) => (
+                      <button
+                        key={n.id}
+                        type="button"
+                        className={cn(
+                          "w-full rounded-xl border px-3 py-2 text-left transition-colors",
+                          n.is_read
+                            ? "border-border/70 bg-background/40 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                            : "border-rose-500/20 bg-rose-500/5 text-foreground hover:bg-rose-500/10",
+                        )}
+                        onClick={() => onMarkNotificationRead?.(n.id)}
+                      >
+                        <p className="text-sm font-semibold">{n.type.replace(/_/g, " ")}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+                          {new Date(n.created_at).toLocaleString()}
+                        </p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
             {onOpenMessages && (
               <motion.button
                 type="button"
@@ -462,11 +532,6 @@ export const TopNavigation = (props: TopNavigationProps) => {
                 aria-label="Game chats"
               >
                 <MessageCircle className="w-5 h-5" />
-                {joinedGameCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-sky-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
-                    {joinedGameCount > 9 ? "9+" : joinedGameCount}
-                  </span>
-                )}
               </motion.button>
             )}
           </div>

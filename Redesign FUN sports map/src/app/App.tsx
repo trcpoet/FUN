@@ -25,7 +25,7 @@ import { useMyProfile } from "../hooks/useMyProfile";
 import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
 import { supabase } from "../lib/supabase";
-import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl } from "../lib/api";
+import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame } from "../lib/api";
 import { getOrCreateDmThread } from "../lib/dmChat";
 import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow } from "../lib/supabase";
@@ -460,6 +460,34 @@ export default function App() {
     return true;
   };
 
+  const handleStartHostedGame = async (game: GameRow) => {
+    const ok = await ensureSession();
+    if (!ok) return;
+    const err = await startGame(game.id);
+    if (err) {
+      setToast({ id: `start-game-${game.id}`, message: err.message, type: "error" });
+      return;
+    }
+    refetchGames();
+  };
+
+  const handleEndHostedGame = async (game: GameRow) => {
+    const ok = await ensureSession();
+    if (!ok) return;
+    const err = await endGame(game.id);
+    if (err) {
+      setToast({ id: `end-game-${game.id}`, message: err.message, type: "error" });
+      return;
+    }
+    await reloadJoinedGameIds();
+    refetchGames();
+    if (selectedGame?.id === game.id) setSelectedGame(null);
+    if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
+      setMessagesOpen(false);
+      setMessengerFocus(null);
+    }
+  };
+
   const handleOpenGameFromCard = (game: GameRow) => {
     // 1) Center camera on the game's location.
     mapCameraIdRef.current += 1;
@@ -688,6 +716,8 @@ export default function App() {
           onOpenMessagesForGame={handleOpenChatForGame}
           onLeaveGame={handleLeave}
           onDeleteHostedGame={handleDeleteHostedGame}
+          onStartHostedGame={handleStartHostedGame}
+          onEndHostedGame={handleEndHostedGame}
           joinedGameIds={joinedGameIds}
           hostGameIds={hostGameIds}
           onMapDoubleClick={(lat, lng, viewportPoint) => {
@@ -772,7 +802,10 @@ export default function App() {
           setMessengerFocus(null);
           setMessagesOpen(true);
         }}
-        joinedGameCount={joinedGameIds.size}
+        notifications={notifications}
+        notificationsUnreadCount={notifications.filter((n) => !n.is_read).length}
+        onMarkNotificationRead={(id) => void markRead(id)}
+        onOpenNotifications={() => navigate("/feed?tab=notifications")}
         locationVisibility={locationVisibility}
         onLocationVisibilityChange={(mode) => {
           setLocationVisibility(mode);
@@ -821,7 +854,7 @@ export default function App() {
             </div>
             {favoriteSport ? (
               <span
-                className="pointer-events-none absolute z-20 -bottom-1 -right-1 select-none text-3xl leading-none drop-shadow-[0_1px_3px_rgba(0,0,0,0.95),0_0_8px_rgba(0,0,0,0.5)]"
+                className="pointer-events-none absolute z-20 -top-1 -right-1 select-none text-3xl leading-none drop-shadow-[0_1px_3px_rgba(0,0,0,0.95),0_0_8px_rgba(0,0,0,0.5)]"
                 title={favoriteSport}
                 role="img"
                 aria-label={`Favorite sport: ${favoriteSport}`}

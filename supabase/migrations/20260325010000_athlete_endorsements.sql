@@ -174,6 +174,22 @@ grant execute on function public.get_athlete_reputation(uuid) to authenticated;
 grant execute on function public.get_athlete_reputation(uuid) to anon;
 
 -- ---------- Extend get_profiles_nearby (map needs rating) ----------
+-- Return row shape changes vs older DBs — must DROP first (CREATE OR REPLACE is not enough).
+do $$
+declare
+  fn regprocedure;
+begin
+  for fn in
+    select p.oid::regprocedure
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = 'get_profiles_nearby'
+  loop
+    execute 'drop function if exists ' || fn::text || ' cascade';
+  end loop;
+end $$;
+
 create or replace function public.get_profiles_nearby(
   lat double precision,
   lng double precision,

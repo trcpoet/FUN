@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import type { GameRow } from "../../lib/supabase";
 import { cn } from "./MapCanvas";
 import { format } from "date-fns";
-import { MapPin, Clock, Trash2, Navigation, Share2 } from "lucide-react";
+import { MapPin, Clock, Trash2, Navigation, Share2, Play, Square, MessageCircle } from "lucide-react";
 
 function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371;
@@ -58,6 +58,10 @@ type GameEventPopupProps = {
   isHost?: boolean;
   /** Host-only: delete game for everyone. Return true when the row was removed. */
   onDeleteHostedGame?: (game: GameRow) => Promise<boolean>;
+  /** Host-only: start the game (sets status=live). */
+  onStartHostedGame?: (game: GameRow) => Promise<void> | void;
+  /** Host-only: end the game (live -> completed; before live -> delete). */
+  onEndHostedGame?: (game: GameRow) => Promise<void> | void;
   /** Viewer location for distance / directions (browser geolocation). */
   viewerCoords?: { lat: number; lng: number } | null;
 };
@@ -71,11 +75,17 @@ export function GameEventPopup({
   joined,
   isHost,
   onDeleteHostedGame,
+  onStartHostedGame,
+  onEndHostedGame,
   viewerCoords = null,
 }: GameEventPopupProps) {
   const [deleting, setDeleting] = useState(false);
+  const [hostBusy, setHostBusy] = useState<"start" | "end" | null>(null);
+  const [optimisticLive, setOptimisticLive] = useState(false);
   const hasCoords = typeof game.lat === "number" && typeof game.lng === "number";
   const isFull = game.spots_remaining != null && game.spots_remaining <= 0;
+  const isLive = game.status === "live";
+  const liveNow = isLive || optimisticLive;
 
   const routeMeta = useMemo(() => {
     if (!hasCoords) return null;
@@ -218,63 +228,98 @@ export function GameEventPopup({
             )}
           </div>
         </div>
-        <div className="flex gap-2 mt-3">
-          {onJoin && !joined && (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {onJoin && !joined ? (
             <button
               type="button"
               onClick={() => onJoin(game)}
-              className="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium"
+              className="col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold transition-colors hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
             >
-              {isFull ? "Join as sub" : "Join"}
+              <span className="inline-flex items-center gap-2">
+                <Play className="w-4 h-4 opacity-90" aria-hidden />
+                {isFull ? "Join as sub" : "Join"}
+              </span>
             </button>
-          )}
-          {joined && isHost && (
-            <span className="flex-1 py-2 px-3 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm font-medium text-center">
+          ) : null}
+
+          {joined && isHost ? (
+            <span className="col-span-2 inline-flex h-10 items-center justify-center rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm font-semibold">
               You&apos;re hosting
             </span>
-          )}
-          {joined && !isHost && (
-            <>
-              {onLeave ? (
-                <button
-                  type="button"
-                  onClick={() => onLeave(game)}
-                  className="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-medium border border-slate-600"
-                >
-                  {isFull ? "You're going (Sub)" : "You're going"}
-                </button>
-              ) : (
-                <span className="py-2 px-3 text-emerald-400 text-sm font-medium">
-                  {isFull ? "You're going (Sub)" : "You're going"}
-                </span>
+          ) : null}
+
+          {isHost && onStartHostedGame && !liveNow ? (
+            <button
+              type="button"
+              disabled={hostBusy !== null}
+              onClick={() => {
+                setHostBusy("start");
+                void Promise.resolve(onStartHostedGame(game))
+                  .then(() => setOptimisticLive(true))
+                  .finally(() => setHostBusy(null));
+              }}
+              className={cn(
+                "inline-flex h-10 items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition-colors",
+                "border-rose-500/40 bg-rose-600/15 text-rose-100 hover:bg-rose-600/22",
+                "disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/30"
               )}
-              {onOpenMessages && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenMessages(game);
-                    // Close the game popup so the chat drawer takes focus.
-                    onClose();
-                  }}
-                  className="flex-1 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-100 text-sm font-medium border border-slate-700"
-                >
-                  Messages
-                </button>
+              aria-label="Start game"
+            >
+              <Play className="w-4 h-4" aria-hidden />
+              {hostBusy === "start" ? "Starting…" : "Start game"}
+            </button>
+          ) : null}
+
+          {isHost && onEndHostedGame && liveNow ? (
+            <button
+              type="button"
+              disabled={hostBusy !== null}
+              onClick={() => {
+                setHostBusy("end");
+                void Promise.resolve(onEndHostedGame(game)).finally(() => setHostBusy(null));
+              }}
+              className={cn(
+                "inline-flex h-10 items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition-colors",
+                "border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800",
+                "disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/20"
               )}
-            </>
-          )}
-          {joined && isHost && onOpenMessages && (
+              aria-label="End game"
+            >
+              <Square className="w-4 h-4" aria-hidden />
+              {hostBusy === "end" ? "Ending…" : "End game"}
+            </button>
+          ) : null}
+
+          {joined && !isHost ? (
+            onLeave ? (
+              <button
+                type="button"
+                onClick={() => onLeave(game)}
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-800 text-slate-100 text-sm font-semibold transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/25"
+              >
+                {isFull ? "You're going (Sub)" : "You're going"}
+              </button>
+            ) : (
+              <span className="inline-flex h-10 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm font-semibold">
+                {isFull ? "You're going (Sub)" : "You're going"}
+              </span>
+            )
+          ) : null}
+
+          {joined && onOpenMessages ? (
             <button
               type="button"
               onClick={() => {
                 onOpenMessages(game);
                 onClose();
               }}
-              className="flex-1 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-100 text-sm font-medium border border-slate-700"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-100 text-sm font-semibold transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/20"
+              aria-label="Messages"
             >
+              <MessageCircle className="w-4 h-4" aria-hidden />
               Messages
             </button>
-          )}
+          ) : null}
         </div>
         {joined && isHost && onDeleteHostedGame && (
           <button

@@ -56,7 +56,7 @@ export function getGameStatus(startsAt: string | null): GameStatus {
 export function gameToFeature(game: GameRow, _selectedGameId: string | null): GameFeature {
   const players_filled = game.participant_count ?? 0;
   const players_total = game.spots_needed;
-  const status = getGameStatus(game.starts_at);
+  const status = game.status === "live" ? "live" : getGameStatus(game.starts_at);
   const players_label = `${players_filled}/${players_total}`;
   const map_label = players_label;
   return {
@@ -100,7 +100,7 @@ function colocatedGroupToFeature(games: GameRow[]): GameFeature {
       marker_kind: "colocated",
       sport: "multi",
       sport_map_icon: getGameMapboxIconId(g0.sport),
-      status: getGameStatus(g0.starts_at),
+      status: games.some((g) => g.status === "live") ? "live" : getGameStatus(g0.starts_at),
       players_filled: filled,
       players_total: totalSpots,
       players_label,

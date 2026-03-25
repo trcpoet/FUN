@@ -24,7 +24,9 @@ export type GameRow = {
   starts_at: string | null;
   created_by: string | null;
   created_at: string;
-  status?: "open" | "full" | "completed" | "cancelled";
+  status?: "open" | "full" | "live" | "completed" | "cancelled";
+  live_started_at?: string | null;
+  ended_at?: string | null;
   location_label?: string | null;
   description?: string | null;
   /** Host preferences from create-game (skill, age, etc.). */

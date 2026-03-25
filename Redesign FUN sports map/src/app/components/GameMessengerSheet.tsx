@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
-import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Send, Users } from "lucide-react";
+import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Send, Share2, Users } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
   Sheet,
@@ -32,6 +32,7 @@ import {
   formatUrgentCountdown,
   getCountdownRemainingMs,
 } from "../../lib/mapGameTimer";
+import { getGameLatLng } from "../../lib/api";
 
 export type GameThreadFocus = {
   kind: "game";
@@ -207,10 +208,69 @@ export function GameMessengerSheet({
   const [membersLoading, setMembersLoading] = useState(false);
   const [headerNow, setHeaderNow] = useState(() => Date.now());
   const [squadInfoOpen, setSquadInfoOpen] = useState(false);
+  const [openingLocation, setOpeningLocation] = useState(false);
+  const [shareBusyGameId, setShareBusyGameId] = useState<string | null>(null);
   const listEndRef = useRef<HTMLDivElement>(null);
   const [unreadTick, setUnreadTick] = useState(0);
 
   const bumpUnreadTick = useCallback(() => setUnreadTick((n) => n + 1), []);
+
+  const handleOpenThreadLocation = useCallback(async () => {
+    if (!focusThread || focusThread.kind !== "game") return;
+    setOpeningLocation(true);
+    try {
+      if (onSelectGameOnMap) {
+        navigate("/");
+        requestAnimationFrame(() => onSelectGameOnMap(focusThread.gameId));
+        onOpenChange(false);
+        return;
+      }
+      const coords = await getGameLatLng(focusThread.gameId);
+      const urlLine = coords
+        ? `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`
+        : "";
+      if (urlLine) window.open(urlLine, "_blank", "noopener,noreferrer");
+    } finally {
+      setOpeningLocation(false);
+    }
+  }, [focusThread, onSelectGameOnMap, navigate, onOpenChange]);
+
+  const handleShareGameChat = useCallback(
+    async (args: { gameId: string; title: string; sport: string; startsAt: string | null | undefined }) => {
+      setShareBusyGameId(args.gameId);
+      try {
+        const titleLine = args.title?.trim() || "Pickup game";
+        const whenLine = args.startsAt
+          ? format(new Date(args.startsAt), "MMM d, h:mm a")
+          : "Time TBD";
+        const coords = await getGameLatLng(args.gameId);
+        const urlLine = coords
+          ? `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`
+          : "";
+        const text = [titleLine, `${args.sport} · ${whenLine}`, urlLine].filter(Boolean).join("\n");
+        const shareData: ShareData = { title: titleLine, text, url: urlLine || undefined };
+        const canNativeShare =
+          typeof navigator.share === "function" &&
+          (!navigator.canShare || navigator.canShare(shareData));
+        if (canNativeShare) {
+          try {
+            await navigator.share(shareData);
+            return;
+          } catch (e) {
+            if ((e as Error).name === "AbortError") return;
+          }
+        }
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          window.prompt("Copy this:", urlLine || text);
+        }
+      } finally {
+        setShareBusyGameId(null);
+      }
+    },
+    [],
+  );
 
   const loadInbox = useCallback(() => {
     setInboxLoading(true);
@@ -613,6 +673,45 @@ export function GameMessengerSheet({
                     )}
                   </button>
                 )}
+                {focusThread?.kind === "game" ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleShareGameChat({
+                          gameId: focusThread.gameId,
+                          title: focusThread.title,
+                          sport: focusThread.sport,
+                          startsAt: focusThread.startsAt,
+                        })
+                      }
+                      disabled={shareBusyGameId === focusThread.gameId}
+                      className="p-2 rounded-full hover:bg-white/10 text-slate-300 shrink-0 disabled:opacity-50 disabled:pointer-events-none"
+                      aria-label="Share game"
+                      title="Share"
+                    >
+                      {shareBusyGameId === focusThread.gameId ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Share2 className="w-5 h-5" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleOpenThreadLocation()}
+                      disabled={openingLocation}
+                      className="p-2 rounded-full hover:bg-white/10 text-slate-300 shrink-0 disabled:opacity-50 disabled:pointer-events-none"
+                      aria-label="Open game location"
+                      title="Location"
+                    >
+                      {openingLocation ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <MapPin className="w-5 h-5" />
+                      )}
+                    </button>
+                  </>
+                ) : null}
                 {focusThread?.kind === "game" && onLeaveThread && (
                   <button
                     type="button"
@@ -722,7 +821,6 @@ export function GameMessengerSheet({
                         participantCount: row.participant_count,
                         spotsRemaining: row.spots_remaining,
                       });
-                      onSelectGameOnMap?.(row.id);
                     };
                     return (
                       <li key={row.id}>
@@ -748,6 +846,28 @@ export function GameMessengerSheet({
                               {row.title}
                             </span>
                             <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleShareGameChat({
+                                    gameId: row.id,
+                                    title: row.title,
+                                    sport: row.sport,
+                                    startsAt: row.starts_at,
+                                  });
+                                }}
+                                disabled={shareBusyGameId === row.id}
+                                className="inline-flex size-7 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06] hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40 disabled:opacity-50"
+                                aria-label="Share game"
+                                title="Share"
+                              >
+                                {shareBusyGameId === row.id ? (
+                                  <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                                ) : (
+                                  <Share2 className="size-3.5" aria-hidden />
+                                )}
+                              </button>
                               <button
                                 type="button"
                                 onClick={(e) => {

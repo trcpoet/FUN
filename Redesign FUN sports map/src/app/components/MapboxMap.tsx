@@ -118,6 +118,10 @@ type MapboxMapProps = {
   onLeaveGame?: (game: GameRow) => void;
   /** Host: delete game for everyone. Return true if the game row was removed. */
   onDeleteHostedGame?: (game: GameRow) => Promise<boolean>;
+  /** Host: start game (status=live). */
+  onStartHostedGame?: (game: GameRow) => Promise<void> | void;
+  /** Host: end game (live->completed; before live->delete). */
+  onEndHostedGame?: (game: GameRow) => Promise<void> | void;
   /** Called when user clicks Messages in the event popup. */
   onOpenMessagesForGame?: (game: GameRow) => void;
   /** Set of game ids the current user has joined (to show "Joined" in popup). */
@@ -168,6 +172,8 @@ export function MapboxMap(props: MapboxMapProps) {
     onJoinGame,
     onLeaveGame,
     onDeleteHostedGame,
+    onStartHostedGame,
+    onEndHostedGame,
     onOpenMessagesForGame,
     joinedGameIds,
     nearbyProfiles = [],
@@ -2030,6 +2036,8 @@ export function MapboxMap(props: MapboxMapProps) {
                   eventPopup.game.created_by === currentUserId)
               }
               onDeleteHostedGame={onDeleteHostedGame}
+              onStartHostedGame={onStartHostedGame}
+              onEndHostedGame={onEndHostedGame}
             />
           </div>
         </div>

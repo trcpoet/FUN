@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { X, MapPin, ChevronRight, MessageCircle } from "lucide-react";
+import { X, MapPin, ChevronRight, MessageCircle, Share2 } from "lucide-react";
 import { format } from "date-fns";
 import type { GameRow } from "../../lib/supabase";
 import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";
@@ -25,6 +25,10 @@ function commonLocationLabel(games: GameRow[]): string | null {
   return labels.every((l) => l === first) ? first : null;
 }
 
+function googleMapsPlaceUrl(to: { lat: number; lng: number }): string {
+  return `https://www.google.com/maps/search/?api=1&query=${to.lat},${to.lng}`;
+}
+
 export function ColocatedGamesModal({
   games,
   viewerCoords,
@@ -47,6 +51,33 @@ export function ColocatedGamesModal({
 
   const activeCount = (list: GameRow[]) =>
     list.filter((g) => g.status === "open" || !g.status).length;
+
+  const handleShare = async () => {
+    const titleLine = title || "Games at this spot";
+    const coords = { lat: g0.lat, lng: g0.lng };
+    const urlLine = googleMapsPlaceUrl(coords);
+    const text = [titleLine, urlLine].filter(Boolean).join("\n");
+
+    const shareData: ShareData = { title: titleLine, text, url: urlLine };
+    const canNativeShare =
+      typeof navigator.share === "function" &&
+      (!navigator.canShare || navigator.canShare(shareData));
+
+    if (canNativeShare) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      window.prompt("Copy this link:", urlLine || text);
+    }
+  };
 
   return (
     <div
@@ -73,14 +104,25 @@ export function ColocatedGamesModal({
                 </p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 rounded-full hover:bg-slate-800 text-slate-300 shrink-0"
-              aria-label="Close"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-start gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => void handleShare()}
+                className="p-2 rounded-full hover:bg-slate-800 text-slate-300"
+                aria-label="Share"
+                title="Share"
+              >
+                <Share2 className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-2 rounded-full hover:bg-slate-800 text-slate-300"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
 

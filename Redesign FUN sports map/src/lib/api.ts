@@ -268,6 +268,34 @@ export async function deleteHostedGame(gameId: string): Promise<Error | null> {
   return null;
 }
 
+const HOST_GAME_RPC_MIGRATION =
+  "supabase/migrations/20260325030000_live_game_ttl_and_inactive_locations.sql";
+
+function hostGameRpcError(error: { code?: string; message?: string }): Error {
+  const msg = error.message ?? "";
+  const missing =
+    error.code === "PGRST202" ||
+    /not found|could not find function|404/i.test(msg);
+  if (missing) {
+    return new Error(
+      `Start/End game RPCs are not deployed. Run ${HOST_GAME_RPC_MIGRATION} in the Supabase SQL Editor (run earlier migrations first if the script errors), then reload the app.`
+    );
+  }
+  return new Error(msg);
+}
+
+export async function startGame(gameId: string): Promise<Error | null> {
+  if (!supabase) return new Error("Supabase not configured");
+  const { error } = await supabase.rpc("start_game", { p_game_id: gameId });
+  return error ? hostGameRpcError(error) : null;
+}
+
+export async function endGame(gameId: string): Promise<Error | null> {
+  if (!supabase) return new Error("Supabase not configured");
+  const { error } = await supabase.rpc("end_game", { p_game_id: gameId });
+  return error ? hostGameRpcError(error) : null;
+}
+
 export async function getGameLatLng(gameId: string): Promise<{ lat: number; lng: number } | null> {
   if (!supabase) return null;
   const { data, error } = await supabase.rpc("get_game_lat_lng", {
