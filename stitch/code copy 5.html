@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PERFORMANCE_HUB | Profile</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Plus+Jakarta+Sans:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "secondary": "#e3e2e8",
+              "on-tertiary-fixed": "#2f0d00",
+              "surface-container-low": "#121318",
+              "error-dim": "#d7383b",
+              "on-primary-fixed": "#004145",
+              "secondary-fixed": "#e3e2e8",
+              "on-secondary-fixed": "#3e3f44",
+              "outline-variant": "#47484c",
+              "primary": "#96f8ff",
+              "primary-dim": "#00e2ed",
+              "on-secondary-fixed-variant": "#5b5b60",
+              "surface-bright": "#2a2c32",
+              "surface": "#0d0e12",
+              "on-error": "#490006",
+              "secondary-container": "#46464b",
+              "background": "#0d0e12",
+              "on-secondary-container": "#d1cfd5",
+              "inverse-surface": "#faf8fe",
+              "tertiary-fixed-dim": "#ff7f3a",
+              "outline": "#75757a",
+              "primary-container": "#00f1fd",
+              "inverse-primary": "#006a6f",
+              "surface-tint": "#96f8ff",
+              "inverse-on-surface": "#54555a",
+              "surface-container-lowest": "#000000",
+              "on-primary-container": "#00565a",
+              "tertiary-dim": "#ff7526",
+              "surface-container-high": "#1e1f25",
+              "on-primary-fixed-variant": "#006065",
+              "on-surface": "#faf8fe",
+              "surface-dim": "#0d0e12",
+              "on-tertiary": "#481900",
+              "on-background": "#faf8fe",
+              "on-tertiary-container": "#330f00",
+              "surface-container-highest": "#24252b",
+              "on-surface-variant": "#abaab0",
+              "on-tertiary-fixed-variant": "#652600",
+              "tertiary": "#ff8343",
+              "error": "#ff716c",
+              "on-primary": "#005f64",
+              "on-secondary": "#515156",
+              "primary-fixed-dim": "#00e2ed",
+              "secondary-dim": "#d5d4d9",
+              "surface-variant": "#24252b",
+              "on-error-container": "#ffa8a3",
+              "secondary-fixed-dim": "#d5d4d9",
+              "surface-container": "#18191e",
+              "tertiary-fixed": "#ff9561",
+              "primary-fixed": "#00f1fd",
+              "tertiary-container": "#ff6a00",
+              "error-container": "#9f0519"
+            },
+            fontFamily: {
+              "headline": ["Space Grotesk"],
+              "body": ["Plus Jakarta Sans"],
+              "label": ["Space Grotesk"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #0b0c10;
+        }
+        .glass-panel {
+            background: rgba(13, 14, 18, 0.7);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+        }
+        .neon-glow {
+            text-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface min-h-screen">
+<!-- TopAppBar -->
+<header class="sticky top-0 z-50 w-full bg-surface/80 dark:bg-[#0B0C10]/80 backdrop-blur-3xl bg-gradient-to-b from-[#0B0C10] to-transparent shadow-[0_32px_48px_rgba(0,242,254,0.08)]">
+<div class="flex items-center justify-between px-6 h-16 w-full">
+<h1 class="text-xl font-bold tracking-tighter text-[#00F2FE] font-headline">PERFORMANCE_HUB</h1>
+<div class="flex gap-4 items-center">
+<button class="text-slate-400 hover:opacity-80 transition-opacity scale-95 active:duration-150">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<button class="text-slate-400 hover:opacity-80 transition-opacity scale-95 active:duration-150 relative">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-tertiary rounded-full"></span>
+</button>
+</div>
+</div>
+</header>
+<main class="max-w-7xl mx-auto px-4 md:px-6 pb-24 pt-4 lg:grid lg:grid-cols-12 lg:gap-8">
+<!-- Content Area -->
+<div class="lg:col-span-8 space-y-6">
+<!-- Hero / Profile Header Card -->
+<section class="relative rounded-xl overflow-hidden bg-surface-container-low">
+<div class="h-48 w-full bg-cover bg-center opacity-40" data-alt="Abstract dark training facility gym interior" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC3sd94HnT8Yf-gvQWrjjRnQXZ8lSJ4U-q4q1HPBbBir6vw2lSrrD-F7UPhwQNlvt91ObWJtLzd0byh6ZJdlyOdTeLuOZhCHcFYIviPT4AwvGqDYwQuDpYBcSE2MgvoymGpb46VasfK1lrXqNcinZC4rjoCb7YWAYVG0vxdizWz-fyN83pWieUG9d-moE6cOYQPU5uC3ny2ocMhH1d1_ea9_sUHpex9IcrS-5FxzHOBlhafUyMRoEsxHHxb3DDkiRKNqQuv3qemMG4')"></div>
+<div class="px-6 pb-8 -mt-12 relative flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+<div class="flex flex-col md:flex-row items-end gap-6">
+<div class="relative">
+<img alt="Alex Rivera" class="w-32 h-32 rounded-full border-4 border-background object-cover shadow-xl" data-alt="Professional portrait of athlete Alex Rivera" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDraQLiOaYGaFnhoiQZt7dJW9Ek-aogKXEsATRnKaJetVCQatVdDgzezllmZkJeupMzWlBr2VGuZr6gxG_tPl5Qhqr4_mWx96SO1_ZB7p1EyeybVqqadxvdql-uIdCyzD6FWza1g5vzM6Seu89g6L9IaT1vduF-FJsu2CSmV_n8bsFval_nXlpmrl5NCKTI_STklF-pVQYbO3-Sn7Y3tLPrxnzlWRE-fUgiRB31b-KK0nBH_LAW-Ugxf1bABCXxoJHc3oahsc-RXNY"/>
+<div class="absolute bottom-2 right-2 w-6 h-6 bg-primary-container rounded-full border-4 border-background flex items-center justify-center">
+<span class="material-symbols-outlined text-[12px] text-on-primary-container font-bold" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+</div>
+<div class="mb-2">
+<h2 class="text-3xl font-headline font-bold text-on-surface">Alex Rivera</h2>
+<p class="text-primary tracking-widest font-headline text-sm uppercase">@arivera</p>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<button class="bg-gradient-to-r from-primary to-primary-container text-on-primary-container font-bold px-8 py-3 rounded-full font-headline text-sm tracking-wide hover:opacity-90 transition-all flex items-center gap-2">
+                            EDIT PROFILE
+                        </button>
+<button class="bg-surface-container-high text-on-surface p-3 rounded-full hover:bg-surface-bright transition-colors">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Stats Row: Bento Grid Style -->
+<section class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+<div class="bg-surface-container p-4 rounded-xl flex flex-col items-center justify-center text-center">
+<span class="text-[10px] font-headline text-on-surface-variant tracking-widest uppercase mb-1">Max Speed</span>
+<span class="text-xl font-bold font-headline text-primary neon-glow">34.2 <small class="text-[10px] text-slate-500">km/h</small></span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl flex flex-col items-center justify-center text-center">
+<span class="text-[10px] font-headline text-on-surface-variant tracking-widest uppercase mb-1">Bench</span>
+<span class="text-xl font-bold font-headline text-primary neon-glow">145 <small class="text-[10px] text-slate-500">kg</small></span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl flex flex-col items-center justify-center text-center">
+<span class="text-[10px] font-headline text-on-surface-variant tracking-widest uppercase mb-1">Jump</span>
+<span class="text-xl font-bold font-headline text-primary neon-glow">82 <small class="text-[10px] text-slate-500">cm</small></span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl flex flex-col items-center justify-center text-center">
+<span class="text-[10px] font-headline text-on-surface-variant tracking-widest uppercase mb-1">Row 500m</span>
+<span class="text-xl font-bold font-headline text-primary neon-glow">1:28 <small class="text-[10px] text-slate-500">min</small></span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl flex flex-col items-center justify-center text-center">
+<span class="text-[10px] font-headline text-on-surface-variant tracking-widest uppercase mb-1">Deadlift</span>
+<span class="text-xl font-bold font-headline text-primary neon-glow">210 <small class="text-[10px] text-slate-500">kg</small></span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl flex flex-col items-center justify-center text-center">
+<span class="text-[10px] font-headline text-on-surface-variant tracking-widest uppercase mb-1">Height</span>
+<span class="text-xl font-bold font-headline text-on-surface">188 <small class="text-[10px] text-slate-500">cm</small></span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl flex flex-col items-center justify-center text-center">
+<span class="text-[10px] font-headline text-on-surface-variant tracking-widest uppercase mb-1">Weight</span>
+<span class="text-xl font-bold font-headline text-on-surface">92 <small class="text-[10px] text-slate-500">kg</small></span>
+</div>
+</section>
+<!-- Publisher Area -->
+<section class="bg-surface-container-low rounded-xl p-6 glass-panel">
+<div class="flex gap-4">
+<img alt="Profile" class="w-12 h-12 rounded-full object-cover" data-alt="Alex Rivera user avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAYbqR--B9kGGzBf8-ffrgEMS0qWdohMDar9NELRXKyKf1Q56cw9RJZeWz60xSvwr5pol56a_tcEEYOKez3rzBBIG1q-gB2VbQogz74YPBOJiFKNNi7TpTOEBtRsW1IcYEw5GWJLDhLIoQzVXYR84P70bg4_1vYN10a_zWXbHSJOLMTned9XT0WRNblAErtXkSHUMK5P4l7StKbBlcOhHAVcsUbbCSdIGwoxMck3mJqrILNdPeduK96s_tMMZBchYnJRhZwBKd90to"/>
+<div class="flex-1">
+<textarea class="w-full bg-surface-container-highest border-none rounded-lg focus:ring-1 focus:ring-primary text-on-surface placeholder-on-surface-variant resize-none py-3 px-4 font-body" placeholder="Share an update with your followers..." rows="2"></textarea>
+<div class="flex items-center justify-between mt-4">
+<div class="flex items-center gap-6">
+<button class="flex items-center gap-2 text-on-surface-variant hover:text-primary transition-colors text-sm font-headline uppercase tracking-wider">
+<span class="material-symbols-outlined text-primary">image</span>
+                                    Photo
+                                </button>
+<button class="flex items-center gap-2 text-on-surface-variant hover:text-primary transition-colors text-sm font-headline uppercase tracking-wider">
+<span class="material-symbols-outlined text-primary">videocam</span>
+                                    Video
+                                </button>
+<button class="flex items-center gap-2 text-on-surface-variant hover:text-primary transition-colors text-sm font-headline uppercase tracking-wider">
+<span class="material-symbols-outlined text-primary">query_stats</span>
+                                    Status
+                                </button>
+</div>
+<button class="bg-primary/20 hover:bg-primary/30 text-primary px-6 py-2 rounded-full font-headline font-bold text-xs tracking-widest transition-all">POST</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Feed Tabs -->
+<section>
+<div class="flex items-center border-b border-outline-variant/20 mb-6 overflow-x-auto no-scrollbar">
+<button class="px-8 py-4 text-primary border-b-2 border-primary font-headline font-bold text-sm tracking-widest uppercase whitespace-nowrap">Posts</button>
+<button class="px-8 py-4 text-on-surface-variant hover:text-on-surface font-headline font-bold text-sm tracking-widest uppercase transition-colors whitespace-nowrap">Reels</button>
+<button class="px-8 py-4 text-on-surface-variant hover:text-on-surface font-headline font-bold text-sm tracking-widest uppercase transition-colors whitespace-nowrap">Statuses</button>
+<button class="px-8 py-4 text-on-surface-variant hover:text-on-surface font-headline font-bold text-sm tracking-widest uppercase transition-colors whitespace-nowrap">Tagged</button>
+</div>
+<!-- Feed Content Grid -->
+<div class="grid grid-cols-3 gap-1 md:gap-4">
+<div class="aspect-square bg-surface-container overflow-hidden rounded-md group relative cursor-pointer">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Intense athlete weightlifting in dark gym" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCe6bnJ24qy3KQ57m5m5LnfNt1FAd5K3etqonl_7UXXuXgE9pJ5My_-j4M7vayb5jj5-NNyx_KLJJufBt_2DpHIMNgA1MqlzTOpOqhgTvvaGvj68hVdWcO5ePs1v0VUUoVonCTWUaqhGbRGcKgpuudKZDi7_oBpD3kksdU9nsDVbwoCdgq8qXNeEFwQErIjMeAqRo21u6tmsjrs1_5YpeQDGWxBDIpIr9KqfP97yrD53C1U7OK5G4R0qcQ3NDqcnEjtEsGZq8zsBpQ"/>
+<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">favorite</span>
+<span class="ml-1 text-white font-bold">1.2k</span>
+</div>
+</div>
+<div class="aspect-square bg-surface-container overflow-hidden rounded-md group relative cursor-pointer">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Professional sprinter at starting blocks" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCcPLTzu-Mfkg8P4LuMfYpofbwx9i5qWyi7lR-XoUzwi14Cru8IYhRaLqStI6CWvTiiJpETSPTmzUnCf6QUuyOx2_zU9s_SnVCNde-lYobPz_UXtn5JZD3oFgWtvAMlLCloMCNuko3-GyZrqxqjdqUrS2z6R5Vy4AM3gN5UmwigXBisVywVd3bMLZKQy3F65HBYTepu9HpTSD5jD1bkTNT9SmmBCuQD7BruM1PI1rouoomHyEXkgRD3giHZBxHS0s0HWgwwV4WJzU8"/>
+<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">favorite</span>
+<span class="ml-1 text-white font-bold">892</span>
+</div>
+</div>
+<div class="aspect-square bg-surface-container overflow-hidden rounded-md group relative cursor-pointer">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Athlete running on treadmill with neon lights" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDSnSrWRYyfgsvpAULqeo9N5eDlIB73PYMXNrcqZsH19Hxds7pksrUupPHTVYcx5PhEFuePejLp-JDICDjmvLkf8K6v9-x9-Y0GzV5KX--Vg4SMEt4_jtm9DruIjY_eafws8KvpqbKA-ZEKQhMIX-NxtImZNlPaessnUlT_XxW-h12ELrUCPgshAu_-Dvt35RiigN1QkOE3IAgGr9GMSPdb2Ve--my13Kv87sDaOa8ItYmKaQ0TU3K5sxwKxGgSjD6bNhkfNuOP1wE"/>
+<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">favorite</span>
+<span class="ml-1 text-white font-bold">2.4k</span>
+</div>
+</div>
+<div class="aspect-square bg-surface-container overflow-hidden rounded-md group relative cursor-pointer">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Close up of athletic shoes on track" src="https://lh3.googleusercontent.com/aida-public/AB6AXuATATF2qlomIApCHSIll9eORFC3sE4e9o4gG4MIodF3zPm5TtmEBIbm7s9-C6jjY-R4pCeID7Ix-5N2JbpK1Z7ThISXbUsFRaZzs7rNsCy5ibatzoe8HjhwPcYKBgN9NBxJmS2eWzAEkljgURU_oS8sLLRZXrW1QgBdKyeIjmcYGGaMFbMq-nfA1sAZSepqtM9v_ViWJNxkn8vY0FukJe4sWcPX0FpqYPU1iTrVUeDcYaNK1om9t-uTC3emeYp58q5_cvJu6oyCre0"/>
+<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">favorite</span>
+<span class="ml-1 text-white font-bold">450</span>
+</div>
+</div>
+<div class="aspect-square bg-surface-container overflow-hidden rounded-md group relative cursor-pointer">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Muscular back of a swimmer prepping" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAH18fz2T2D3HifesaS3OO9nunads4MSpP3RYOMpgYsTNjpEHOSztUbCYbmf926iT--W0ZMWW3jPrrKcJ7NtZN81h3UYJ0S6u-lNyHjxh5Ib05iOgIV51OfJ2B7vm4Zyfucy9We10TePJPioKtkICiBH47e8jrhCvG5zXg94G1QDDJpFOX_NiXpIznNFe_8SUSdTwDxdjqJCan0-52hj3pQwX7Mhfjh393sL_sNxVHxAaunZpx1YfD3wtJkoeiBS5kLByv2hzI_V_s"/>
+<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">favorite</span>
+<span class="ml-1 text-white font-bold">3.1k</span>
+</div>
+</div>
+<div class="aspect-square bg-surface-container overflow-hidden rounded-md group relative cursor-pointer">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Action shot of basketball player dunking" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBxXjxGintu3gtgbcHgeIVndfW93PabZS2tE2jMpTVJgK2cW-lPHBGWGQfzhkriteWfnAwW_TBkxqvrmTqPSHRtAURFytmgrz6u0WMDtfEvCsKfo6psidom-RIFYCq2twKIev4h30YKG4HOaj-DQ5ALdxYb2ickaBluJ5A7CSqPorBm_Vutwj_IS9TGbYzuwZ4ZiADE3_Et1EV30y3F3bMqgKaugR4AsFCdcxpMYcmq8Uk7H-Sbi6A0moBP-YUOzJvtD44Lj9qFJJA"/>
+<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">favorite</span>
+<span class="ml-1 text-white font-bold">1.5k</span>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Sidebar -->
+<aside class="hidden lg:block lg:col-span-4 space-y-6">
+<!-- Suggested Athletes -->
+<div class="bg-surface-container p-6 rounded-xl border border-outline-variant/10">
+<div class="flex items-center justify-between mb-6">
+<h3 class="font-headline font-bold text-sm tracking-widest uppercase text-on-surface">Suggested Athletes</h3>
+<button class="text-xs text-primary font-headline font-bold uppercase hover:opacity-80">See All</button>
+</div>
+<div class="space-y-4">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<img class="w-10 h-10 rounded-full object-cover" data-alt="Athlete suggestion profile picture" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCaiHqIMee1ppypspuKfv7Bjz-c0ajp_DxJ0fJPuQVw07Ng_sxTjh9RxUd-GC6fai19DYcC0sZUKs3ZaXmX5zsENHZcPimLS2SgWXhQ5PD1u16EDCDYCh_9f8_hfwhsgAscKaTj-7MxlYLPj7G49Uy8LRTBsv2n3Q7fJbGXSO2V0fsYDILoD04fwDaUsarnHDN2JUMv6A6-SHfGImKPZgtiemXpVtprDpCJ34EtZA64f_ByJraf-adNgi4iRORVgfxanArFsNfiO0k"/>
+<div>
+<p class="text-sm font-bold">Marcus Chen</p>
+<p class="text-xs text-on-surface-variant">Crossfit Athlete</p>
+</div>
+</div>
+<button class="text-primary-container text-xs font-headline font-bold uppercase">Follow</button>
+</div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<img class="w-10 h-10 rounded-full object-cover" data-alt="Athlete suggestion profile picture" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD-Msk00JU9lEm04K5cfSlstdv9vPWQ0G_UvVeQfeAWNcE97Jq5oI7ZvJ-hJdJvPbl11ZWJsF8zPwGhOnW1tOqlR8DQ1kiRrBu0U21mixxP7Wusr0L0taJ6DwYcFBmUqjWK8Hn18DJWfMeSvCZh3fyTYIQfSCa9iTAcuVG-AWK-Mdv6jPknmMGRO_7e05AyDaHsebTESn3Pb4f4O4-jSP0jfjKWwThbX733htBFOd9NQgjqvgyqF_92iiCEMsdN2HFwu62FgLwXeyg"/>
+<div>
+<p class="text-sm font-bold">Elena Rodriguez</p>
+<p class="text-xs text-on-surface-variant">Sprinter</p>
+</div>
+</div>
+<button class="text-primary-container text-xs font-headline font-bold uppercase">Follow</button>
+</div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<img class="w-10 h-10 rounded-full object-cover" data-alt="Athlete suggestion profile picture" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC7aLnpD_9dvTBs3NntfYLugXwvEuARsejKcpFWAbaEdZnGto7fS9h-qWyoaBYMJwo2Eqh29OuyotLYOQu1FpgVVGd826xRQlrd48FOsxthBIb-deJULoPNJlBGak6VmPboVv0k8ckLtSztBAJgOUUr5KmsQq1bpDrEtQJU0gcfVDZmmiQZe8u-I2tmMbrwUNSGDlp4v9mKASeG1MGCm37WOGnEUx5ekfz7r2el80QJ84DO6zMpenNnPhVgnhR7mX7H2rHWCnzV3_c"/>
+<div>
+<p class="text-sm font-bold">David Blake</p>
+<p class="text-xs text-on-surface-variant">Powerlifter</p>
+</div>
+</div>
+<button class="text-primary-container text-xs font-headline font-bold uppercase">Follow</button>
+</div>
+</div>
+</div>
+<!-- Local Games / Events -->
+<div class="bg-surface-container p-6 rounded-xl border border-outline-variant/10">
+<div class="flex items-center justify-between mb-6">
+<h3 class="font-headline font-bold text-sm tracking-widest uppercase text-on-surface">Local Games</h3>
+<div class="flex items-center gap-1">
+<span class="w-2 h-2 bg-tertiary rounded-full animate-pulse"></span>
+<span class="text-[10px] text-tertiary font-headline font-bold uppercase">Live</span>
+</div>
+</div>
+<div class="space-y-4">
+<div class="bg-surface-container-high rounded-lg p-4 flex flex-col gap-3 group cursor-pointer hover:bg-surface-bright transition-colors">
+<div class="flex justify-between items-start">
+<div>
+<span class="text-[10px] text-primary-container font-headline font-bold uppercase tracking-widest">Basketball</span>
+<h4 class="text-sm font-bold mt-1">Downtown 3v3 Finals</h4>
+</div>
+<span class="text-[10px] text-on-surface-variant">2.4km away</span>
+</div>
+<div class="flex -space-x-2">
+<img class="w-6 h-6 rounded-full border border-surface" data-alt="Game attendee avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDxj1s_UlLBCJPX-5slsU8UIAhq2DRolNvECbLHWoXGqCd1axIOYZipjcxv9LVsKu5yQGa9lFeeEkZKNana5OBXse44KboRJwEsoaqvsHExhXcLndhwPNhUJzLTVz9P6wq26CUXJcZL50IOm6whsZEill0vFVeTYfkrtoXOKae5Tp2gy3G1lTDLzI2pBXlMt01Djj_NcQSvC6akP9OWghJNrvtYvusXsFDG0BESA0rgrjJx8muoBABR_ao6pE0Nsyr010eGicmMNC8"/>
+<img class="w-6 h-6 rounded-full border border-surface" data-alt="Game attendee avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA8giqM_FhEPyDOFYYQvZwL0i6g8ydhjAKLlUcTf6JPhhNojccW02vNYxDCYqqO4AWubwuVNcCEJHYXLf96VieeM4zYNHhMciP2KAlgPn4hOlmGdVBdDRKkuFsFq9zS2ME6HzU2wRhhGO4HnBYnwZYkIeYqLI7Z4D_wEvEAGypEJjpehikN439FBRIt47JTVyIPIx2Xe9rkjeVpjUX1tZ6mssw_-tHfXpKwdAfGBA7E3aanMzvFwuJMewfDS19UJHgljHEPQ5_2Wzk"/>
+<img class="w-6 h-6 rounded-full border border-surface" data-alt="Game attendee avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBz-nHP8xKIPPFRuEl7t_HbzAMXA5a6cxlXaLyjo3GRjfy0yrfs-McveWqudQnTI5Vwwz-gKYMXya8n8PlD68_O1WmZYB71Ep02U3hZueYfeuM-2UlMaRk2JFgvvlYF-BuB6WJOzd1Yyck_ZvpU_B44XoeDQFpC5BB1CynC20b-U1QP5cnbbz7ySEIqa8hOaFxGVWt6yxuDJDVbh79komySI2UO8I_VXlHjddGLq-hVvXABU7Rzr001Vw6InI-tQReul2H6mYUpZQs"/>
+<div class="w-6 h-6 rounded-full bg-surface-container-highest border border-surface flex items-center justify-center text-[8px] font-bold">+12</div>
+</div>
+</div>
+<div class="bg-surface-container-high rounded-lg p-4 flex flex-col gap-3 group cursor-pointer hover:bg-surface-bright transition-colors opacity-80">
+<div class="flex justify-between items-start">
+<div>
+<span class="text-[10px] text-primary-container font-headline font-bold uppercase tracking-widest">Football</span>
+<h4 class="text-sm font-bold mt-1">Midnight Scrimmage</h4>
+</div>
+<span class="text-[10px] text-on-surface-variant">0.8km away</span>
+</div>
+<p class="text-xs text-on-surface-variant">Starts in 45m</p>
+</div>
+</div>
+</div>
+</aside>
+</main>
+<!-- BottomNavBar -->
+</body></html>

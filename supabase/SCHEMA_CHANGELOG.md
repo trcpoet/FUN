@@ -1,5 +1,26 @@
 # Schema changelog
 
+## 2026-03-22 – `create_game` RPC 404 on client
+
+**Symptom:** `POST .../rest/v1/rpc/create_game` returns **404 Not Found**.
+
+**Cause:** The DB is missing the latest `create_game` (app sends `p_description`, `p_requirements`, etc.) and/or **no `GRANT EXECUTE`** for `anon` / `authenticated`.
+
+**Fix (Supabase → SQL Editor, in order):**
+
+1. Run **`migrations/20260321000000_games_requirements.sql`** (defines `create_game` + `get_games_nearby` with `requirements`).
+2. Run **`migrations/20260322000000_create_game_grants.sql`** (grants + `NOTIFY pgrst, 'reload schema'`).
+
+Verify:
+
+```sql
+select pg_get_function_identity_arguments(oid)
+from pg_proc
+where proname = 'create_game' and pronamespace = 'public'::regnamespace;
+```
+
+You should see the nine-argument signature ending in `jsonb`.
+
 ## 2025-03-25 – Host deletes own game
 
 **File:** `migrations/20250325000000_games_host_delete_rls.sql`  
