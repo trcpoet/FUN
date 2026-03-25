@@ -15,6 +15,11 @@ import { cn } from "./MapCanvas";
 import { useIsMobile } from "./ui/use-mobile";
 import { useNavigate } from "react-router";
 import type { GameRow } from "../../lib/supabase";
+import {
+  formatLiveStripCardSummary,
+  getLiveStripBadgeTone,
+  type LiveStripBadgeTone,
+} from "../../lib/mapGameTimer";
 
 function formatDistance(km: number): string {
   const mi = km * 0.621371;
@@ -40,8 +45,16 @@ export type BottomCarouselProps = {
   /** Used to show Host vs In on cards (hosts are in game_participants but aren’t “guest joins”). */
   currentUserId?: string | null;
   liveNowOpen?: boolean;
+  /** Bumps when the clock minute changes so “Starts in X min” stays fresh. */
+  mapMinuteEpoch?: number;
   /** Mobile nav: open the messenger as a full-screen experience (sheet). */
   onOpenMessages?: () => void;
+};
+
+const BADGE_TONE_CLASS: Record<LiveStripBadgeTone, string> = {
+  live: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  soon: "bg-amber-500/20 text-amber-200 border-amber-500/35",
+  calm: "bg-cyan-950/40 text-cyan-200/95 border-cyan-500/25",
 };
 
 export const BottomCarousel = ({
@@ -52,8 +65,11 @@ export const BottomCarousel = ({
   joinedGameIds,
   currentUserId = null,
   liveNowOpen = false,
+  mapMinuteEpoch = 0,
   onOpenMessages,
 }: BottomCarouselProps) => {
+  void mapMinuteEpoch;
+  const liveNowMs = Date.now();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [radialMenuOpen, setRadialMenuOpen] = useState(false);
@@ -91,6 +107,12 @@ export const BottomCarousel = ({
             />
           </div>
 
+          {games.length === 0 ? (
+            <div className="pointer-events-auto mx-4 mb-4 rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-center text-sm text-slate-400">
+              No games live or starting in the next 3 hours here. Turn off Live to see the full map, or widen filters.
+            </div>
+          ) : null}
+
           <div
             className="flex gap-4 overflow-x-auto px-4 pb-4 snap-x snap-mandatory hide-scrollbars pointer-events-auto"
             style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
@@ -99,6 +121,8 @@ export const BottomCarousel = ({
           const isSelected = selectedGame?.id === game.id;
           const isJoined = joinedGameIds.has(game.id);
           const isHost = Boolean(currentUserId) && game.created_by === currentUserId;
+          const summary = formatLiveStripCardSummary(game, liveNowMs);
+          const tone = getLiveStripBadgeTone(game, liveNowMs);
           return (
             <motion.div
               key={game.id}
@@ -121,10 +145,19 @@ export const BottomCarousel = ({
               <div className="absolute inset-0 bg-slate-800 z-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-700 via-slate-800 to-slate-900" />
 
               <div className="relative z-20 p-3 w-full">
-                <div className="flex justify-between items-start mb-1.5">
-                  <span className="px-2 py-0.5 text-[11px] font-bold rounded-full flex items-center gap-1 uppercase tracking-wider backdrop-blur-md shadow-lg bg-orange-500/20 text-orange-400 border border-orange-500/30">
-                    <Flame className="w-2.5 h-2.5" />
-                    Live Now
+                <div className="flex justify-between items-start mb-1.5 gap-2">
+                  <span
+                    className={cn(
+                      "max-w-[min(100%,14rem)] px-2 py-0.5 text-[10px] font-semibold rounded-full flex items-center gap-1 backdrop-blur-md shadow-lg border",
+                      BADGE_TONE_CLASS[tone]
+                    )}
+                  >
+                    {tone === "live" ? (
+                      <Flame className="w-2.5 h-2.5 shrink-0" aria-hidden />
+                    ) : (
+                      <Clock className="w-2.5 h-2.5 shrink-0 opacity-90" aria-hidden />
+                    )}
+                    <span className="min-w-0 truncate leading-snug">{summary}</span>
                   </span>
                   <span className="text-[11px] font-medium text-slate-300 flex items-center gap-1 bg-slate-900/60 backdrop-blur-md px-2 py-0.5 rounded-full border border-slate-700/50">
                     <MapPin className="w-2.5 h-2.5 text-slate-400" />
@@ -140,18 +173,13 @@ export const BottomCarousel = ({
                     {game.description.trim()}
                   </p>
                 ) : null}
-                <p className="text-[13px] text-slate-300 font-medium mb-1 drop-shadow-md">
-                  {game.sport} •{" "}
-                  {game.spots_remaining != null
-                    ? `${game.spots_remaining} spots left`
-                    : `${game.spots_needed} player cap`}
-                </p>
+                <p className="text-[13px] text-slate-300 font-medium mb-1 drop-shadow-md">{game.sport}</p>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400 mb-2">
                   <span className="flex items-center gap-1">
-                    <Clock className="w-2.5 h-2.5" />
+                    <Clock className="w-2.5 h-2.5 shrink-0" />
                     {game.starts_at
                       ? format(new Date(game.starts_at), "MMM d, h:mm a")
-                      : "Time TBD"}
+                      : "Soon"}
                   </span>
                   <span className="flex items-center gap-1">
                     <MapPin className="w-2.5 h-2.5" />

@@ -168,7 +168,7 @@ export function ColocatedGamesModal({
                             <div className="min-w-0 flex-1">
                               <p className="text-sm text-slate-100 truncate">{g.title || "Pickup game"}</p>
                               <p className="text-[11px] text-slate-500">
-                                {g.starts_at ? format(new Date(g.starts_at), "MMM d · h:mm a") : "Time TBD"}
+                                {g.starts_at ? format(new Date(g.starts_at), "MMM d · h:mm a") : "—"}
                               </p>
                             </div>
                             {joined ? (

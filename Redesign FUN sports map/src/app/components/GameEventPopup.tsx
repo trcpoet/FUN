@@ -113,7 +113,7 @@ export function GameEventPopup({
 
   const handleShare = async () => {
     const titleLine = game.title || "Pickup game";
-    const whenLine = game.starts_at ? format(new Date(game.starts_at), "MMM d, h:mm a") : "Time TBD";
+    const whenLine = game.starts_at ? format(new Date(game.starts_at), "MMM d, h:mm a") : "Time on app";
     const coordsLine = hasCoords ? `📍 ${formatCoords(game.lat, game.lng)}` : "";
     const urlLine = routeMeta?.href ?? "";
     const text = [titleLine, `${game.sport} · ${whenLine}`, coordsLine, urlLine].filter(Boolean).join("\n");
@@ -173,7 +173,7 @@ export function GameEventPopup({
               <Clock className="w-3 h-3 shrink-0 text-slate-500" />
               {game.starts_at
                 ? format(new Date(game.starts_at), "MMM d, h:mm a")
-                : "Time TBD"}
+                : "—"}
             </span>
             {hasCoords && (
               <span className="flex items-center gap-1.5">
@@ -295,9 +295,9 @@ export function GameEventPopup({
               <button
                 type="button"
                 onClick={() => onLeave(game)}
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-800 text-slate-100 text-sm font-semibold transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/25"
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-rose-500/40 bg-rose-950/35 text-rose-100 text-sm font-semibold transition-colors hover:bg-rose-950/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/30"
               >
-                {isFull ? "You're going (Sub)" : "You're going"}
+                {isFull ? "Can't make it (sub)" : "Can't make it"}
               </button>
             ) : (
               <span className="inline-flex h-10 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm font-semibold">

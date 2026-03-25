@@ -142,6 +142,8 @@ type MapboxMapProps = {
   onVenuesFetchLoadingChange?: (loading: boolean) => void;
   /** Incremented every minute so game pin labels refresh (countdown / expiry). */
   mapMinuteEpoch?: number;
+  /** When true, skip starting venue Overpass/DB fetches (e.g. messenger open) so chat APIs get bandwidth. */
+  pauseVenueFetch?: boolean;
 };
 
 export type VenueSelection = {
@@ -183,6 +185,7 @@ export function MapboxMap(props: MapboxMapProps) {
     centerOnUserTrigger,
     onVenuesFetchLoadingChange,
     mapMinuteEpoch = 0,
+    pauseVenueFetch = false,
   } = props;
   const navigate = useNavigate();
   const currentUserId = props.currentUserId ?? null;
@@ -1598,6 +1601,10 @@ export function MapboxMap(props: MapboxMapProps) {
       onVenuesFetchLoadingChangeRef.current?.(false);
       return;
     }
+    if (pauseVenueFetch) {
+      onVenuesFetchLoadingChangeRef.current?.(false);
+      return;
+    }
 
     const addVenueMarkers = (geojson: SportsVenueGeoJSON, onDone?: () => void) => {
       const mapInstance = mapRef.current;
@@ -1969,6 +1976,7 @@ export function MapboxMap(props: MapboxMapProps) {
     venueSportsFilter,
     onSelectVenue,
     applyMapLayerVisibility,
+    pauseVenueFetch,
   ]);
 
   const gamesAtSelectedVenue = useMemo(() => {

@@ -11,6 +11,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { ChevronRight, Trophy, Users, PenLine, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { addHours, format } from "date-fns";
 import { supabase } from "../../lib/supabase";
 
 const SPORTS = [
@@ -63,6 +64,7 @@ export function CreateGameSheet({
       setTitle("");
       setSport("Basketball");
       setSpots(4);
+      setStartsAtLocal(format(addHours(new Date(), 1), "yyyy-MM-dd'T'HH:mm"));
       setError(null);
     }
   }, [open]);
@@ -78,6 +80,19 @@ export function CreateGameSheet({
       setError("Sign-in required. In Supabase enable: Authentication → Providers → Anonymous.");
       return;
     }
+    if (!startsAtLocal.trim()) {
+      setError("Pick a start time.");
+      return;
+    }
+    const startD = new Date(startsAtLocal);
+    if (Number.isNaN(startD.getTime())) {
+      setError("Invalid start time.");
+      return;
+    }
+    if (startD.getTime() < Date.now()) {
+      setError("Pick a time in the future.");
+      return;
+    }
     setLoading(true);
     setError(null);
     const { error: err } = await supabase.rpc("create_game", {
@@ -86,7 +101,7 @@ export function CreateGameSheet({
       p_spots_needed: spots,
       p_lat: userCoords.lat,
       p_lng: userCoords.lng,
-      p_starts_at: null,
+      p_starts_at: startD.toISOString(),
       p_location_label: null,
       p_description: null,
       p_requirements: null,
@@ -273,8 +288,19 @@ export function CreateGameSheet({
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
-                className="rounded-2xl border border-border/80 bg-card/70 p-3 space-y-1 shadow-[var(--shadow-control)]"
+                className="space-y-3"
               >
+                <div className="text-left">
+                  <p className="text-xs font-medium text-muted-foreground mb-1.5">Start time (required)</p>
+                  <Input
+                    type="datetime-local"
+                    value={startsAtLocal}
+                    min={format(new Date(), "yyyy-MM-dd'T'HH:mm")}
+                    onChange={(e) => setStartsAtLocal(e.target.value)}
+                    className="h-11 bg-slate-900 border-slate-600 text-white rounded-xl"
+                  />
+                </div>
+                <div className="rounded-2xl border border-border/80 bg-card/70 p-3 space-y-1 shadow-[var(--shadow-control)]">
                 <p className="flex min-h-[2rem] items-center gap-2 text-foreground/90">
                   <span
                     className="shrink-0 text-2xl leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
@@ -288,6 +314,7 @@ export function CreateGameSheet({
                   <span className="text-foreground font-semibold">{spots}</span> spots
                   · <span className="text-foreground font-semibold">{title.trim() || "Pickup game"}</span>
                 </p>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

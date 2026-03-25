@@ -142,7 +142,8 @@ export function CreateGameModal({
       setSport(ALL_SPORTS[0]?.id ?? "Basketball");
       setSportQuery("");
       setSpots(4);
-      setDateTime("");
+      const t = new Date(Date.now() + 60 * 60 * 1000);
+      setDateTime(format(t, "yyyy-MM-dd'T'HH:mm"));
       setError(null);
       setPlayerPrefsOpen(false);
       setReq(emptyGameRequirements());
@@ -208,13 +209,14 @@ export function CreateGameModal({
   }, [pickDate, pickTime, combineLocalDateTime]);
 
   const clearWhen = useCallback(() => {
-    setDateTime("");
+    const t = new Date(Date.now() + 60 * 60 * 1000);
+    setDateTime(format(t, "yyyy-MM-dd'T'HH:mm"));
     setError(null);
     setWhenPickerOpen(false);
   }, []);
 
   const whenTriggerLabel = useMemo(() => {
-    if (!dateTime.trim()) return "Optional — tap to set time";
+    if (!dateTime.trim()) return "Pick date & time";
     const d = new Date(dateTime.trim());
     if (Number.isNaN(d.getTime())) return "Invalid — tap to fix";
     return format(d, "MMM d, yyyy · h:mm a");
@@ -235,15 +237,20 @@ export function CreateGameModal({
       return;
     }
 
-    let startsAt: string | null = null;
-    if (dateTime.trim()) {
-      const d = new Date(dateTime.trim());
-      if (Number.isNaN(d.getTime())) {
-        setError("Please enter a valid date and time.");
-        return;
-      }
-      startsAt = d.toISOString();
+    if (!dateTime.trim()) {
+      setError("Pick a date and time for the game.");
+      return;
     }
+    const startDate = new Date(dateTime.trim());
+    if (Number.isNaN(startDate.getTime())) {
+      setError("Please enter a valid date and time.");
+      return;
+    }
+    if (startDate.getTime() < Date.now()) {
+      setError("Pick a date and time in the future.");
+      return;
+    }
+    const startsAt = startDate.toISOString();
 
     setLoading(true);
     setError(null);
@@ -525,7 +532,7 @@ export function CreateGameModal({
                         className="h-8 text-xs text-slate-400 hover:text-slate-200"
                         onClick={clearWhen}
                       >
-                        Clear
+                        +1h from now
                       </Button>
                       <Button
                         type="button"
@@ -539,7 +546,7 @@ export function CreateGameModal({
                 </PopoverContent>
               </Popover>
             </div>
-            <p className="text-slate-600 text-[10px] mt-1.5">Optional — leave blank for &quot;time TBD&quot;</p>
+            <p className="text-slate-600 text-[10px] mt-1.5">Required — players need a real start time.</p>
           </div>
 
           {/* Name */}

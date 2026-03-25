@@ -49,9 +49,12 @@ function SheetContent({
   children,
   side = "right",
   "aria-describedby": ariaDescribedBy,
+  hideCloseButton = false,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left";
+  /** When true, omit the default top-right X so the consumer can place Back + Close together (e.g. mobile profile settings). */
+  hideCloseButton?: boolean;
 }) {
   return (
     <SheetPortal>
@@ -76,10 +79,12 @@ function SheetContent({
         {...props}
       >
         {children}
-        <SheetPrimitive.Close className="absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-10 rounded-md opacity-80 transition-[opacity,background-color,box-shadow] duration-[var(--dur-hover)] ease-[var(--ease-out)] hover:opacity-100 hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none">
-          <XIcon className="size-4" />
-          <span className="sr-only">Close</span>
-        </SheetPrimitive.Close>
+        {!hideCloseButton ? (
+          <SheetPrimitive.Close className="absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-10 rounded-md opacity-80 transition-[opacity,background-color,box-shadow] duration-[var(--dur-hover)] ease-[var(--ease-out)] hover:opacity-100 hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none">
+            <XIcon className="size-4" />
+            <span className="sr-only">Close</span>
+          </SheetPrimitive.Close>
+        ) : null}
       </SheetPrimitive.Content>
     </SheetPortal>
   );

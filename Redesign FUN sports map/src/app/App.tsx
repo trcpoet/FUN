@@ -20,16 +20,17 @@ import { useUnifiedSearch } from "../hooks/useUnifiedSearch";
 import { SEARCH_DEBOUNCE_MS } from "../lib/searchConstants";
 import type { ForwardGeocodeFeature } from "../lib/geocoding";
 import { gamesMatchingSport, closestGame } from "../lib/sportSearch";
-import type { ProfileSearchRow } from "../lib/supabase";
+import type { DmInboxRow, GameInboxRow, ProfileSearchRow } from "../lib/supabase";
 import { useMyProfile } from "../hooks/useMyProfile";
 import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
 import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame } from "../lib/api";
-import { getOrCreateDmThread } from "../lib/dmChat";
+import { fetchMyDmInbox, getOrCreateDmThread } from "../lib/dmChat";
+import { fetchMyGameInbox } from "../lib/gameChat";
 import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow } from "../lib/supabase";
-import { filterGamesVisibleOnMap } from "../lib/mapGameTimer";
+import { filterGamesVisibleOnMap, isGameInLiveWindow } from "../lib/mapGameTimer";
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
 import { StarRating } from "./components/ui/StarRating";
 
@@ -121,19 +122,6 @@ export default function App() {
 
   const showMapLoadingBanner = venuesFetchLoading || filterApplySync;
 
-  const mapLoadingLines = useMemo(() => {
-    const lines: string[] = [];
-    if (filterApplySync) {
-      lines.push("Applying your map filters…");
-    }
-    if (venuesFetchLoading) {
-      lines.push("Loading sports venues from OpenStreetMap (radius / area)…");
-    }
-    if (filterApplySync && nearbyLoading) {
-      lines.push("Fetching nearby games and athletes…");
-    }
-    return lines;
-  }, [venuesFetchLoading, filterApplySync, nearbyLoading]);
   const { avatarId, avatarUrl, athleteProfile } = useMyProfile();
   const favoriteSport = athleteProfile.favoriteSport?.trim() ?? null;
   const { stats } = useUserStats();
@@ -156,6 +144,9 @@ export default function App() {
   const [hostGameIds, setHostGameIds] = useState<Set<string>>(new Set());
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [messengerFocus, setMessengerFocus] = useState<MessengerThreadFocus | null>(null);
+  /** Idle prefetch so opening Messages isn't blocked by cold RPCs. */
+  const [gameInboxBootstrap, setGameInboxBootstrap] = useState<GameInboxRow[] | null>(null);
+  const [dmInboxBootstrap, setDmInboxBootstrap] = useState<DmInboxRow[] | null>(null);
   const [liveNowOpen, setLiveNowOpen] = useState(false);
   const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
   const lastNearbyIdsRef = useRef<Set<string>>(new Set());
@@ -298,6 +289,38 @@ export default function App() {
   useEffect(() => {
     void reloadJoinedGameIds();
   }, [currentUserId, reloadJoinedGameIds]);
+
+  /** Warm game + DM inboxes after login so Messages opens with data while venues/games still load. */
+  useEffect(() => {
+    if (!currentUserId) {
+      setGameInboxBootstrap(null);
+      setDmInboxBootstrap(null);
+      return;
+    }
+    let cancelled = false;
+    const run = () => {
+      void fetchMyGameInbox().then(({ data, error }) => {
+        if (cancelled || error) return;
+        setGameInboxBootstrap(data ?? []);
+      });
+      void fetchMyDmInbox().then(({ data, error }) => {
+        if (cancelled || error) return;
+        setDmInboxBootstrap(data ?? []);
+      });
+    };
+    const idle =
+      typeof window.requestIdleCallback !== "undefined"
+        ? window.requestIdleCallback(run, { timeout: 5000 })
+        : window.setTimeout(run, 1500);
+    return () => {
+      cancelled = true;
+      if (typeof window.cancelIdleCallback !== "undefined") {
+        window.cancelIdleCallback(idle as number);
+      } else {
+        clearTimeout(idle as number);
+      }
+    };
+  }, [currentUserId]);
 
   const ensureSession = async (): Promise<boolean> => {
     if (!supabase) return false;
@@ -611,12 +634,22 @@ export default function App() {
     return list;
   }, [games, sportFocus, appliedFilters.sports, mapMinuteEpoch]);
 
+  const liveStripGames = useMemo(() => {
+    const now = Date.now();
+    return displayGames.filter((g) => isGameInLiveWindow(g, now));
+  }, [displayGames, mapMinuteEpoch]);
+
+  const mapGames = useMemo(
+    () => (liveNowOpen ? liveStripGames : displayGames),
+    [liveNowOpen, liveStripGames, displayGames]
+  );
+
   useEffect(() => {
     if (!selectedGame) return;
-    if (!displayGames.some((g) => g.id === selectedGame.id)) {
+    if (!mapGames.some((g) => g.id === selectedGame.id)) {
       setSelectedGame(null);
     }
-  }, [displayGames, selectedGame]);
+  }, [mapGames, selectedGame]);
 
   const clearMapSearch = () => {
     setSearchQuery("");
@@ -697,7 +730,7 @@ export default function App() {
       >
         <MapboxMap
           userCoords={effectiveUserCoords}
-          games={displayGames}
+          games={mapGames}
           mapMinuteEpoch={mapMinuteEpoch}
           mapCameraRequest={mapCameraRequest}
           nearbyProfiles={nearbyProfiles}
@@ -711,6 +744,7 @@ export default function App() {
           venueSearchRadiusKm={appliedFilters.venueRadiusKm}
           venueSportsFilter={appliedFilters.sports}
           onVenuesFetchLoadingChange={handleVenuesFetchLoading}
+          pauseVenueFetch={messagesOpen}
           gamePopupRequest={gamePopupRequest}
           onJoinGame={handleJoin}
           onOpenMessagesForGame={handleOpenChatForGame}
@@ -753,22 +787,13 @@ export default function App() {
 
       {showMapLoadingBanner && (
         <div
-          className="pointer-events-none absolute left-4 top-24 z-[55] max-w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-white/10 bg-slate-950/92 px-3 py-2.5 shadow-lg backdrop-blur-md"
+          className="pointer-events-none absolute left-4 top-24 z-[55] flex size-11 items-center justify-center rounded-full border border-white/12 bg-slate-950/90 shadow-[0_8px_32px_rgba(0,0,0,0.45)] ring-1 ring-white/[0.06] backdrop-blur-md"
           role="status"
           aria-live="polite"
           aria-busy="true"
+          aria-label="Map updating"
         >
-          <div className="flex items-start gap-2.5">
-            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-emerald-400" aria-hidden />
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-slate-100">Updating map</p>
-              <ul className="mt-1.5 list-disc space-y-1 pl-3.5 text-[11px] leading-snug text-slate-400">
-                {mapLoadingLines.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          <Loader2 className="size-5 shrink-0 animate-spin text-emerald-400" aria-hidden />
         </div>
       )}
 
@@ -865,13 +890,14 @@ export default function App() {
           </div>
         </div>
         <BottomCarousel
-          games={displayGames}
+          games={mapGames}
           selectedGame={selectedGame}
           onSelectGame={setSelectedGame}
           onOpenGame={handleOpenGameFromCard}
           joinedGameIds={joinedGameIds}
           currentUserId={currentUserId}
           liveNowOpen={liveNowOpen}
+          mapMinuteEpoch={mapMinuteEpoch}
           onOpenMessages={() => {
             setMessengerFocus(null);
             setMessagesOpen(true);
@@ -912,6 +938,8 @@ export default function App() {
         onSelectGameOnMap={handleSelectGameOnMapFromChat}
         joinedGameIds={joinedGameIds}
         onLeaveThread={handleLeaveThreadById}
+        inboxBootstrap={gameInboxBootstrap}
+        dmInboxBootstrap={dmInboxBootstrap}
       />
 
       <FiltersModal

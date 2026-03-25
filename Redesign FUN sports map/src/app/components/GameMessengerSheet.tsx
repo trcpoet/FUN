@@ -71,6 +71,9 @@ type GameMessengerSheetProps = {
   onSelectGameOnMap?: (gameId: string) => void;
   /** Leave chat and also unjoin the game (so the thread disappears). */
   onLeaveThread?: (gameId: string) => Promise<void> | void;
+  /** Idle-prefetched rows so the list can paint before network round-trips. */
+  inboxBootstrap?: GameInboxRow[] | null;
+  dmInboxBootstrap?: DmInboxRow[] | null;
 };
 
 function threadScheduleLines(args: {
@@ -96,7 +99,7 @@ function threadScheduleLines(args: {
     if (rem == null) return { timeLine, countdownLine: "No longer on map" };
     return { timeLine, countdownLine: `${formatUrgentCountdown(rem)} left on map` };
   }
-  return { timeLine: "Time TBD", countdownLine: "" };
+  return { timeLine: "Set time", countdownLine: "" };
 }
 
 function SquadMemberList({
@@ -170,6 +173,8 @@ export function GameMessengerSheet({
   joinedGameIds,
   onSelectGameOnMap,
   onLeaveThread,
+  inboxBootstrap = null,
+  dmInboxBootstrap = null,
 }: GameMessengerSheetProps) {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"groups" | "direct">("groups");
@@ -242,7 +247,7 @@ export function GameMessengerSheet({
         const titleLine = args.title?.trim() || "Pickup game";
         const whenLine = args.startsAt
           ? format(new Date(args.startsAt), "MMM d, h:mm a")
-          : "Time TBD";
+          : "See app";
         const coords = await getGameLatLng(args.gameId);
         const urlLine = coords
           ? `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`
@@ -295,8 +300,15 @@ export function GameMessengerSheet({
     if (!open) return;
     if (focusThread) return;
     if (mode !== "groups") return;
+    if (inboxBootstrap?.length) {
+      setInbox((prev) => {
+        if (prev.length > 0) return prev;
+        const filtered = joinedGameIds ? inboxBootstrap.filter((r) => joinedGameIds.has(r.id)) : inboxBootstrap;
+        return filtered;
+      });
+    }
     loadInbox();
-  }, [open, focusThread, mode, loadInbox]);
+  }, [open, focusThread, mode, loadInbox, inboxBootstrap, joinedGameIds]);
 
   const loadDmInbox = useCallback(() => {
     setDmInboxLoading(true);
@@ -320,8 +332,11 @@ export function GameMessengerSheet({
     if (!open) return;
     if (focusThread) return;
     if (mode !== "direct") return;
+    if (dmInboxBootstrap?.length) {
+      setDmInbox((prev) => (prev.length > 0 ? prev : dmInboxBootstrap));
+    }
     loadDmInbox();
-  }, [open, focusThread, mode, loadDmInbox]);
+  }, [open, focusThread, mode, loadDmInbox, dmInboxBootstrap]);
 
   useEffect(() => {
     if (!open) return;
@@ -881,7 +896,7 @@ export function GameMessengerSheet({
                                 <MapPin className="size-3.5" aria-hidden />
                               </button>
                               <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                                {row.starts_at ? format(new Date(row.starts_at), "MMM d") : "TBD"}
+                                {row.starts_at ? format(new Date(row.starts_at), "MMM d") : "—"}
                               </span>
                             </div>
                           </div>

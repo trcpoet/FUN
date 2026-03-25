@@ -12,7 +12,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet";
 import { Slider } from "../ui/slider";
 import { Switch } from "../ui/switch";
 import {
@@ -40,6 +40,7 @@ import {
   Camera,
   Sparkles,
   Eye,
+  X,
 } from "lucide-react";
 
 type Props = {
@@ -327,17 +328,55 @@ export function ProfileEditSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="flex h-[92vh] flex-col gap-0 overflow-hidden rounded-t-2xl border-white/10 bg-[#0A0F1C] p-0 text-white"
+        hideCloseButton
+        className="relative flex h-[92vh] flex-col gap-0 overflow-hidden rounded-t-2xl border-white/10 bg-[#0A0F1C] p-0 text-white"
       >
-        <SheetHeader className="shrink-0 space-y-3 border-b border-white/[0.06] bg-[#0A0F1C] px-4 pb-3 pt-2 text-left shadow-[inset_0_-1px_0_0_rgba(255,255,255,0.03)]">
-          <div className="flex flex-wrap items-start justify-between gap-2 pr-10">
-            <div>
+        {/* Mobile: Back + Close together; sm+: Close only (Back stays in header next to Preview). */}
+        <div
+          className={cn(
+            "pointer-events-none absolute left-0 right-0 top-0 z-20 flex",
+            "justify-end px-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))]",
+            "sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pt-[max(1rem,env(safe-area-inset-top))]",
+          )}
+        >
+          <div className="pointer-events-auto flex items-center gap-1.5">
+            {editTab !== "home" ? (
+              <button
+                type="button"
+                onClick={() => setEditTab("home")}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-cyan-400/90",
+                  "transition-colors hover:bg-white/[0.08] hover:text-cyan-200",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                  "sm:hidden",
+                )}
+                aria-label="Back to all settings"
+              >
+                <ArrowLeft className="size-4 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
+                Back
+              </button>
+            ) : null}
+            <SheetClose
+              className={cn(
+                "rounded-md p-2 opacity-90 transition-[opacity,background-color] hover:bg-white/10 hover:opacity-100",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
+              )}
+            >
+              <X className="size-5 text-slate-200" aria-hidden />
+              <span className="sr-only">Close</span>
+            </SheetClose>
+          </div>
+        </div>
+
+        <SheetHeader className="shrink-0 space-y-3 border-b border-white/[0.06] bg-[#0A0F1C] px-4 pb-3 pt-2 text-left shadow-[inset_0_-1px_0_0_rgba(255,255,255,0.03)] sm:pr-10">
+          <div className="flex flex-wrap items-start justify-between gap-2 pr-10 sm:pr-0">
+            <div className="min-w-0 flex-1 pr-2">
               <SheetTitle className="text-lg text-white">Profile settings</SheetTitle>
               <SheetDescription className="text-sm text-slate-500">
                 Tap a section to edit. Done saves everything.
               </SheetDescription>
             </div>
-            <div className="flex shrink-0 flex-col items-end gap-1.5">
+            <div className="hidden shrink-0 flex-col items-end gap-1.5 sm:flex">
               <Button
                 type="button"
                 variant={previewAsPublic ? "secondary" : "ghost"}
@@ -358,17 +397,34 @@ export function ProfileEditSheet({
                   type="button"
                   onClick={() => setEditTab("home")}
                   className={cn(
-                    "inline-flex items-center gap-1 rounded-md py-0.5 pl-0.5 pr-1 text-[11px] font-medium text-cyan-400/90",
-                    "transition-colors hover:text-cyan-200",
+                    "inline-flex items-center gap-1.5 rounded-lg py-2 pl-2 pr-3 text-sm font-semibold text-cyan-400/90",
+                    "transition-colors hover:text-cyan-200 hover:bg-white/[0.06]",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
                   )}
                   aria-label="Back to all settings"
                 >
-                  <ArrowLeft className="size-3 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
+                  <ArrowLeft className="size-4 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
                   Back
                 </button>
               ) : null}
             </div>
+          </div>
+          <div className="flex justify-end sm:hidden">
+            <Button
+              type="button"
+              variant={previewAsPublic ? "secondary" : "ghost"}
+              size="sm"
+              className={cn(
+                "h-9 gap-2 border px-3 text-xs font-semibold shadow-sm",
+                previewAsPublic
+                  ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-100 shadow-[0_8px_24px_rgba(16,185,129,0.12)]"
+                  : "border-white/12 bg-white/[0.06] text-slate-100 hover:bg-white/[0.1]",
+              )}
+              onClick={() => setPreviewAsPublic((v) => !v)}
+            >
+              <Eye className="size-3.5 shrink-0" />
+              Preview my profile
+            </Button>
           </div>
           <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-slate-500">
             <span>{draft.city?.trim() ? `Home base · ${draft.city.trim()}` : "Home base · Not set"}</span>
@@ -558,8 +614,8 @@ export function ProfileEditSheet({
           {/* Home: fill narrow grid column; sub-pages: cap line length for forms */}
           <div
             className={cn(
-              "mx-auto w-full space-y-6 px-4 py-4 pb-8",
-              editTab === "home" ? "max-w-full" : "max-w-lg xl:max-w-xl 2xl:max-w-2xl",
+              "mx-auto w-full px-4 py-4 pb-8",
+              editTab === "home" ? "max-w-full space-y-3" : "max-w-lg space-y-6 xl:max-w-xl 2xl:max-w-2xl",
             )}
           >
             {err && (
@@ -571,18 +627,21 @@ export function ProfileEditSheet({
             {editTab === "home" && (
               <section
                 className={cn(
-                  "grid grid-cols-2 grid-rows-6 gap-2 sm:min-h-0 sm:gap-x-2 sm:gap-y-2",
+                  "flex flex-col gap-1.5 sm:gap-2",
                   sectionCard(),
                 )}
               >
-                <div className="col-span-2 row-span-1 flex items-center gap-2 self-start">
-                  <Sparkles className="size-4 shrink-0 text-emerald-400/90" />
-                  <h3 className="text-sm font-semibold tracking-wide text-slate-200">Edit your profile</h3>
+                <div className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="size-4 shrink-0 text-emerald-400/90" />
+                    <h3 className="text-sm font-semibold tracking-wide text-slate-200">Edit your profile</h3>
+                  </div>
+                  <p className="text-xs leading-snug text-slate-400 sm:text-sm">
+                    Pick one section. Keep it simple — you can come back anytime.
+                  </p>
                 </div>
-                <p className="col-span-2 row-span-1 text-sm leading-snug text-slate-400">
-                  Pick one section. Keep it simple — you can come back anytime.
-                </p>
 
+                <div className="flex flex-col gap-2">
                 {(
                   [
                     {
@@ -622,11 +681,11 @@ export function ProfileEditSheet({
                     type="button"
                     onClick={() => setEditTab(row.id)}
                     className={cn(
-                      "col-span-1 row-span-1 flex min-h-0 flex-col rounded-2xl border border-white/[0.08] bg-white/[0.02] p-2.5 text-left transition-colors sm:p-3",
+                      "flex min-h-0 w-full flex-col rounded-2xl border border-white/[0.08] bg-white/[0.02] p-2.5 text-left transition-colors sm:p-3",
                       "hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40",
                     )}
                   >
-                    <div className="flex min-h-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-2">
+                    <div className="flex min-h-0 flex-1 flex-row items-start gap-2">
                       <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-200 sm:mt-0.5 sm:size-10">
                         <row.Icon className="size-4 sm:size-5" aria-hidden />
                       </span>
@@ -643,6 +702,7 @@ export function ProfileEditSheet({
                     </div>
                   </button>
                 ))}
+                </div>
               </section>
             )}
 
