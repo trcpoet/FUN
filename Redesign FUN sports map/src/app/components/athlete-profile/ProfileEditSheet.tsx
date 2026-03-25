@@ -32,6 +32,7 @@ import {
   Trash2,
   LogOut,
   ChevronDown,
+  ArrowLeft,
   User,
   Trophy,
   Dumbbell,
@@ -336,32 +337,37 @@ export function ProfileEditSheet({
                 Tap a section to edit. Done saves everything.
               </SheetDescription>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {editTab !== "home" ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1.5 border border-white/10 text-xs text-slate-300 hover:text-white"
-                  onClick={() => setEditTab("home")}
-                >
-                  <ChevronDown className="size-3.5 rotate-90" aria-hidden />
-                  Back
-                </Button>
-              ) : null}
+            <div className="flex shrink-0 flex-col items-end gap-1.5">
               <Button
                 type="button"
                 variant={previewAsPublic ? "secondary" : "ghost"}
                 size="sm"
                 className={cn(
-                  "h-8 gap-1.5 border border-white/10 text-xs",
-                  previewAsPublic && "border-emerald-500/40 bg-emerald-500/15 text-emerald-100",
+                  "h-9 gap-2 border px-3 text-xs font-semibold shadow-sm",
+                  previewAsPublic
+                    ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-100 shadow-[0_8px_24px_rgba(16,185,129,0.12)]"
+                    : "border-white/12 bg-white/[0.06] text-slate-100 hover:bg-white/[0.1]",
                 )}
                 onClick={() => setPreviewAsPublic((v) => !v)}
               >
-                <Eye className="size-3.5" />
+                <Eye className="size-3.5 shrink-0" />
                 Preview my profile
               </Button>
+              {editTab !== "home" ? (
+                <button
+                  type="button"
+                  onClick={() => setEditTab("home")}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-md py-0.5 pl-0.5 pr-1 text-[11px] font-medium text-cyan-400/90",
+                    "transition-colors hover:text-cyan-200",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                  )}
+                  aria-label="Back to all settings"
+                >
+                  <ArrowLeft className="size-3 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
+                  Back
+                </button>
+              ) : null}
             </div>
           </div>
           <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-slate-500">
@@ -371,23 +377,32 @@ export function ProfileEditSheet({
         </SheetHeader>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain sm:flex-row sm:overflow-hidden">
         <div
           className={cn(
-            "shrink-0 border-b border-white/[0.06] bg-gradient-to-b px-4 py-4 sm:w-[min(44%,17.5rem)] sm:max-w-[280px] sm:border-b-0 sm:border-r sm:border-white/[0.06] sm:py-5",
+            "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain sm:overflow-hidden",
+            /* sm: 4 cols × 6 rows — preview 2×6 | edit panel 2×6 (was 3 cols with menu 1×3 on home). */
+            "sm:grid sm:min-h-0 sm:grid-cols-4 sm:grid-rows-6 sm:items-start sm:gap-x-4 sm:gap-y-0 sm:px-3 sm:pb-2",
+          )}
+        >
+        <div
+          className={cn(
+            "shrink-0 border-b border-white/[0.06] bg-gradient-to-b px-4 py-4 sm:col-span-2 sm:row-span-6 sm:min-h-0 sm:h-full sm:w-auto sm:max-w-none sm:self-stretch sm:border-b-0 sm:border-r sm:border-white/[0.06] sm:py-5 sm:overflow-y-auto",
             previewAsPublic
               ? "from-emerald-950/35 via-[#0c1528]/60 to-[#0A0F1C]"
               : "from-white/[0.04] via-[#0A0F1C] to-[#0A0F1C]",
           )}
         >
-          <div className="flex w-full max-w-sm flex-col items-start text-left sm:max-w-none">
+          <div className="flex w-full flex-col items-start text-left sm:max-w-none">
             <p className="mb-3 text-left text-[11px] font-medium uppercase tracking-[0.2em] text-slate-500">
               Profile photo
             </p>
             <div className="relative shrink-0">
               <div
                 className={cn(
-                  "size-[7.5rem] overflow-hidden rounded-full border-4 border-[#080c14] bg-slate-800 shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-2 ring-white/10",
+                  "overflow-hidden rounded-full border-4 border-[#080c14] bg-slate-800 shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-2 ring-white/10",
+                  editTab === "home"
+                    ? "size-32 sm:size-40 md:size-44"
+                    : "size-[7.5rem]",
                   previewAsPublic && "ring-emerald-500/50",
                 )}
               >
@@ -439,7 +454,34 @@ export function ProfileEditSheet({
             <p className="text-left font-mono text-sm text-slate-500">
               @{(draft.handle ?? "").replace(/^@/, "") || "handle"}
             </p>
-            <p className="mt-1 max-w-[16rem] text-left text-xs leading-relaxed text-slate-500">
+            {draft.bio?.trim() ? (
+              <p className="mt-2 max-w-[16rem] text-left text-xs leading-relaxed text-slate-300 line-clamp-4">
+                {draft.bio.trim()}
+              </p>
+            ) : null}
+            {(() => {
+              const home =
+                draft.snapshot?.neighbourhood?.trim() || draft.city?.trim() || null;
+              return home ? (
+                <p className="mt-2 max-w-[16rem] text-left text-[11px] text-slate-400">
+                  <span className="font-medium text-slate-500">Home base · </span>
+                  {home}
+                </p>
+              ) : null;
+            })()}
+            {draft.snapshot?.occupation?.trim() ? (
+              <p className="mt-1 max-w-[16rem] text-left text-[11px] text-slate-400">
+                <span className="font-medium text-slate-500">Work · </span>
+                {draft.snapshot.occupation.trim()}
+              </p>
+            ) : null}
+            {draft.snapshot?.university?.trim() ? (
+              <p className="mt-0.5 max-w-[16rem] text-left text-[11px] text-slate-400">
+                <span className="font-medium text-slate-500">School · </span>
+                {draft.snapshot.university.trim()}
+              </p>
+            ) : null}
+            <p className="mt-3 max-w-[16rem] text-left text-xs leading-relaxed text-slate-500">
               Tap the green button to choose a new photo. Hit <span className="text-slate-200">Done</span> when you&apos;re
               finished.
             </p>
@@ -505,10 +547,21 @@ export function ProfileEditSheet({
           </div>
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-visible sm:overflow-hidden">
+        <div
+          className={cn(
+            "flex min-h-0 min-w-0 flex-1 flex-col overflow-visible sm:min-h-0 sm:overflow-y-auto",
+            "sm:col-span-2 sm:row-span-6 sm:col-start-3",
+          )}
+        >
 
         <div className="min-h-0 flex-1 overflow-visible px-0 sm:min-h-0 sm:overflow-y-auto">
-          <div className="space-y-6 px-4 py-4 pb-8">
+          {/* Home: fill narrow grid column; sub-pages: cap line length for forms */}
+          <div
+            className={cn(
+              "mx-auto w-full space-y-6 px-4 py-4 pb-8",
+              editTab === "home" ? "max-w-full" : "max-w-lg xl:max-w-xl 2xl:max-w-2xl",
+            )}
+          >
             {err && (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
                 {err}
@@ -516,72 +569,80 @@ export function ProfileEditSheet({
             )}
 
             {editTab === "home" && (
-              <section className={cn("space-y-3", sectionCard())}>
-                <div className="flex items-center gap-2">
-                  <Sparkles className="size-4 text-emerald-400/90" />
+              <section
+                className={cn(
+                  "grid grid-cols-2 grid-rows-6 gap-2 sm:min-h-0 sm:gap-x-2 sm:gap-y-2",
+                  sectionCard(),
+                )}
+              >
+                <div className="col-span-2 row-span-1 flex items-center gap-2 self-start">
+                  <Sparkles className="size-4 shrink-0 text-emerald-400/90" />
                   <h3 className="text-sm font-semibold tracking-wide text-slate-200">Edit your profile</h3>
                 </div>
-                <p className="text-sm text-slate-400">
+                <p className="col-span-2 row-span-1 text-sm leading-snug text-slate-400">
                   Pick one section. Keep it simple — you can come back anytime.
                 </p>
 
-                <div className="mt-3 space-y-2">
-                  {(
-                    [
-                      {
-                        id: "identity",
-                        title: "My name & photo",
-                        desc: "Name, handle, home base, and bio.",
-                        Icon: User,
-                      },
-                      {
-                        id: "sports",
-                        title: "Sports I play",
-                        desc: "Main sport, extra sports, and skill level.",
-                        Icon: Trophy,
-                      },
-                      {
-                        id: "athletic",
-                        title: "Skill & availability",
-                        desc: "Strength sliders, positions, and how you like to play.",
-                        Icon: Dumbbell,
-                      },
-                      {
-                        id: "trust",
-                        title: "Reputation (optional)",
-                        desc: "Show-up % and sportsmanship rating.",
-                        Icon: Shield,
-                      },
-                      {
-                        id: "more",
-                        title: "More",
-                        desc: "Log out and advanced options.",
-                        Icon: ChevronDown,
-                      },
-                    ] as const
-                  ).map((row) => (
-                    <button
-                      key={row.id}
-                      type="button"
-                      onClick={() => setEditTab(row.id)}
-                      className={cn(
-                        "w-full rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 text-left transition-colors",
-                        "hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40",
-                      )}
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="mt-0.5 inline-flex size-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-200">
-                          <row.Icon className="size-5" aria-hidden />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-white">{row.title}</p>
-                          <p className="mt-0.5 text-xs text-slate-500">{row.desc}</p>
-                        </div>
-                        <ChevronDown className="size-4 text-slate-600 -rotate-90 mt-1" aria-hidden />
+                {(
+                  [
+                    {
+                      id: "identity",
+                      title: "My name & photo",
+                      desc: "Name, handle, home base, and bio.",
+                      Icon: User,
+                    },
+                    {
+                      id: "sports",
+                      title: "Sports I play",
+                      desc: "Main sport, extra sports, and skill level.",
+                      Icon: Trophy,
+                    },
+                    {
+                      id: "athletic",
+                      title: "Skill & availability",
+                      desc: "Strength sliders, positions, and how you like to play.",
+                      Icon: Dumbbell,
+                    },
+                    {
+                      id: "trust",
+                      title: "Reputation (optional)",
+                      desc: "Show-up % and sportsmanship rating.",
+                      Icon: Shield,
+                    },
+                    {
+                      id: "more",
+                      title: "More",
+                      desc: "Log out and advanced options.",
+                      Icon: ChevronDown,
+                    },
+                  ] as const
+                ).map((row) => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    onClick={() => setEditTab(row.id)}
+                    className={cn(
+                      "col-span-1 row-span-1 flex min-h-0 flex-col rounded-2xl border border-white/[0.08] bg-white/[0.02] p-2.5 text-left transition-colors sm:p-3",
+                      "hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40",
+                    )}
+                  >
+                    <div className="flex min-h-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-2">
+                      <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-200 sm:mt-0.5 sm:size-10">
+                        <row.Icon className="size-4 sm:size-5" aria-hidden />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold leading-tight text-white sm:text-sm">{row.title}</p>
+                        <p className="mt-0.5 line-clamp-3 text-[10px] leading-snug text-slate-500 sm:line-clamp-none sm:text-xs">
+                          {row.desc}
+                        </p>
                       </div>
-                    </button>
-                  ))}
-                </div>
+                      <ChevronDown
+                        className="size-3 shrink-0 -rotate-90 text-slate-600 sm:mt-1 sm:size-4"
+                        aria-hidden
+                      />
+                    </div>
+                  </button>
+                ))}
               </section>
             )}
 
@@ -1350,7 +1411,12 @@ export function ProfileEditSheet({
             </section>
             )}
             <div className="border-t border-white/[0.08] pt-8 mt-8 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-              <div className="mx-auto flex w-full max-w-md flex-col items-stretch justify-center gap-2 sm:max-w-2xl sm:flex-row sm:justify-center sm:gap-3">
+              <div
+                className={cn(
+                  "mx-auto flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:justify-center sm:gap-3",
+                  editTab === "home" ? "max-w-full" : "max-w-lg xl:max-w-xl 2xl:max-w-2xl",
+                )}
+              >
                 <Button
                   type="button"
                   className="h-11 w-full bg-emerald-600 text-sm text-white hover:bg-emerald-700 sm:w-auto sm:min-w-[11rem]"

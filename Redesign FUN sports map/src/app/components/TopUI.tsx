@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Filter, Navigation, MapPinned, X, MessageCircle, Rss, EyeOff, Shield, Globe, Bell } from 'lucide-react';
+import { Search, Filter, Navigation, MapPinned, X, MessageCircle, Rss, EyeOff, Shield, Globe, Bell, UserRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useIsMobile } from './ui/use-mobile';
 import { useNavigate } from "react-router";
@@ -126,9 +126,21 @@ export const TopNavigation = (props: TopNavigationProps) => {
   } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [visOpen, setVisOpen] = useState(false);
+  const [feedToolbarHintOpen, setFeedToolbarHintOpen] = useState(false);
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+
+  const FEED_TOOLBAR_HINT_KEY = "fun_map_feed_toolbar_hint_v1";
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && window.localStorage.getItem(FEED_TOOLBAR_HINT_KEY) !== "1") {
+        setFeedToolbarHintOpen(true);
+      }
+    } catch {
+      setFeedToolbarHintOpen(true);
+    }
+  }, []);
 
   // Shrink search when clicking outside (e.g. on the map)
   useEffect(() => {
@@ -378,162 +390,202 @@ export const TopNavigation = (props: TopNavigationProps) => {
           </motion.button>
         </div>
 
-        {/* Row 1: Live Now + Feed (one line). Row 2: Location icon under them. */}
-        <div className="relative flex flex-col items-end gap-1.5 w-full">
-          {/* One line: Live Now + Feed */}
-          <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={onLiveNowToggle}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border",
-                "transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
-                "hover:-translate-y-[0.5px] hover:shadow-[0_16px_44px_rgba(249,115,22,0.18)]",
-                "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
-                liveNowOpen
-                  ? "bg-orange-500/30 text-orange-200 border-orange-400/70 shadow-[0_12px_36px_rgba(249,115,22,0.18)] hover:bg-orange-500/36 hover:text-orange-100 hover:border-orange-300/80"
-                  : "bg-orange-500/20 text-orange-300 border-orange-500/50 shadow-[0_10px_30px_rgba(249,115,22,0.14)] hover:bg-orange-500/26 hover:text-orange-200 hover:border-orange-400/70"
-              )}
-            >
-              <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
-              Live Now
-            </button>
-
-            {!isMobile && (
+        {/* Row: Feed + Live (one cluster) → Visibility. Below: map tools column with labels. */}
+        <div className="flex flex-col items-end gap-2 w-full">
+          {/* Order: Feed (hero) → Live Now → Visibility (tertiary) */}
+          <div className="relative flex flex-wrap items-center justify-end gap-2">
+            {feedToolbarHintOpen ? (
+              <div
+                className="absolute right-0 top-full z-[60] mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-primary/35 bg-[#0A0F1C]/95 px-3 py-2.5 text-left shadow-[var(--shadow-control)] backdrop-blur-xl pointer-events-auto"
+                role="status"
+              >
+                <p className="text-xs text-slate-200 leading-snug pr-6">
+                  <span className="font-semibold text-primary">Feed</span> is updates from players and games.{" "}
+                  <span className="text-slate-400">Live</span> highlights what’s on the map right now.
+                </p>
+                <button
+                  type="button"
+                  className="absolute right-2 top-2 rounded-md p-1 text-slate-500 hover:bg-white/10 hover:text-slate-200"
+                  aria-label="Dismiss"
+                  onClick={() => {
+                    try {
+                      window.localStorage.setItem(FEED_TOOLBAR_HINT_KEY, "1");
+                    } catch {
+                      /* ignore */
+                    }
+                    setFeedToolbarHintOpen(false);
+                  }}
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+            ) : null}
+            <div className="inline-flex items-center rounded-2xl border border-white/12 bg-slate-950/60 p-1 shadow-[var(--shadow-control)] backdrop-blur-md">
               <button
                 type="button"
                 onClick={() => navigate("/feed")}
                 className={cn(
-                  "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold",
-                  "border border-border/80 bg-popover/70 backdrop-blur-xl",
-                  "shadow-[var(--shadow-control)]",
-                  "transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
-                  "text-muted-foreground hover:text-foreground hover:bg-accent",
-                  "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                  "inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold",
+                  "bg-primary text-primary-foreground shadow-[0_12px_36px_rgba(34,211,238,0.28)]",
+                  "transition-[transform,box-shadow,filter] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
+                  "hover:brightness-110 hover:-translate-y-[0.5px] active:scale-[0.99]",
+                  "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
                 )}
-                aria-label="Open feed"
-                title="Feed"
+                aria-label="Open feed — updates from players and games"
               >
-                <Rss className="size-4" />
+                <Rss className="size-4 shrink-0" aria-hidden />
                 Feed
               </button>
-            )}
+              <div className="mx-1 h-7 w-px shrink-0 bg-white/12" aria-hidden />
+              <button
+                type="button"
+                onClick={onLiveNowToggle}
+                className={cn(
+                  "inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold border transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
+                  "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                  liveNowOpen
+                    ? "border-orange-400/55 bg-orange-500/15 text-orange-200 shadow-[inset_0_0_0_1px_rgba(251,146,60,0.25)] hover:bg-orange-500/20"
+                    : "border-orange-500/35 bg-transparent text-orange-300/95 hover:border-orange-400/50 hover:bg-orange-500/10",
+                )}
+                aria-label="Live Now — highlight games happening on the map"
+                title="Live Now"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse shrink-0" />
+                Live
+              </button>
+            </div>
 
-            {/* Location visibility chip */}
             <button
               type="button"
               onClick={() => setVisOpen(true)}
               className={cn(
-                "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border",
-                "transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
-                "hover:-translate-y-[0.5px] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium",
+                "transition-colors duration-[var(--dur-hover)] ease-[var(--ease-out)]",
+                "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-white/20 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
                 locationVisibility === "ghost"
-                  ? "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]"
+                  ? "border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]"
                   : locationVisibility === "close_friends"
-                    ? "border-cyan-400/35 bg-cyan-400/10 text-cyan-100 shadow-[0_12px_36px_rgba(34,211,238,0.12)] hover:bg-cyan-400/14"
-                    : "border-cyan-400/55 bg-cyan-400/22 text-cyan-50 shadow-[0_16px_44px_rgba(34,211,238,0.18)] hover:bg-cyan-400/28",
+                    ? "border-cyan-500/30 bg-transparent text-cyan-200/90 hover:bg-cyan-500/10"
+                    : "border-white/15 bg-white/[0.04] text-slate-300 hover:bg-white/[0.07]",
               )}
-              aria-label="Location visibility"
-              title="Location visibility"
+              aria-label="Visibility — who can see you on the map"
+              title="Who sees you"
             >
               {locationVisibility === "ghost" ? (
-                <EyeOff className="size-4" aria-hidden />
+                <EyeOff className="size-3.5 opacity-90" aria-hidden />
               ) : locationVisibility === "close_friends" ? (
-                <Shield className="size-4" aria-hidden />
+                <Shield className="size-3.5 opacity-90" aria-hidden />
               ) : (
-                <Globe className="size-4" aria-hidden />
+                <Globe className="size-3.5 opacity-90" aria-hidden />
               )}
-              {locationVisibility === "ghost"
-                ? "Ghost"
-                : locationVisibility === "close_friends"
-                  ? "Close friends"
-                  : "Public"}
+              <span className="max-w-[5.5rem] truncate">
+                {locationVisibility === "ghost"
+                  ? "Ghost"
+                  : locationVisibility === "close_friends"
+                    ? "Close friends"
+                    : "Public"}
+              </span>
             </button>
           </div>
 
-          {/* Location, notifications, chats — stacked under Live Now row */}
-          <div className="flex flex-col items-end gap-1.5">
-            {onCenterOnUser && (
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.95 }}
-                onClick={onCenterOnUser}
-                className={MAP_GLASS_ICON_BTN_SM_EMERALD}
-                aria-label="Center map on my location"
-              >
-                <Navigation className="w-5 h-5" />
-              </motion.button>
-            )}
-            <Popover>
-              <PopoverTrigger asChild>
-                <motion.button
-                  type="button"
-                  whileTap={{ scale: 0.95 }}
-                  className={cn("relative", MAP_GLASS_ICON_BTN_SM_SKY)}
-                  aria-label="Notifications"
-                >
-                  <Bell className="w-5 h-5" />
-                  {notificationsUnreadCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
-                      {notificationsUnreadCount > 9 ? "9+" : notificationsUnreadCount}
-                    </span>
-                  )}
-                </motion.button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                side="left"
-                className="w-[min(22rem,calc(100vw-2rem))] border border-border/80 bg-popover/95 text-popover-foreground backdrop-blur-xl"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold">Notifications</p>
-                  {onOpenNotifications ? (
-                    <button
+          {/* Map tools: grouped column — map / alerts / chats (labels clarify icon-only controls) */}
+          <div className="flex flex-col items-end gap-1">
+            <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-500 pr-0.5">Map &amp; alerts</p>
+            <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md flex flex-col items-center gap-1.5">
+              {onCenterOnUser && (
+                <div className="flex flex-col items-center gap-0.5">
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.95 }}
+                    onClick={onCenterOnUser}
+                    className={MAP_GLASS_ICON_BTN_SM_EMERALD}
+                    aria-label="Center map on my location"
+                    title="Recenter map on you"
+                  >
+                    <Navigation className="w-5 h-5" />
+                  </motion.button>
+                  <span className="text-[9px] font-medium text-slate-500 leading-none">Location</span>
+                </div>
+              )}
+              <div className="flex flex-col items-center gap-0.5">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <motion.button
                       type="button"
-                      onClick={onOpenNotifications}
-                      className="text-xs font-semibold text-emerald-400 hover:text-emerald-300"
+                      whileTap={{ scale: 0.95 }}
+                      className={cn("relative", MAP_GLASS_ICON_BTN_SM_SKY)}
+                      aria-label="Notifications"
+                      title="Alerts"
                     >
-                      See all
-                    </button>
-                  ) : null}
+                      <Bell className="w-5 h-5" />
+                      {notificationsUnreadCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
+                          {notificationsUnreadCount > 9 ? "9+" : notificationsUnreadCount}
+                        </span>
+                      )}
+                    </motion.button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="end"
+                    side="left"
+                    className="w-[min(22rem,calc(100vw-2rem))] border border-border/80 bg-popover/95 text-popover-foreground backdrop-blur-xl"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold">Notifications</p>
+                      {onOpenNotifications ? (
+                        <button
+                          type="button"
+                          onClick={onOpenNotifications}
+                          className="text-xs font-semibold text-emerald-400 hover:text-emerald-300"
+                        >
+                          See all
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="mt-3 space-y-1">
+                      {notifications.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No notifications yet.</p>
+                      ) : (
+                        notifications.slice(0, 6).map((n) => (
+                          <button
+                            key={n.id}
+                            type="button"
+                            className={cn(
+                              "w-full rounded-xl border px-3 py-2 text-left transition-colors",
+                              n.is_read
+                                ? "border-border/70 bg-background/40 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                                : "border-rose-500/20 bg-rose-500/5 text-foreground hover:bg-rose-500/10",
+                            )}
+                            onClick={() => onMarkNotificationRead?.(n.id)}
+                          >
+                            <p className="text-sm font-semibold">{n.type.replace(/_/g, " ")}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+                              {new Date(n.created_at).toLocaleString()}
+                            </p>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                <span className="text-[9px] font-medium text-slate-500 leading-none">Alerts</span>
+              </div>
+              {onOpenMessages ? (
+                <div className="flex flex-col items-center gap-0.5">
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.95 }}
+                    onClick={onOpenMessages}
+                    className={cn("relative", MAP_GLASS_ICON_BTN_SM_SKY)}
+                    aria-label="Game chats"
+                    title="Messages"
+                  >
+                    <MessageCircle className="w-5 h-5" />
+                  </motion.button>
+                  <span className="text-[9px] font-medium text-slate-500 leading-none">Chats</span>
                 </div>
-                <div className="mt-3 space-y-1">
-                  {notifications.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No notifications yet.</p>
-                  ) : (
-                    notifications.slice(0, 6).map((n) => (
-                      <button
-                        key={n.id}
-                        type="button"
-                        className={cn(
-                          "w-full rounded-xl border px-3 py-2 text-left transition-colors",
-                          n.is_read
-                            ? "border-border/70 bg-background/40 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                            : "border-rose-500/20 bg-rose-500/5 text-foreground hover:bg-rose-500/10",
-                        )}
-                        onClick={() => onMarkNotificationRead?.(n.id)}
-                      >
-                        <p className="text-sm font-semibold">{n.type.replace(/_/g, " ")}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
-                          {new Date(n.created_at).toLocaleString()}
-                        </p>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
-            {onOpenMessages && (
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.95 }}
-                onClick={onOpenMessages}
-                className={cn("relative", MAP_GLASS_ICON_BTN_SM_SKY)}
-                aria-label="Game chats"
-              >
-                <MessageCircle className="w-5 h-5" />
-              </motion.button>
-            )}
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

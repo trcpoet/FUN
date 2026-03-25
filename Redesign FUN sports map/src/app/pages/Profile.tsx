@@ -346,10 +346,17 @@ export default function Profile() {
           {(athleteProfile.snapshot?.university?.trim() ||
             athleteProfile.city?.trim() ||
             athleteProfile.snapshot?.neighbourhood?.trim() ||
+            athleteProfile.snapshot?.occupation?.trim() ||
             athleteProfile.favoriteSport?.trim()) && (
             <div>
-              <h3 className="mb-3 text-sm font-semibold text-white">Location &amp; school</h3>
+              <h3 className="mb-3 text-sm font-semibold text-white">Location, school &amp; work</h3>
               <ul className="space-y-2 text-sm text-slate-300">
+                {athleteProfile.snapshot?.occupation?.trim() ? (
+                  <li>
+                    <span className="text-slate-500">Occupation · </span>
+                    <span className="text-white">{athleteProfile.snapshot.occupation.trim()}</span>
+                  </li>
+                ) : null}
                 {athleteProfile.snapshot?.university?.trim() ? (
                   <li>
                     <span className="text-slate-500">University · </span>
@@ -377,6 +384,35 @@ export default function Profile() {
               </ul>
             </div>
           )}
+
+          {(() => {
+            const s = athleteProfile.snapshot;
+            if (!s) return null;
+            const pos = (s.positions ?? []).filter((p) => p.trim()).join(", ");
+            const rows: { label: string; value: string }[] = [];
+            if (s.height?.trim()) rows.push({ label: "Height", value: s.height.trim() });
+            if (s.weight?.trim()) rows.push({ label: "Weight", value: s.weight.trim() });
+            if (s.handedness?.trim()) rows.push({ label: "Handedness", value: s.handedness.trim() });
+            if (pos) rows.push({ label: "Positions", value: pos });
+            if (s.playStyle?.trim()) rows.push({ label: "Play style", value: s.playStyle.trim() });
+            if (s.yearsExperience != null && String(s.yearsExperience).trim() !== "")
+              rows.push({ label: "Years in sport", value: String(s.yearsExperience) });
+            if (s.fitnessFocus?.trim()) rows.push({ label: "Fitness focus", value: s.fitnessFocus.trim() });
+            if (rows.length === 0) return null;
+            return (
+              <div>
+                <h3 className="mb-3 text-sm font-semibold text-white">Athletic snapshot</h3>
+                <ul className="space-y-2 text-sm text-slate-300">
+                  {rows.map((r) => (
+                    <li key={r.label}>
+                      <span className="text-slate-500">{r.label} · </span>
+                      <span className="text-white">{r.value}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
 
           <div>
             <h3 className="mb-3 text-sm font-semibold text-white">Games</h3>
