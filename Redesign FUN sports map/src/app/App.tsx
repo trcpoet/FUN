@@ -1,6 +1,6 @@
 import React, { Suspense, useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Loader2 } from "lucide-react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import type { MapCameraRequest, VenueSelection } from "./components/MapboxMap";
 import { prefetchMapboxGl } from "./lib/mapboxCached";
 
@@ -26,9 +26,11 @@ import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
 import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl } from "../lib/api";
+import { getOrCreateDmThread } from "../lib/dmChat";
 import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow } from "../lib/supabase";
 import { filterGamesVisibleOnMap } from "../lib/mapGameTimer";
+import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
 
 const DEFAULT_AVATAR_IMAGE =
   "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=100";
@@ -135,8 +137,10 @@ export default function App() {
   const favoriteSport = athleteProfile.favoriteSport?.trim() ?? null;
   const { stats } = useUserStats();
   const navigate = useNavigate();
+  const location = useLocation();
   const { notifications, markRead } = useNotifications({ limit: 10 });
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [locationVisibility, setLocationVisibility] = useState<LocationVisibilityMode>(() => readLocationVisibility());
   const [toast, setToast] = useState<{ id: string; message: string; type: string } | null>(null);
   const toastShownIds = useRef<Set<string>>(new Set());
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
@@ -215,8 +219,54 @@ export default function App() {
     return true;
   };
 
+  // Deep-link: open a DM thread from `/?dm=<userId>`
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const dm = params.get("dm");
+    if (!dm) return;
+    if (!supabase) return;
+
+    let cancelled = false;
+    void (async () => {
+      const ok = await ensureSession();
+      if (!ok || cancelled) return;
+      const { threadId, error } = await getOrCreateDmThread(dm);
+      if (cancelled) return;
+      if (error || !threadId) return;
+
+      let displayName: string | null = null;
+      let avatarUrl: string | null = null;
+      try {
+        const { data } = await supabase.from("profiles").select("display_name, avatar_url").eq("id", dm).single();
+        const row = data as { display_name?: string | null; avatar_url?: string | null } | null;
+        displayName = row?.display_name ?? null;
+        avatarUrl = row?.avatar_url ?? null;
+      } catch {
+        displayName = null;
+        avatarUrl = null;
+      }
+
+      setMessengerFocus({
+        kind: "dm",
+        threadId,
+        otherUserId: dm,
+        displayName,
+        avatarUrl,
+      });
+      setMessagesOpen(true);
+
+      // Clean URL (remove dm param) so refresh doesn't reopen.
+      navigate("/", { replace: true });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.search, navigate]);
+
   // Publish our location so other players see us (only if already signed in — no auto sign-in on load)
   useEffect(() => {
+    if (locationVisibility === "ghost") return;
     if (!userCoords?.lat || !userCoords?.lng || !supabase) return;
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user && supabase) {
@@ -224,7 +274,7 @@ export default function App() {
         supabase.rpc("update_my_location", { p_lat: userCoords.lat, p_lng: userCoords.lng }).then(() => {}, () => {});
       }
     });
-  }, [userCoords?.lat, userCoords?.lng]);
+  }, [userCoords?.lat, userCoords?.lng, locationVisibility]);
 
   const handleJoin = async (game: GameRow) => {
     const ok = await ensureSession();
@@ -234,6 +284,7 @@ export default function App() {
       await reloadJoinedGameIds();
       refetchGames();
       setMessengerFocus({
+        kind: "game",
         gameId: game.id,
         title: game.title || "Pickup game",
         sport: game.sport,
@@ -248,6 +299,7 @@ export default function App() {
 
   const handleOpenChatForGame = (game: GameRow) => {
     setMessengerFocus({
+      kind: "game",
       gameId: game.id,
       title: game.title || "Pickup game",
       sport: game.sport,
@@ -269,7 +321,7 @@ export default function App() {
       refetchGames();
 
       // If the user is currently viewing the thread for this game, close it.
-      if (messagesOpen && messengerFocus?.gameId === game.id) {
+      if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
         setMessagesOpen(false);
         setMessengerFocus(null);
       }
@@ -286,7 +338,7 @@ export default function App() {
       refetchGames();
 
       // If the user is currently viewing the thread for this game, close it.
-      if (messagesOpen && messengerFocus?.gameId === gameId) {
+      if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === gameId) {
         setMessagesOpen(false);
         setMessengerFocus(null);
       }
@@ -304,7 +356,7 @@ export default function App() {
     await reloadJoinedGameIds();
     refetchGames();
     if (selectedGame?.id === game.id) setSelectedGame(null);
-    if (messagesOpen && messengerFocus?.gameId === game.id) {
+    if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
       setMessagesOpen(false);
       setMessengerFocus(null);
     }
@@ -623,6 +675,11 @@ export default function App() {
           setMessagesOpen(true);
         }}
         joinedGameCount={joinedGameIds.size}
+        locationVisibility={locationVisibility}
+        onLocationVisibilityChange={(mode) => {
+          setLocationVisibility(mode);
+          writeLocationVisibility(mode);
+        }}
         mapSearch={{
           query: searchQuery,
           onQueryChange: setSearchQuery,

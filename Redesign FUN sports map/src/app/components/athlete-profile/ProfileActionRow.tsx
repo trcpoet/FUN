@@ -11,6 +11,8 @@ type Props = {
   onDiscoverPeople?: () => void;
   /** When true, + button shows expanded state. */
   discoverExpanded?: boolean;
+  /** For other users' profiles: whether you already follow this user. */
+  isFollowing?: boolean;
   onFollow?: () => void;
   onMessage?: () => void;
   onInvite?: () => void;
@@ -23,6 +25,7 @@ export function ProfileActionRow({
   onShare,
   onDiscoverPeople,
   discoverExpanded = false,
+  isFollowing = false,
   onFollow,
   onMessage,
   onInvite,
@@ -34,11 +37,16 @@ export function ProfileActionRow({
         <Button
           type="button"
           size="sm"
-          className="flex-1 min-w-[100px] h-10 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
+          className={cn(
+            "flex-1 min-w-[100px] h-10 font-semibold",
+            isFollowing
+              ? "border-white/15 bg-white/[0.06] text-slate-300 hover:bg-white/[0.08]"
+              : "bg-emerald-600 hover:bg-emerald-500 text-white",
+          )}
           onClick={onFollow}
         >
           <UserPlus className="size-4 mr-1.5" />
-          Follow
+          {isFollowing ? "Following" : "Follow"}
         </Button>
         <Button
           type="button"
@@ -82,7 +90,7 @@ export function ProfileActionRow({
   }
 
   return (
-    <div className={cn("flex flex-col items-end gap-2", className)}>
+    <div className={cn("flex items-center justify-end", className)}>
       {onDiscoverPeople && (
         <Button
           type="button"

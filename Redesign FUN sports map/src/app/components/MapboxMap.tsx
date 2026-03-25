@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
 import { createRoot } from "react-dom/client";
+import { useNavigate } from "react-router";
 
 type ReactRoot = ReturnType<typeof createRoot>;
 import type { GameRow } from "../../lib/supabase";
@@ -174,6 +175,7 @@ export function MapboxMap(props: MapboxMapProps) {
     onVenuesFetchLoadingChange,
     mapMinuteEpoch = 0,
   } = props;
+  const navigate = useNavigate();
   const currentUserId = props.currentUserId ?? null;
   const joinedSet = joinedGameIds ?? new Set<string>();
   const hostSet = props.hostGameIds ?? new Set<string>();
@@ -1484,6 +1486,10 @@ export function MapboxMap(props: MapboxMapProps) {
         img.style.objectFit = "cover";
         el.appendChild(img);
         el.title = profile.display_name || "Player";
+        el.addEventListener("click", (e) => {
+          e.stopPropagation();
+          navigate(`/athlete/${profile.profile_id}`);
+        });
         outer.appendChild(el);
 
         const marker = new mapboxgl.default.Marker({ element: outer })
@@ -1973,6 +1979,7 @@ export function MapboxMap(props: MapboxMapProps) {
             openGamesNearbyCount={openGamesNearbyCount}
             gamesNearby={gamesAtSelectedVenue}
             joinedGameIds={joinedSet}
+            viewerCoords={userCoords}
             onJoinGame={onJoinGame}
             onOpenChat={onOpenMessagesForGame}
             onCreateGame={(venue) => {

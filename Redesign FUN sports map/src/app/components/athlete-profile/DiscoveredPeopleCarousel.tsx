@@ -14,28 +14,7 @@ import {
   CarouselPrevious,
 } from "../ui/carousel";
 import { cn } from "../ui/utils";
-
-const FOLLOW_STORAGE_KEY = "fun_discover_followed_ids";
-
-function readFollowedIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(FOLLOW_STORAGE_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw) as unknown;
-    if (!Array.isArray(arr)) return new Set();
-    return new Set(arr.filter((x): x is string => typeof x === "string"));
-  } catch {
-    return new Set();
-  }
-}
-
-function writeFollowedIds(ids: Set<string>) {
-  try {
-    localStorage.setItem(FOLLOW_STORAGE_KEY, JSON.stringify([...ids]));
-  } catch {
-    /* private mode */
-  }
-}
+import { readFollowedIds, writeFollowedIds } from "../../../lib/localFollows";
 
 function requestGeo(): Promise<{ lat: number; lng: number } | null> {
   return new Promise((resolve) => {

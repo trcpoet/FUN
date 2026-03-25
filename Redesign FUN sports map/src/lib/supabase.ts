@@ -54,6 +54,23 @@ export type GameInboxRow = {
   spots_remaining: number;
 };
 
+export type DmInboxRow = {
+  thread_id: string;
+  other_user_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  last_message_body: string | null;
+  last_message_at: string | null;
+};
+
+export type DmMessageRow = {
+  id: string;
+  thread_id: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+};
+
 export type ProfileNearbyRow = {
   profile_id: string;
   display_name: string | null;

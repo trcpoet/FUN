@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { X, MapPin, Activity, ChevronRight, MessageCircle } from "lucide-react";
+import { X, MapPin, Activity, ChevronRight, MessageCircle, Navigation, Share2 } from "lucide-react";
 import type { VenueSelection } from "./MapboxMap";
 import type { GameRow } from "../../lib/supabase";
 import { formatVenueGameTimerSummary } from "../../lib/mapGameTimer";
@@ -20,6 +20,8 @@ type VenueInfoPopupProps = {
   onJoinGame?: (game: GameRow) => void;
   /** Open messenger for a game (user should already be joined for chat). */
   onOpenChat?: (game: GameRow) => void;
+  /** Viewer location for directions shortcut. */
+  viewerCoords?: { lat: number; lng: number } | null;
 };
 
 function formatCoords(lat: number, lng: number): string {
@@ -47,6 +49,7 @@ export function VenueInfoPopup({
   onCreateGame,
   onJoinGame,
   onOpenChat,
+  viewerCoords = null,
 }: VenueInfoPopupProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -103,6 +106,43 @@ export function VenueInfoPopup({
   const left = anchorClient.x + nudge.x;
   const top = anchorClient.y + nudge.y;
 
+  const mapsHref = useMemo(() => {
+    const dest = { lat: venue.center.lat, lng: venue.center.lng };
+    if (viewerCoords && Number.isFinite(viewerCoords.lat) && Number.isFinite(viewerCoords.lng)) {
+      const o = `${viewerCoords.lat},${viewerCoords.lng}`;
+      const d = `${dest.lat},${dest.lng}`;
+      return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=driving`;
+    }
+    return `https://www.google.com/maps/search/?api=1&query=${dest.lat},${dest.lng}`;
+  }, [viewerCoords, venue.center.lat, venue.center.lng]);
+
+  const handleShare = async () => {
+    const titleLine = title;
+    const coordsLine = `📍 ${formatCoords(venue.center.lat, venue.center.lng)}`;
+    const urlLine = mapsHref;
+    const text = [titleLine, sub, coordsLine, urlLine].filter(Boolean).join("\n");
+
+    const shareData: ShareData = { title: titleLine, text, url: urlLine };
+    const canNativeShare =
+      typeof navigator.share === "function" &&
+      (!navigator.canShare || navigator.canShare(shareData));
+
+    if (canNativeShare) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      window.prompt("Copy this venue link:", urlLine);
+    }
+  };
+
   return (
     <div
       ref={rootRef}
@@ -122,17 +162,31 @@ export function VenueInfoPopup({
             <p className="font-semibold text-white truncate">{title}</p>
             <p className="text-slate-400 text-sm mt-0.5 truncate">{sub}</p>
           </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            className="p-1 rounded-full hover:bg-slate-800 text-slate-300 shrink-0"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleShare();
+              }}
+              className="p-1 rounded-full hover:bg-slate-800 text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+              aria-label="Share venue"
+              title="Share"
+            >
+              <Share2 className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              className="p-1 rounded-full hover:bg-slate-800 text-slate-300 shrink-0"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <div className="mt-2 flex flex-col gap-2">
@@ -146,6 +200,17 @@ export function VenueInfoPopup({
             <MapPin className="w-3 h-3 shrink-0" />
             {formatCoords(venue.center.lat, venue.center.lng)}
           </div>
+
+          <a
+            href={mapsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-600/80 bg-slate-800/90 px-2 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-emerald-500/50 hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+            aria-label="Open Google Maps directions"
+          >
+            <Navigation className="w-4 h-4 text-emerald-400" aria-hidden />
+            Directions
+          </a>
 
           {gamesNearby.length > 0 && (
             <div className="mt-2 space-y-2 border-t border-white/10 pt-2">

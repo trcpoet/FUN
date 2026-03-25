@@ -1,19 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Filter, MapPin, Activity, Calendar, Users, Settings, Navigation, MapPinned, X, MessageCircle, UserRound } from 'lucide-react';
+import { Search, Filter, Navigation, MapPinned, X, MessageCircle, Rss, EyeOff, Shield, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useIsMobile } from './ui/use-mobile';
+import { useNavigate } from "react-router";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 import type { ForwardGeocodeFeature } from '../../lib/geocoding';
 import type { ProfileSearchRow } from '../../lib/supabase';
 import type { SearchSectionId } from '../../lib/mergeSearchResults';
 import { sportEmojiFor } from '../../lib/sportDisplay';
-
-const NAV_ITEMS = [
-  { id: 'map', label: 'Map', Icon: MapPin, active: true },
-  { id: 'activity', label: 'Activity', Icon: Activity, active: false },
-  { id: 'events', label: 'Events', Icon: Calendar, active: false },
-  { id: 'social', label: 'Social', Icon: Users, active: false },
-  { id: 'settings', label: 'Settings', Icon: Settings, active: false },
-];
+import type { LocationVisibilityMode } from "../../lib/locationVisibility";
 
 /** Glass morphism for map toolbar round controls (search, filter). */
 const MAP_GLASS_ICON_BTN =
@@ -76,6 +71,8 @@ export type TopNavigationProps = {
   joinedGameCount?: number;
   /** Unified search: places + sports + people (pass from App). */
   mapSearch?: UnifiedMapSearchBarProps | null;
+  locationVisibility?: LocationVisibilityMode;
+  onLocationVisibilityChange?: (mode: LocationVisibilityMode) => void;
 };
 
 function placeSubtitle(placeName: string): string | undefined {
@@ -113,11 +110,14 @@ export const TopNavigation = (props: TopNavigationProps) => {
     onOpenMessages,
     joinedGameCount = 0,
     mapSearch = null,
+    locationVisibility = "public",
+    onLocationVisibilityChange,
   } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const [navOpen, setNavOpen] = useState(false);
+  const [visOpen, setVisOpen] = useState(false);
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
 
   // Shrink search when clicking outside (e.g. on the map)
   useEffect(() => {
@@ -367,18 +367,21 @@ export const TopNavigation = (props: TopNavigationProps) => {
           </motion.button>
         </div>
 
-        {/* Row 1: Live Now + Menu (one line). Row 2: Location icon under them. */}
+        {/* Row 1: Live Now + Feed (one line). Row 2: Location icon under them. */}
         <div className="relative flex flex-col items-end gap-1.5 w-full">
-          {/* One line: Live Now + Menu */}
+          {/* One line: Live Now + Feed */}
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={onLiveNowToggle}
               className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors",
+                "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border",
+                "transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
+                "hover:-translate-y-[0.5px] hover:shadow-[0_16px_44px_rgba(249,115,22,0.18)]",
+                "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
                 liveNowOpen
-                  ? "bg-orange-500/30 text-orange-300 border-orange-500 shadow-orange-500/20"
-                  : "bg-orange-500/20 text-orange-400 border-orange-500/50 shadow-orange-500/20"
+                  ? "bg-orange-500/30 text-orange-200 border-orange-400/70 shadow-[0_12px_36px_rgba(249,115,22,0.18)] hover:bg-orange-500/36 hover:text-orange-100 hover:border-orange-300/80"
+                  : "bg-orange-500/20 text-orange-300 border-orange-500/50 shadow-[0_10px_30px_rgba(249,115,22,0.14)] hover:bg-orange-500/26 hover:text-orange-200 hover:border-orange-400/70"
               )}
             >
               <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
@@ -386,52 +389,55 @@ export const TopNavigation = (props: TopNavigationProps) => {
             </button>
 
             {!isMobile && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setNavOpen((v) => !v)}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold",
-                    "border border-border/80 bg-popover/70 backdrop-blur-xl",
-                    "shadow-[var(--shadow-control)]",
-                    "transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
-                    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
-                    navOpen
-                      ? "text-foreground border-ring/50"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                  )}
-                >
-                  Menu
-                </button>
-                {navOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-[55]"
-                      aria-hidden
-                      onClick={() => setNavOpen(false)}
-                    />
-                    <div className="absolute top-full right-0 mt-2 w-56 rounded-2xl bg-popover/95 border border-border/80 shadow-[var(--shadow-panel)] py-2 z-[60] pointer-events-auto backdrop-blur-xl">
-                      {NAV_ITEMS.map(({ id, label, Icon, active }) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setNavOpen(false)}
-                          className={cn(
-                            "w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors first:rounded-t-lg last:rounded-b-lg",
-                            active
-                              ? "text-primary bg-accent"
-                              : "text-muted-foreground hover:text-foreground hover:bg-accent/70"
-                          )}
-                        >
-                          <Icon className="w-4 h-4 shrink-0" />
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
+              <button
+                type="button"
+                onClick={() => navigate("/feed")}
+                className={cn(
+                  "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold",
+                  "border border-border/80 bg-popover/70 backdrop-blur-xl",
+                  "shadow-[var(--shadow-control)]",
+                  "transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
+                  "text-muted-foreground hover:text-foreground hover:bg-accent",
+                  "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
                 )}
-              </>
+                aria-label="Open feed"
+                title="Feed"
+              >
+                <Rss className="size-4" />
+                Feed
+              </button>
             )}
+
+            {/* Location visibility chip */}
+            <button
+              type="button"
+              onClick={() => setVisOpen(true)}
+              className={cn(
+                "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border",
+                "transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
+                "hover:-translate-y-[0.5px] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                locationVisibility === "ghost"
+                  ? "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]"
+                  : locationVisibility === "close_friends"
+                    ? "border-cyan-400/35 bg-cyan-400/10 text-cyan-100 shadow-[0_12px_36px_rgba(34,211,238,0.12)] hover:bg-cyan-400/14"
+                    : "border-cyan-400/55 bg-cyan-400/22 text-cyan-50 shadow-[0_16px_44px_rgba(34,211,238,0.18)] hover:bg-cyan-400/28",
+              )}
+              aria-label="Location visibility"
+              title="Location visibility"
+            >
+              {locationVisibility === "ghost" ? (
+                <EyeOff className="size-4" aria-hidden />
+              ) : locationVisibility === "close_friends" ? (
+                <Shield className="size-4" aria-hidden />
+              ) : (
+                <Globe className="size-4" aria-hidden />
+              )}
+              {locationVisibility === "ghost"
+                ? "Ghost"
+                : locationVisibility === "close_friends"
+                  ? "Close friends"
+                  : "Public"}
+            </button>
           </div>
 
           {/* Location, then game chats — stacked under Live Now row */}
@@ -466,6 +472,83 @@ export const TopNavigation = (props: TopNavigationProps) => {
           </div>
         </div>
       </div>
+
+      <Sheet open={visOpen} onOpenChange={setVisOpen}>
+        <SheetContent
+          side={isMobile ? "bottom" : "right"}
+          className={cn(
+            "border-border/80 bg-popover/95 text-popover-foreground backdrop-blur-xl",
+            isMobile ? "h-[62vh] max-h-[520px] rounded-t-2xl" : "w-full sm:max-w-md",
+          )}
+        >
+          <SheetHeader className="border-b border-border/70 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))] pr-12 text-left">
+            <SheetTitle className="text-lg">Location visibility</SheetTitle>
+            <SheetDescription className="text-muted-foreground">
+              Choose who can see your live location on the map.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="px-4 py-4 space-y-2">
+            {(
+              [
+                {
+                  id: "ghost",
+                  title: "Ghost",
+                  desc: "No one can see you.",
+                  Icon: EyeOff,
+                  tone: "border-white/10 bg-white/[0.04] hover:bg-white/[0.06]",
+                },
+                {
+                  id: "close_friends",
+                  title: "Close friends",
+                  desc: "Only your close friends can see you.",
+                  Icon: Shield,
+                  tone: "border-cyan-400/25 bg-cyan-400/10 hover:bg-cyan-400/14",
+                },
+                {
+                  id: "public",
+                  title: "Public",
+                  desc: "Anyone can see you.",
+                  Icon: Globe,
+                  tone: "border-cyan-400/45 bg-cyan-400/22 hover:bg-cyan-400/28",
+                },
+              ] as const
+            ).map((opt) => {
+              const active = locationVisibility === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    onLocationVisibilityChange?.(opt.id);
+                    setVisOpen(false);
+                  }}
+                  className={cn(
+                    "w-full rounded-2xl border p-3 text-left transition-colors",
+                    opt.tone,
+                    active ? "ring-2 ring-ring/40" : "",
+                    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  )}
+                  aria-pressed={active}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className={cn("mt-0.5 inline-flex size-10 items-center justify-center rounded-xl border", opt.tone)}>
+                      <opt.Icon className="size-5" aria-hidden />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-foreground">{opt.title}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{opt.desc}</p>
+                    </div>
+                    {active ? (
+                      <span className="text-xs font-semibold text-primary">Selected</span>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

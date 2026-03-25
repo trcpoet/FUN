@@ -23,6 +23,7 @@ import {
   DiscoveredPeopleCarousel,
 } from "../components/athlete-profile";
 import { mergeAthleteProfile } from "../../lib/athleteProfile";
+import { readFollowedIds } from "../../lib/localFollows";
 import { cn } from "../components/ui/utils";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -109,6 +110,11 @@ export default function Profile() {
   const fallbackInitial = (displayName?.trim() || "?")[0].toUpperCase();
   const primarySports = athleteProfile.primarySports ?? [];
   const pinnedPost = (athleteProfile.posts ?? []).find((p) => p.pinned) ?? null;
+  const followingCount = readFollowedIds().size;
+  const homeBaseLabel =
+    athleteProfile.snapshot?.neighbourhood?.trim() ||
+    athleteProfile.city?.trim() ||
+    null;
 
   const openAddPost = () => {
     setAddFeedKind("post");
@@ -152,6 +158,9 @@ export default function Profile() {
                 bio={athleteProfile.bio ?? null}
                 performanceMetrics={athleteProfile.performanceMetrics ?? []}
                 primarySports={primarySports}
+                followersCount={0}
+                followingCount={followingCount}
+                homeBaseLabel={homeBaseLabel}
                 onShare={() => void handleShare()}
                 onAbout={() => setAboutOpen(true)}
               />
@@ -162,23 +171,47 @@ export default function Profile() {
               ) : null}
             </div>
 
-            <ProfileActionRow
-              isOwnProfile
-              discoverExpanded={discoverOpen}
-              onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
-            />
-
-            {user?.id ? (
-              <DiscoveredPeopleCarousel
-                expanded={discoverOpen}
-                onClose={() => setDiscoverOpen(false)}
-                excludeUserId={user.id}
-                primarySports={primarySports}
-              />
-            ) : null}
-
+            {/* Desktop: metrics + discover toggle on one row; discover panel expands below and pushes content down. */}
             <div className="hidden md:block">
-              <PerformanceStatsStrip metrics={athleteProfile.performanceMetrics ?? []} primarySports={primarySports} />
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <PerformanceStatsStrip metrics={athleteProfile.performanceMetrics ?? []} primarySports={primarySports} />
+                </div>
+                <ProfileActionRow
+                  isOwnProfile
+                  discoverExpanded={discoverOpen}
+                  onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
+                />
+              </div>
+              {user?.id ? (
+                <div className="mt-3">
+                  <DiscoveredPeopleCarousel
+                    expanded={discoverOpen}
+                    onClose={() => setDiscoverOpen(false)}
+                    excludeUserId={user.id}
+                    primarySports={primarySports}
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            {/* Mobile: discover toggle lives as its own row (metrics already inside the hero). */}
+            <div className="md:hidden">
+              <ProfileActionRow
+                isOwnProfile
+                discoverExpanded={discoverOpen}
+                onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
+              />
+              {user?.id ? (
+                <div className="mt-3">
+                  <DiscoveredPeopleCarousel
+                    expanded={discoverOpen}
+                    onClose={() => setDiscoverOpen(false)}
+                    excludeUserId={user.id}
+                    primarySports={primarySports}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <ProfileComposerCard
@@ -204,6 +237,48 @@ export default function Profile() {
           side={isMobile ? "bottom" : "right"}
           wide={!isMobile}
         >
+          <div>
+            <h3 className="mb-3 text-sm font-semibold text-white">Player info</h3>
+            <ul className="space-y-2 text-sm text-slate-300">
+              <li>
+                <span className="text-slate-500">Skill level · </span>
+                <span className="text-white">Level {stats?.level ?? 1}</span>
+              </li>
+              {athleteProfile.availability ? (
+                <li>
+                  <span className="text-slate-500">Availability · </span>
+                  <span className="text-white">{athleteProfile.availability.replaceAll("_", " ")}</span>
+                </li>
+              ) : null}
+              {athleteProfile.snapshot?.intensity ? (
+                <li>
+                  <span className="text-slate-500">Intensity · </span>
+                  <span className="text-white">{athleteProfile.snapshot.intensity}</span>
+                </li>
+              ) : null}
+              {athleteProfile.trust?.showUpRate != null ? (
+                <li>
+                  <span className="text-slate-500">Show up rate · </span>
+                  <span className="font-semibold tabular-nums text-white">
+                    {Math.round(athleteProfile.trust.showUpRate * 100)}%
+                  </span>
+                </li>
+              ) : null}
+              {athleteProfile.trust?.sportsmanship != null ? (
+                <li>
+                  <span className="text-slate-500">Rating · </span>
+                  <span className="font-semibold tabular-nums text-white">
+                    {athleteProfile.trust.sportsmanship.toFixed(1)}
+                  </span>
+                </li>
+              ) : null}
+              <li>
+                <span className="text-slate-500">Last active · </span>
+                <span className="text-white">—</span>
+              </li>
+            </ul>
+          </div>
+
           {athleteProfile.bio?.trim() ? (
             <div>
               <h3 className="mb-3 text-sm font-semibold text-white">Athlete tagline</h3>

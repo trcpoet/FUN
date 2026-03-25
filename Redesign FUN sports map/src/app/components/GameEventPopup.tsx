@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import type { GameRow } from "../../lib/supabase";
 import { cn } from "./MapCanvas";
 import { format } from "date-fns";
-import { MapPin, Clock, Trash2, Navigation } from "lucide-react";
+import { MapPin, Clock, Trash2, Navigation, Share2 } from "lucide-react";
 
 function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371;
@@ -101,6 +101,34 @@ export function GameEventPopup({
     };
   }, [hasCoords, game.lat, game.lng, viewerCoords]);
 
+  const handleShare = async () => {
+    const titleLine = game.title || "Pickup game";
+    const whenLine = game.starts_at ? format(new Date(game.starts_at), "MMM d, h:mm a") : "Time TBD";
+    const coordsLine = hasCoords ? `📍 ${formatCoords(game.lat, game.lng)}` : "";
+    const urlLine = routeMeta?.href ?? "";
+    const text = [titleLine, `${game.sport} · ${whenLine}`, coordsLine, urlLine].filter(Boolean).join("\n");
+
+    const shareData: ShareData = { title: titleLine, text, url: urlLine || undefined };
+    const canNativeShare =
+      typeof navigator.share === "function" &&
+      (!navigator.canShare || navigator.canShare(shareData));
+
+    if (canNativeShare) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      window.prompt("Copy this game link:", urlLine || text);
+    }
+  };
+
   return (
     <div
       className="absolute z-[1000] w-[min(18rem,calc(100vw-2rem))] max-w-[18rem] rounded-xl border border-slate-600 bg-slate-900/95 shadow-xl backdrop-blur-sm"
@@ -145,39 +173,50 @@ export function GameEventPopup({
             )}
           </div>
           </div>
-          {routeMeta && (
-            <a
-              href={routeMeta.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(
-                "shrink-0 flex flex-col items-end gap-0.5 rounded-lg border border-slate-600/80 bg-slate-800/90 px-2 py-1.5 text-right transition-colors",
-                "hover:border-emerald-500/50 hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
-              )}
-              aria-label={
-                routeMeta.hasOrigin
-                  ? `Open Google Maps directions, ${formatDistanceShort(routeMeta.km!)} about ${routeMeta.minutes} minutes drive estimated`
-                  : "Open this location in Google Maps"
-              }
+          <div className="shrink-0 flex items-start gap-1.5">
+            <button
+              type="button"
+              onClick={() => void handleShare()}
+              className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-600/80 bg-slate-800/90 text-slate-200 transition-colors hover:border-slate-400/70 hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+              aria-label="Share game"
+              title="Share"
             >
-              <Navigation className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
-              {routeMeta.hasOrigin && routeMeta.km != null ? (
-                <>
-                  <span className="text-[11px] font-semibold tabular-nums text-white leading-tight">
-                    {formatDistanceShort(routeMeta.km)}
+              <Share2 className="h-4 w-4" aria-hidden />
+            </button>
+            {routeMeta && (
+              <a
+                href={routeMeta.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(
+                  "shrink-0 flex flex-col items-end gap-0.5 rounded-lg border border-slate-600/80 bg-slate-800/90 px-2 py-1.5 text-right transition-colors",
+                  "hover:border-emerald-500/50 hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+                )}
+                aria-label={
+                  routeMeta.hasOrigin
+                    ? `Open Google Maps directions, ${formatDistanceShort(routeMeta.km!)} about ${routeMeta.minutes} minutes drive estimated`
+                    : "Open this location in Google Maps"
+                }
+              >
+                <Navigation className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+                {routeMeta.hasOrigin && routeMeta.km != null ? (
+                  <>
+                    <span className="text-[11px] font-semibold tabular-nums text-white leading-tight">
+                      {formatDistanceShort(routeMeta.km)}
+                    </span>
+                    <span className="text-[10px] text-slate-400 leading-tight">
+                      ~{routeMeta.minutes} min drive
+                    </span>
+                    <span className="text-[9px] text-slate-500 leading-tight">est.</span>
+                  </>
+                ) : (
+                  <span className="text-[10px] font-medium text-slate-300 leading-tight max-w-[4.5rem]">
+                    Maps
                   </span>
-                  <span className="text-[10px] text-slate-400 leading-tight">
-                    ~{routeMeta.minutes} min drive
-                  </span>
-                  <span className="text-[9px] text-slate-500 leading-tight">est.</span>
-                </>
-              ) : (
-                <span className="text-[10px] font-medium text-slate-300 leading-tight max-w-[4.5rem]">
-                  Maps
-                </span>
-              )}
-            </a>
-          )}
+                )}
+              </a>
+            )}
+          </div>
         </div>
         <div className="flex gap-2 mt-3">
           {onJoin && !joined && (

@@ -10,6 +10,7 @@ import SignUp from "./app/pages/SignUp.tsx";
 import Onboarding from "./app/pages/Onboarding.tsx";
 import Profile from "./app/pages/Profile.tsx";
 import PublicProfile from "./app/pages/PublicProfile.tsx";
+import Feed from "./app/pages/Feed.tsx";
 import "./styles/index.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -51,6 +52,7 @@ createRoot(document.getElementById("root")!).render(
             </RequireAuth>
           }
         />
+        <Route path="/feed" element={<Feed />} />
         <Route path="/athlete/:userId" element={<PublicProfile />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

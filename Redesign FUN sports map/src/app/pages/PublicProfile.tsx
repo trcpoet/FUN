@@ -6,6 +6,7 @@ import type { AthleteProfilePayload } from "../../lib/athleteProfile";
 import { useIsMobile } from "../components/ui/use-mobile";
 import { ProfileHero, ProfileActionRow } from "../components/athlete-profile";
 import { cn } from "../components/ui/utils";
+import { isFollowing, toggleFollowing } from "../../lib/localFollows";
 
 /**
  * Read-only athlete profile opened from map search (or shared link).
@@ -21,6 +22,7 @@ export default function PublicProfile() {
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [athleteProfile, setAthleteProfile] = useState<AthleteProfilePayload | null>(null);
+  const [following, setFollowing] = useState(false);
 
   useEffect(() => {
     if (!userId) {
@@ -44,6 +46,7 @@ export default function PublicProfile() {
         setDisplayName(res.displayName);
         setAvatarUrl(res.avatarUrl);
         setAthleteProfile(res.athleteProfile);
+        setFollowing(isFollowing(userId));
       }
       setLoading(false);
     });
@@ -112,8 +115,16 @@ export default function PublicProfile() {
                   const url = `${window.location.origin}/athlete/${userId}`;
                   void navigator.clipboard.writeText(url);
                 }}
-                onFollow={() => {}}
-                onMessage={() => {}}
+                isFollowing={following}
+                onFollow={() => {
+                  if (!userId) return;
+                  const res = toggleFollowing(userId);
+                  setFollowing(res.next);
+                }}
+                onMessage={() => {
+                  if (!userId) return;
+                  navigate(`/?dm=${encodeURIComponent(userId)}`);
+                }}
                 onInvite={() => {}}
               />
               <p className="text-xs text-slate-500 text-center px-2">

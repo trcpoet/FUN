@@ -14,6 +14,9 @@ type Props = {
   bio?: string | null;
   performanceMetrics?: PerformanceMetricEntry[];
   primarySports?: string[];
+  followersCount?: number;
+  followingCount?: number;
+  homeBaseLabel?: string | null;
   onAbout?: () => void;
   onShare?: () => void;
   className?: string;
@@ -32,6 +35,9 @@ export function ProfileHubHero({
   bio,
   performanceMetrics = [],
   primarySports = [],
+  followersCount,
+  followingCount,
+  homeBaseLabel,
   onAbout,
   onShare,
   className,
@@ -39,6 +45,9 @@ export function ProfileHubHero({
   const bioText = bio?.trim() ?? "";
   const handleClean = handle?.trim() ? cleanHandle(handle) : "";
   const visibleMetricList = visibleMetrics(performanceMetrics, primarySports);
+  const homeBase = homeBaseLabel?.trim() ?? "";
+  const followers = followersCount ?? 0;
+  const following = followingCount ?? 0;
 
   return (
     <div className={cn(className)}>
@@ -202,6 +211,22 @@ export function ProfileHubHero({
                     ) : null}
                   </div>
                 )}
+              </div>
+
+              {/* Compact stats row (minimal, high-signal) */}
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
+                  <span className="font-semibold tabular-nums text-white">{followers}</span>{" "}
+                  <span className="text-slate-400">Followers</span>
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
+                  <span className="font-semibold tabular-nums text-white">{following}</span>{" "}
+                  <span className="text-slate-400">Following</span>
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
+                  <span className="text-slate-400">Home Base</span>{" "}
+                  <span className="font-semibold text-white">{homeBase || "—"}</span>
+                </span>
               </div>
               <p className="mt-3 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Bio</p>
               {bioText ? (
