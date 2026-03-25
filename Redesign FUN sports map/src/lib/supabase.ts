@@ -76,6 +76,11 @@ export type ProfileNearbyRow = {
   display_name: string | null;
   avatar_url: string | null;
   avatar_id?: string | null;
+  /** Optional: reputation rating out of 5 if the RPC provides it. */
+  sportsmanship?: number | null;
+  /** Optional 24h status if the RPC provides it. */
+  status_body?: string | null;
+  status_expires_at?: string | null;
   lat: number;
   lng: number;
   distance_km: number;

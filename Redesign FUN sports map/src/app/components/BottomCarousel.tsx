@@ -13,6 +13,7 @@ import {
 import { format } from "date-fns";
 import { cn } from "./MapCanvas";
 import { useIsMobile } from "./ui/use-mobile";
+import { useNavigate } from "react-router";
 import type { GameRow } from "../../lib/supabase";
 
 function formatDistance(km: number): string {
@@ -39,6 +40,8 @@ export type BottomCarouselProps = {
   /** Used to show Host vs In on cards (hosts are in game_participants but aren’t “guest joins”). */
   currentUserId?: string | null;
   liveNowOpen?: boolean;
+  /** Mobile nav: open the messenger as a full-screen experience (sheet). */
+  onOpenMessages?: () => void;
 };
 
 export const BottomCarousel = ({
@@ -49,9 +52,31 @@ export const BottomCarousel = ({
   joinedGameIds,
   currentUserId = null,
   liveNowOpen = false,
+  onOpenMessages,
 }: BottomCarouselProps) => {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const [radialMenuOpen, setRadialMenuOpen] = useState(false);
+
+  const handleNav = (id: string) => {
+    setRadialMenuOpen(false);
+    if (id === "activity") {
+      navigate("/feed");
+      return;
+    }
+    if (id === "events") {
+      navigate("/feed?tab=notifications");
+      return;
+    }
+    if (id === "social") {
+      onOpenMessages?.();
+      return;
+    }
+    if (id === "settings") {
+      navigate("/profile?settings=1");
+      return;
+    }
+  };
 
   return (
     <div className="absolute bottom-0 left-0 right-0 z-40 pb-6 pt-12 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/80 to-transparent pointer-events-none flex flex-col justify-end">
@@ -237,6 +262,8 @@ export const BottomCarousel = ({
                         }}
                         className="w-11 h-11 rounded-full bg-slate-800/95 border border-slate-600 shadow-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors"
                         title={label}
+                        aria-label={label}
+                        onClick={() => handleNav(id)}
                       >
                         <Icon className="w-5 h-5" />
                       </motion.button>

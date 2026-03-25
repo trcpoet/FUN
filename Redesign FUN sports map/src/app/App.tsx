@@ -31,6 +31,7 @@ import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow } from "../lib/supabase";
 import { filterGamesVisibleOnMap } from "../lib/mapGameTimer";
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
+import { StarRating } from "./components/ui/StarRating";
 
 const DEFAULT_AVATAR_IMAGE =
   "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=100";
@@ -157,6 +158,102 @@ export default function App() {
   const [messengerFocus, setMessengerFocus] = useState<MessengerThreadFocus | null>(null);
   const [liveNowOpen, setLiveNowOpen] = useState(false);
   const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
+  const lastNearbyIdsRef = useRef<Set<string>>(new Set());
+  const lastProxNotifAtRef = useRef<number>(0);
+
+  const canFireProximityNotif = useCallback((): boolean => {
+    try {
+      const key = "fun_prox_notifs_v1";
+      const raw = localStorage.getItem(key);
+      const now = Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+      const ts: number[] = raw ? (JSON.parse(raw) as number[]) : [];
+      const recent = ts.filter((t) => typeof t === "number" && now - t < dayMs);
+      if (recent.length >= 3) return false;
+      // also avoid bursts (even within the cap)
+      if (now - lastProxNotifAtRef.current < 60_000) return false;
+      recent.push(now);
+      localStorage.setItem(key, JSON.stringify(recent));
+      lastProxNotifAtRef.current = now;
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const distMeters = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+    const R = 6371000;
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const sLat = Math.sin(dLat / 2);
+    const sLng = Math.sin(dLng / 2);
+    const x = sLat * sLat + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sLng * sLng;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+  };
+
+  // Proximity notifications (top 3 signals, hard-capped)
+  useEffect(() => {
+    if (!userCoords) return;
+    if (!nearbyProfiles) return;
+    const prev = lastNearbyIdsRef.current;
+    const next = new Set(nearbyProfiles.map((p) => p.profile_id));
+    lastNearbyIdsRef.current = next;
+
+    const prevCount = prev.size;
+    const nextCount = next.size;
+    const newCount = nearbyProfiles.filter((p) => !prev.has(p.profile_id)).length;
+
+    // 1) First players nearby
+    if (prevCount === 0 && nextCount > 0) {
+      if (canFireProximityNotif()) {
+        setToast({
+          id: `prox-nearby-${Date.now()}`,
+          type: "info",
+          message: `${Math.min(99, nextCount)} player${nextCount === 1 ? "" : "s"} near you right now`,
+        });
+      }
+      return;
+    }
+
+    // 2) A new player appeared near you
+    if (newCount > 0) {
+      if (canFireProximityNotif()) {
+        setToast({
+          id: `prox-new-${Date.now()}`,
+          type: "info",
+          message: `New player nearby (+${Math.min(9, newCount)})`,
+        });
+      }
+      return;
+    }
+
+    // 3) Players near your currently selected venue
+    if (selectedVenue) {
+      const venueKey = `fun_prox_venue_once_${selectedVenue.id}`;
+      let already = false;
+      try {
+        already = localStorage.getItem(venueKey) === "1";
+      } catch {
+        already = false;
+      }
+      if (!already) {
+        const nearVenue = nearbyProfiles.some((p) => distMeters(selectedVenue.center, { lat: p.lat, lng: p.lng }) <= 250);
+        if (nearVenue && canFireProximityNotif()) {
+          try {
+            localStorage.setItem(venueKey, "1");
+          } catch {
+            /* ignore */
+          }
+          setToast({
+            id: `prox-venue-${selectedVenue.id}-${Date.now()}`,
+            type: "info",
+            message: "Players are active near this venue",
+          });
+        }
+      }
+    }
+  }, [nearbyProfiles, selectedVenue?.id, selectedVenue?.center.lat, selectedVenue?.center.lng, userCoords?.lat, userCoords?.lng, canFireProximityNotif]);
 
   useEffect(() => {
     prefetchMapboxGl();
@@ -577,6 +674,7 @@ export default function App() {
           mapCameraRequest={mapCameraRequest}
           nearbyProfiles={nearbyProfiles}
           currentUserId={currentUserId}
+          userSportsmanship={athleteProfile?.trust?.sportsmanship ?? null}
           selectedGameId={selectedGame?.id ?? null}
           onSelectGame={setSelectedGame}
           selectedVenue={selectedVenue}
@@ -718,6 +816,9 @@ export default function App() {
               />
               <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-slate-800" />
             </button>
+            <div className="pointer-events-none absolute -bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-white/10 bg-slate-950/80 px-2 py-1 backdrop-blur-md">
+              <StarRating value={athleteProfile.trust?.sportsmanship ?? null} size={10} />
+            </div>
             {favoriteSport ? (
               <span
                 className="pointer-events-none absolute z-20 -bottom-1 -right-1 select-none text-3xl leading-none drop-shadow-[0_1px_3px_rgba(0,0,0,0.95),0_0_8px_rgba(0,0,0,0.5)]"
@@ -738,6 +839,10 @@ export default function App() {
           joinedGameIds={joinedGameIds}
           currentUserId={currentUserId}
           liveNowOpen={liveNowOpen}
+          onOpenMessages={() => {
+            setMessengerFocus(null);
+            setMessagesOpen(true);
+          }}
         />
       </div>
 

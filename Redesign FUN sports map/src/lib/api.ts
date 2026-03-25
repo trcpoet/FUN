@@ -15,6 +15,7 @@ import type {
   UserBadgeRow,
   NotificationRow,
 } from "./supabase";
+import { cachedAsync, cacheClear } from "./requestCache";
 
 const DEFAULT_RADIUS_KM = 15;
 const DEFAULT_PROFILES_LIMIT = 50;
@@ -405,52 +406,54 @@ async function fetchProfileRow(
   athleteProfileRaw: unknown;
   error: Error | null;
 }> {
-  if (!supabase) return { row: null, athleteProfileRaw: null, error: new Error("Supabase not configured") };
+  return cachedAsync(`profiles:row:${userId}`, 15_000, async () => {
+    if (!supabase) return { row: null, athleteProfileRaw: null, error: new Error("Supabase not configured") };
 
-  const colState = readAthleteProfileColumnState();
+    const colState = readAthleteProfileColumnState();
 
-  if (colState === "present") {
-    const res = await supabase
+    if (colState === "present") {
+      const res = await supabase
+        .from("profiles")
+        .select(PROFILE_SELECT_WITH_ATHLETE)
+        .eq("id", userId)
+        .maybeSingle();
+      if (!res.error && res.data) {
+        const r = res.data as Record<string, unknown>;
+        return { row: r, athleteProfileRaw: r.athlete_profile, error: null };
+      }
+      clearAthleteProfileColumnCache();
+    }
+
+    if (readAthleteProfileColumnState() !== "absent") {
+      const probed = await probeProfileRowWithAthlete(userId);
+      if (probed.ok) {
+        const r = probed.row;
+        return { row: r, athleteProfileRaw: r.athlete_profile, error: null };
+      }
+    }
+
+    let { data, error } = await supabase
       .from("profiles")
-      .select(PROFILE_SELECT_WITH_ATHLETE)
+      .select(PROFILE_SELECT_BASE)
       .eq("id", userId)
       .maybeSingle();
-    if (!res.error && res.data) {
-      const r = res.data as Record<string, unknown>;
-      return { row: r, athleteProfileRaw: r.athlete_profile, error: null };
+
+    if (!error && data) {
+      const r = data as Record<string, unknown>;
+      return { row: r, athleteProfileRaw: null, error: null };
     }
-    clearAthleteProfileColumnCache();
-  }
 
-  if (readAthleteProfileColumnState() !== "absent") {
-    const probed = await probeProfileRowWithAthlete(userId);
-    if (probed.ok) {
-      const r = probed.row;
-      return { row: r, athleteProfileRaw: r.athlete_profile, error: null };
+    const last = await supabase.from("profiles").select(PROFILE_SELECT_MIN).eq("id", userId).maybeSingle();
+    if (last.error || !last.data) {
+      return {
+        row: null,
+        athleteProfileRaw: null,
+        error: new Error(last.error?.message ?? error?.message ?? "Profile fetch failed"),
+      };
     }
-  }
-
-  let { data, error } = await supabase
-    .from("profiles")
-    .select(PROFILE_SELECT_BASE)
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (!error && data) {
-    const r = data as Record<string, unknown>;
+    const r = last.data as Record<string, unknown>;
     return { row: r, athleteProfileRaw: null, error: null };
-  }
-
-  const last = await supabase.from("profiles").select(PROFILE_SELECT_MIN).eq("id", userId).maybeSingle();
-  if (last.error || !last.data) {
-    return {
-      row: null,
-      athleteProfileRaw: null,
-      error: new Error(last.error?.message ?? error?.message ?? "Profile fetch failed"),
-    };
-  }
-  const r = last.data as Record<string, unknown>;
-  return { row: r, athleteProfileRaw: null, error: null };
+  });
 }
 
 export async function updateMyAvatarId(avatarId: string | null): Promise<Error | null> {
@@ -461,6 +464,7 @@ export async function updateMyAvatarId(avatarId: string | null): Promise<Error |
     .from("profiles")
     .update({ avatar_id: avatarId, updated_at: new Date().toISOString() })
     .eq("id", user.id);
+  if (!error) cacheClear(`profiles:row:${user.id}`);
   return error ? new Error(error.message) : null;
 }
 
@@ -586,6 +590,7 @@ export async function updateMyProfile(updates: {
     delete withoutAthlete.athlete_profile;
     const { error: err2 } = await supabase.from("profiles").update(withoutAthlete).eq("id", user.id);
     if (err2) return new Error(err2.message);
+    cacheClear(`profiles:row:${user.id}`);
     return new Error(
       "Athlete card data was not saved: your Supabase project is missing the column profiles.athlete_profile (jsonb). " +
         "Run the migration in supabase/migrations/20250320000000_athlete_profile_jsonb.sql (SQL Editor). " +
@@ -597,6 +602,7 @@ export async function updateMyProfile(updates: {
   if (!error && updates.athlete_profile !== undefined) {
     writeAthleteProfileColumnState("present");
   }
+  if (!error) cacheClear(`profiles:row:${user.id}`);
 
   return error ? new Error(error.message) : null;
 }

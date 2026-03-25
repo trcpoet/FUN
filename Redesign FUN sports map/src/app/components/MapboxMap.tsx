@@ -125,6 +125,8 @@ type MapboxMapProps = {
   /** Set of game ids where the current user is the host (to show "You're hosting"). */
   hostGameIds?: Set<string>;
   nearbyProfiles?: ProfileNearbyRow[];
+  /** Your rating out of 5 (shown under your 2D map avatar). */
+  userSportsmanship?: number | null;
   currentUserId?: string | null;
   /** (lat, lng, viewportPoint) when user double-taps the map */
   onMapDoubleClick?: (lat: number, lng: number, viewportPoint?: { x: number; y: number }) => void;
@@ -169,6 +171,7 @@ export function MapboxMap(props: MapboxMapProps) {
     onOpenMessagesForGame,
     joinedGameIds,
     nearbyProfiles = [],
+    userSportsmanship = null,
     onMapDoubleClick,
     onCreateGameAtVenue,
     centerOnUserTrigger,
@@ -1429,6 +1432,27 @@ export function MapboxMap(props: MapboxMapProps) {
     img.alt = "You";
     avatar.appendChild(img);
     wrap.appendChild(avatar);
+
+    const rating = typeof userSportsmanship === "number" ? Math.max(0, Math.min(5, userSportsmanship)) : null;
+    if (rating != null) {
+      const ratingWrap = document.createElement("div");
+      ratingWrap.style.display = "flex";
+      ratingWrap.style.gap = "1px";
+      ratingWrap.style.marginTop = "4px";
+      ratingWrap.style.justifyContent = "center";
+      ratingWrap.style.filter = "drop-shadow(0 2px 6px rgba(0,0,0,0.5))";
+      const full = Math.round(rating);
+      for (let i = 0; i < 5; i++) {
+        const s = document.createElement("span");
+        s.textContent = i < full ? "★" : "☆";
+        s.style.fontSize = "10px";
+        s.style.lineHeight = "1";
+        s.style.color = i < full ? "rgba(252, 211, 77, 0.95)" : "rgba(148, 163, 184, 0.8)";
+        ratingWrap.appendChild(s);
+      }
+      ratingWrap.title = `${rating.toFixed(1).replace(/\\.0$/, "")} / 5`;
+      wrap.appendChild(ratingWrap);
+    }
     outer.appendChild(wrap);
     userMarker2dScaleElRef.current = wrap;
 
@@ -1449,7 +1473,7 @@ export function MapboxMap(props: MapboxMapProps) {
       userMarker2dRef.current = null;
       userMarker2dScaleElRef.current = null;
     };
-  }, [mapLoaded, userCoords, userAvatarUrl, use3DOverlay, applyDomMarkerScale]);
+  }, [mapLoaded, userCoords, userAvatarUrl, use3DOverlay, userSportsmanship, applyDomMarkerScale]);
 
   // —— Other players (DOM markers) ———
   useEffect(() => {
@@ -1467,9 +1491,16 @@ export function MapboxMap(props: MapboxMapProps) {
     loadMapboxGl().then((mapboxgl) => {
       others.forEach((profile) => {
         const outer = document.createElement("div");
+        const scaleWrap = document.createElement("div");
+        scaleWrap.style.display = "flex";
+        scaleWrap.style.flexDirection = "column";
+        scaleWrap.style.alignItems = "center";
+        scaleWrap.style.gap = "3px";
+        scaleWrap.style.cursor = "pointer";
+        scaleWrap.style.willChange = "transform";
+
         const el = document.createElement("div");
         el.className = "player-marker";
-        el.style.cursor = "pointer";
         el.style.width = "40px";
         el.style.height = "40px";
         el.style.borderRadius = "50%";
@@ -1477,7 +1508,6 @@ export function MapboxMap(props: MapboxMapProps) {
         el.style.boxShadow = "0 0 12px rgba(16, 185, 129, 0.4)";
         el.style.overflow = "hidden";
         el.style.background = "var(--tw-slate-700, #334155)";
-        el.style.willChange = "transform";
         const img = document.createElement("img");
         img.src = profile.avatar_url || DEFAULT_AVATAR;
         img.alt = profile.display_name || "Player";
@@ -1485,18 +1515,59 @@ export function MapboxMap(props: MapboxMapProps) {
         img.style.height = "100%";
         img.style.objectFit = "cover";
         el.appendChild(img);
-        el.title = profile.display_name || "Player";
-        el.addEventListener("click", (e) => {
+        scaleWrap.title = profile.display_name || "Player";
+
+        const status = typeof profile.status_body === "string" ? profile.status_body.trim() : "";
+        if (status) {
+          const pill = document.createElement("div");
+          pill.textContent = status.length > 28 ? `${status.slice(0, 27)}…` : status;
+          pill.style.maxWidth = "140px";
+          pill.style.whiteSpace = "nowrap";
+          pill.style.overflow = "hidden";
+          pill.style.textOverflow = "ellipsis";
+          pill.style.padding = "3px 8px";
+          pill.style.borderRadius = "999px";
+          pill.style.border = "1px solid rgba(255,255,255,0.12)";
+          pill.style.background = "rgba(2,6,23,0.72)";
+          pill.style.backdropFilter = "blur(10px)";
+          pill.style.color = "rgba(226,232,240,0.95)";
+          pill.style.fontSize = "11px";
+          pill.style.fontWeight = "600";
+          pill.style.filter = "drop-shadow(0 10px 18px rgba(0,0,0,0.4))";
+          scaleWrap.appendChild(pill);
+        }
+
+        const rating = typeof profile.sportsmanship === "number" ? Math.max(0, Math.min(5, profile.sportsmanship)) : null;
+        if (rating != null) {
+          const ratingWrap = document.createElement("div");
+          ratingWrap.style.display = "flex";
+          ratingWrap.style.gap = "1px";
+          ratingWrap.style.justifyContent = "center";
+          ratingWrap.style.filter = "drop-shadow(0 2px 6px rgba(0,0,0,0.5))";
+          const full = Math.round(rating);
+          for (let i = 0; i < 5; i++) {
+            const s = document.createElement("span");
+            s.textContent = i < full ? "★" : "☆";
+            s.style.fontSize = "9px";
+            s.style.lineHeight = "1";
+            s.style.color = i < full ? "rgba(252, 211, 77, 0.95)" : "rgba(148, 163, 184, 0.75)";
+            ratingWrap.appendChild(s);
+          }
+          scaleWrap.appendChild(ratingWrap);
+        }
+
+        scaleWrap.appendChild(el);
+        scaleWrap.addEventListener("click", (e) => {
           e.stopPropagation();
           navigate(`/athlete/${profile.profile_id}`);
         });
-        outer.appendChild(el);
+        outer.appendChild(scaleWrap);
 
         const marker = new mapboxgl.default.Marker({ element: outer })
           .setLngLat([profile.lng, profile.lat])
           .addTo(map);
         playerMarkersRef.current.push(marker);
-        playerMarkerEntriesRef.current.push({ marker, scaleEl: el });
+        playerMarkerEntriesRef.current.push({ marker, scaleEl: scaleWrap });
       });
       applyMapLayerVisibility();
       applyDomMarkerScale();

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import React, { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { useUserStats } from "../../hooks/useUserStats";
 import { useNotifications } from "../../hooks/useNotifications";
@@ -26,6 +26,8 @@ import { mergeAthleteProfile } from "../../lib/athleteProfile";
 import { readFollowedIds } from "../../lib/localFollows";
 import { cn } from "../components/ui/utils";
 import { useAuth } from "../contexts/AuthContext";
+import { getAthleteReputation } from "../../lib/endorsements";
+import { getLatestStatus, upsertMyStatus } from "../../lib/status";
 
 export default function Profile() {
   const { user } = useAuth();
@@ -42,7 +44,12 @@ export default function Profile() {
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [shareCopiedAt, setShareCopiedAt] = useState<number | null>(null);
   const [editDisplayName, setEditDisplayName] = useState("");
+  const [repAvg, setRepAvg] = useState<number | null>(null);
+  const [repCount, setRepCount] = useState<number>(0);
+  const [statusText, setStatusText] = useState<string | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  const openedSettingsRef = useRef(false);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
@@ -59,6 +66,52 @@ export default function Profile() {
   useEffect(() => {
     if (editOpen) setEditDisplayName(displayName ?? "");
   }, [editOpen, displayName]);
+
+  useEffect(() => {
+    if (openedSettingsRef.current) return;
+    const qs = new URLSearchParams(location.search);
+    if (qs.get("settings") === "1") {
+      openedSettingsRef.current = true;
+      setEditOpen(true);
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setRepAvg(null);
+      setRepCount(0);
+      return;
+    }
+    let cancelled = false;
+    void getAthleteReputation(user.id).then((r) => {
+      if (cancelled) return;
+      if (r.error || !r.data) {
+        setRepAvg(null);
+        setRepCount(0);
+      } else {
+        setRepAvg(typeof r.data.sportsmanship_avg === "number" ? r.data.sportsmanship_avg : null);
+        setRepCount(r.data.sportsmanship_count ?? 0);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setStatusText(null);
+      return;
+    }
+    let cancelled = false;
+    void getLatestStatus(user.id).then((r) => {
+      if (cancelled) return;
+      setStatusText(r.data?.body ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -155,6 +208,10 @@ export default function Profile() {
                 avatarUrl={avatarUrl}
                 fallbackInitial={fallbackInitial}
                 verified={!!athleteProfile.verified}
+                rating={repAvg ?? athleteProfile.trust?.sportsmanship ?? null}
+                ratingCount={repCount}
+                gamesPlayed={stats?.games_played_total ?? 0}
+                statusText={statusText}
                 bio={athleteProfile.bio ?? null}
                 performanceMetrics={athleteProfile.performanceMetrics ?? []}
                 primarySports={primarySports}
@@ -357,13 +414,9 @@ export default function Profile() {
           open={statusDialogOpen}
           onOpenChange={setStatusDialogOpen}
           onSave={async (post) => {
-            const err = await updateProfile({
-              athlete_profile: mergeAthleteProfile(athleteProfile, {
-                posts: [...(athleteProfile.posts ?? []), post],
-              }),
-            });
+            const err = await upsertMyStatus(post.caption);
             if (err) throw new Error(err.message);
-            await refetch();
+            setStatusText(post.caption);
           }}
         />
 

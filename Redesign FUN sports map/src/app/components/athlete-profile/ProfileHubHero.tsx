@@ -2,6 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { BadgeCheck, Info, Share2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { cn } from "../ui/utils";
+import { StarRating } from "../ui/StarRating";
 import type { PerformanceMetricEntry } from "../../../lib/athleteProfile";
 import { visibleMetrics } from "../../../lib/athleteProfile";
 
@@ -11,6 +12,10 @@ type Props = {
   avatarUrl: string | null;
   fallbackInitial: string;
   verified: boolean;
+  rating?: number | null;
+  ratingCount?: number;
+  gamesPlayed?: number;
+  statusText?: string | null;
   bio?: string | null;
   performanceMetrics?: PerformanceMetricEntry[];
   primarySports?: string[];
@@ -32,6 +37,10 @@ export function ProfileHubHero({
   avatarUrl,
   fallbackInitial,
   verified,
+  rating,
+  ratingCount,
+  gamesPlayed,
+  statusText,
   bio,
   performanceMetrics = [],
   primarySports = [],
@@ -48,6 +57,9 @@ export function ProfileHubHero({
   const homeBase = homeBaseLabel?.trim() ?? "";
   const followers = followersCount ?? 0;
   const following = followingCount ?? 0;
+  const games = gamesPlayed ?? 0;
+  const ratingValue = typeof rating === "number" ? rating : null;
+  const ratingN = ratingCount ?? 0;
 
   return (
     <div className={cn(className)}>
@@ -63,6 +75,13 @@ export function ProfileHubHero({
                 {fallbackInitial}
               </AvatarFallback>
             </Avatar>
+            {statusText?.trim() ? (
+              <div className="absolute -top-2 left-1/2 -translate-x-1/2 max-w-[min(16rem,70vw)]">
+                <div className="rounded-full border border-white/12 bg-black/70 px-2.5 py-1 text-[11px] font-semibold text-slate-100 backdrop-blur-md shadow-lg">
+                  <span className="truncate block">{statusText.trim()}</span>
+                </div>
+              </div>
+            ) : null}
             {verified ? (
               <span
                 className="absolute bottom-0 right-0 flex size-6 items-center justify-center rounded-full bg-[#00F5FF] shadow-md ring-2 ring-[#161B22]"
@@ -80,7 +99,12 @@ export function ProfileHubHero({
             <div className="flex min-w-0 items-center gap-2">
               <div className="min-w-0 flex-1">
                 {handleClean ? (
-                  <p className="font-mono text-sm leading-snug text-[#00F5FF]/90">@{handleClean}</p>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="min-w-0 truncate font-mono text-sm leading-snug text-[#00F5FF]/90">
+                      @{handleClean}
+                    </p>
+                    <StarRating value={rating} size={12} className="shrink-0 text-amber-300/95" />
+                  </div>
                 ) : (
                   <p className="text-sm leading-snug text-slate-500">Add a handle in settings</p>
                 )}
@@ -161,6 +185,13 @@ export function ProfileHubHero({
                   {fallbackInitial}
                 </AvatarFallback>
               </Avatar>
+            {statusText?.trim() ? (
+              <div className="absolute -top-2 left-1/2 -translate-x-1/2 max-w-[min(20rem,50vw)]">
+                <div className="rounded-full border border-white/12 bg-black/70 px-3 py-1 text-xs font-semibold text-slate-100 backdrop-blur-md shadow-lg">
+                  <span className="truncate block">{statusText.trim()}</span>
+                </div>
+              </div>
+            ) : null}
               {verified ? (
                 <span
                   className="absolute bottom-0.5 right-0.5 flex size-7 items-center justify-center rounded-full bg-[#00F5FF] shadow-md ring-2 ring-[#0D1117]"
@@ -178,7 +209,12 @@ export function ProfileHubHero({
               <div className="flex min-w-0 items-center gap-2">
                 <div className="min-w-0 flex-1">
                   {handleClean ? (
-                    <p className="font-mono text-sm leading-snug text-[#00F5FF]/90">@{handleClean}</p>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className="min-w-0 truncate font-mono text-sm leading-snug text-[#00F5FF]/90">
+                        @{handleClean}
+                      </p>
+                      <StarRating value={rating} size={12} className="shrink-0 text-amber-300/95" />
+                    </div>
                   ) : (
                     <p className="text-sm leading-snug text-slate-500">Add a handle in settings</p>
                   )}
@@ -223,6 +259,19 @@ export function ProfileHubHero({
                   <span className="font-semibold tabular-nums text-white">{following}</span>{" "}
                   <span className="text-slate-400">Following</span>
                 </span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
+                  <span className="font-semibold tabular-nums text-white">{games}</span>{" "}
+                  <span className="text-slate-400">Games</span>
+                </span>
+                {ratingValue != null ? (
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
+                    <span className="font-semibold tabular-nums text-white">
+                      {ratingValue.toFixed(1).replace(/\.0$/, "")}
+                    </span>{" "}
+                    <span className="text-amber-300/95">★</span>{" "}
+                    <span className="text-slate-500 tabular-nums">({ratingN})</span>
+                  </span>
+                ) : null}
                 <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
                   <span className="text-slate-400">Home Base</span>{" "}
                   <span className="font-semibold text-white">{homeBase || "—"}</span>

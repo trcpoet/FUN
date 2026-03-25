@@ -88,9 +88,7 @@ function strengthsForSave(raw: SkillRating[] | undefined): SkillRating[] {
     .slice(0, MAX_STRENGTHS);
 }
 
-type EditTab = "identity" | "sports" | "athletic" | "trust";
-
-const EDIT_TAB_ORDER: EditTab[] = ["identity", "sports", "athletic", "trust"];
+type EditTab = "home" | "identity" | "sports" | "athletic" | "trust" | "more";
 
 function statValue(ratings: SkillRating[], id: "speed" | "endurance" | "defense" | "playmaking"): number {
   const d = SKILL_DEFAULTS.find((x) => x.key === id)!;
@@ -186,7 +184,7 @@ export function ProfileEditSheet({
   const [err, setErr] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
-  const [editTab, setEditTab] = useState<EditTab>("identity");
+  const [editTab, setEditTab] = useState<EditTab>("home");
   const [sportFilter, setSportFilter] = useState("");
   const [previewAsPublic, setPreviewAsPublic] = useState(false);
   const prevOpenRef = useRef(false);
@@ -198,7 +196,7 @@ export function ProfileEditSheet({
       merged.athleticLoadouts = undefined;
       setDraft(merged);
       setErr(null);
-      setEditTab("identity");
+      setEditTab("home");
       setSportFilter("");
       setPreviewAsPublic(false);
     }
@@ -322,7 +320,7 @@ export function ProfileEditSheet({
     ? SPORT_OPTIONS.filter((s) => s.toLowerCase().includes(sportQ))
     : SPORT_OPTIONS;
   const mainSport = draft.primarySports?.[0] ?? null;
-  const stepIndex = EDIT_TAB_ORDER.indexOf(editTab) + 1;
+  // Tabs replaced by senior-friendly list navigation.
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -335,10 +333,22 @@ export function ProfileEditSheet({
             <div>
               <SheetTitle className="text-lg text-white">Profile settings</SheetTitle>
               <SheetDescription className="text-sm text-slate-500">
-                Tab through your build. Save applies everything.
+                Tap a section to edit. Done saves everything.
               </SheetDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {editTab !== "home" ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1.5 border border-white/10 text-xs text-slate-300 hover:text-white"
+                  onClick={() => setEditTab("home")}
+                >
+                  <ChevronDown className="size-3.5 rotate-90" aria-hidden />
+                  Back
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant={previewAsPublic ? "secondary" : "ghost"}
@@ -350,22 +360,13 @@ export function ProfileEditSheet({
                 onClick={() => setPreviewAsPublic((v) => !v)}
               >
                 <Eye className="size-3.5" />
-                Public preview
+                Preview my profile
               </Button>
-              <span className="text-xs tabular-nums text-slate-500">{completeness}%</span>
             </div>
           </div>
-          <div className="space-y-1">
-            <div className="flex justify-between text-[10px] font-medium uppercase tracking-wider text-slate-500">
-              <span>Season · {draft.city?.trim() || "Your journey"}</span>
-              <span>
-                Step {stepIndex} of 4 · {EDIT_TAB_ORDER[stepIndex - 1]}
-              </span>
-            </div>
-            <Progress
-              value={completeness}
-              className="h-1.5 bg-white/10 [&>[data-slot=progress-indicator]]:bg-emerald-500 motion-reduce:[&>[data-slot=progress-indicator]]:transition-none"
-            />
+          <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            <span>{draft.city?.trim() ? `Home base · ${draft.city.trim()}` : "Home base · Not set"}</span>
+            <span className="tabular-nums">{completeness}% complete</span>
           </div>
         </SheetHeader>
 
@@ -439,8 +440,8 @@ export function ProfileEditSheet({
               @{(draft.handle ?? "").replace(/^@/, "") || "handle"}
             </p>
             <p className="mt-1 max-w-[16rem] text-left text-xs leading-relaxed text-slate-500">
-              Tap the green button to choose a new photo. Use <span className="text-slate-400">Save profile</span> at
-              the bottom when you&apos;re done.
+              Tap the green button to choose a new photo. Hit <span className="text-slate-200">Done</span> when you&apos;re
+              finished.
             </p>
             {avatarFile ? (
               <Button
@@ -505,31 +506,6 @@ export function ProfileEditSheet({
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-visible sm:overflow-hidden">
-        <div className="sticky top-0 z-20 flex shrink-0 gap-1 overflow-x-auto border-b border-white/[0.06] bg-[#0A0F1C]/95 px-2 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-[#0A0F1C]/85">
-          {(
-            [
-              ["identity", "Identity", User],
-              ["sports", "Sports", Trophy],
-              ["athletic", "Build", Dumbbell],
-              ["trust", "Trust", Shield],
-            ] as const
-          ).map(([id, label, Icon]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setEditTab(id)}
-              className={cn(
-                "flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-colors motion-safe:duration-200 cursor-pointer",
-                editTab === id
-                  ? "bg-emerald-600/25 text-emerald-100 ring-1 ring-emerald-500/40"
-                  : "text-slate-400 hover:bg-white/5 hover:text-slate-200",
-              )}
-            >
-              <Icon className="size-3.5 opacity-80" />
-              {label}
-            </button>
-          ))}
-        </div>
 
         <div className="min-h-0 flex-1 overflow-visible px-0 sm:min-h-0 sm:overflow-y-auto">
           <div className="space-y-6 px-4 py-4 pb-8">
@@ -537,6 +513,102 @@ export function ProfileEditSheet({
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
                 {err}
               </div>
+            )}
+
+            {editTab === "home" && (
+              <section className={cn("space-y-3", sectionCard())}>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="size-4 text-emerald-400/90" />
+                  <h3 className="text-sm font-semibold tracking-wide text-slate-200">Edit your profile</h3>
+                </div>
+                <p className="text-sm text-slate-400">
+                  Pick one section. Keep it simple — you can come back anytime.
+                </p>
+
+                <div className="mt-3 space-y-2">
+                  {(
+                    [
+                      {
+                        id: "identity",
+                        title: "My name & photo",
+                        desc: "Name, handle, home base, and bio.",
+                        Icon: User,
+                      },
+                      {
+                        id: "sports",
+                        title: "Sports I play",
+                        desc: "Main sport, extra sports, and skill level.",
+                        Icon: Trophy,
+                      },
+                      {
+                        id: "athletic",
+                        title: "Skill & availability",
+                        desc: "Strength sliders, positions, and how you like to play.",
+                        Icon: Dumbbell,
+                      },
+                      {
+                        id: "trust",
+                        title: "Reputation (optional)",
+                        desc: "Show-up % and sportsmanship rating.",
+                        Icon: Shield,
+                      },
+                      {
+                        id: "more",
+                        title: "More",
+                        desc: "Log out and advanced options.",
+                        Icon: ChevronDown,
+                      },
+                    ] as const
+                  ).map((row) => (
+                    <button
+                      key={row.id}
+                      type="button"
+                      onClick={() => setEditTab(row.id)}
+                      className={cn(
+                        "w-full rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 text-left transition-colors",
+                        "hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40",
+                      )}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="mt-0.5 inline-flex size-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-200">
+                          <row.Icon className="size-5" aria-hidden />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-white">{row.title}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">{row.desc}</p>
+                        </div>
+                        <ChevronDown className="size-4 text-slate-600 -rotate-90 mt-1" aria-hidden />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {editTab === "more" && (
+              <section className={cn("space-y-3", sectionCard())}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold tracking-wide text-slate-200">More</h3>
+                  </div>
+                </div>
+                <p className="text-sm text-slate-400">Advanced actions.</p>
+
+                {onSignOut ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full border-red-500/35 text-sm text-red-300 hover:bg-red-500/10 hover:text-red-200"
+                    onClick={() => {
+                      void Promise.resolve(onSignOut());
+                      onOpenChange(false);
+                    }}
+                  >
+                    <LogOut className="mr-2 size-4" />
+                    Log out
+                  </Button>
+                ) : null}
+              </section>
             )}
 
             {editTab === "identity" && (
@@ -1285,22 +1357,8 @@ export function ProfileEditSheet({
                   disabled={saving}
                   onClick={() => void handleSave()}
                 >
-                  {saving ? "Saving…" : "Save profile"}
+                  {saving ? "Saving…" : "Done"}
                 </Button>
-                {onSignOut ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 w-full border-red-500/35 text-sm text-red-300 hover:bg-red-500/10 hover:text-red-200 sm:w-auto sm:min-w-[11rem]"
-                    onClick={() => {
-                      void Promise.resolve(onSignOut());
-                      onOpenChange(false);
-                    }}
-                  >
-                    <LogOut className="mr-2 size-4" />
-                    Log out
-                  </Button>
-                ) : null}
               </div>
             </div>
           </div>

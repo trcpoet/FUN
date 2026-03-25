@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bell, Compass, Globe, HeartPulse, PenSquare, Sparkles, Users } from "lucide-react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { cn } from "../components/ui/utils";
 import { Button } from "../components/ui/button";
 import { ActivityFeed } from "../components/athlete-profile/ActivityFeed";
 import { useNotifications } from "../../hooks/useNotifications";
+import { getRecentStatuses, type StatusRow } from "../../lib/status";
 
 function notificationLabel(n: { type: string; payload?: unknown }): string {
   if (n.type === "badge_earned") {
@@ -80,8 +81,31 @@ function IconTabButton(props: {
 export default function Feed() {
   const [tab, setTab] = useState<TabId>("discovery");
   const navigate = useNavigate();
+  const location = useLocation();
   const { notifications, markRead } = useNotifications({ limit: 12 });
   const unreadCount = notifications.filter((n) => !n.is_read).length;
+  const [statuses, setStatuses] = useState<StatusRow[]>([]);
+
+  useEffect(() => {
+    const qs = new URLSearchParams(location.search);
+    const t = qs.get("tab");
+    if (t === "notifications") setTab("notifications");
+    else if (t === "friends") setTab("friends");
+    else if (t === "similar") setTab("similar");
+    else if (t === "activity") setTab("activity");
+    else if (t === "discovery") setTab("discovery");
+  }, [location.search]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getRecentStatuses(24).then((r) => {
+      if (cancelled) return;
+      setStatuses(r.data ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const placeholderPosts = useMemo(
     () => [
@@ -199,6 +223,25 @@ export default function Feed() {
       <main className="mx-auto w-full max-w-3xl px-4 py-6">
         {tab === "discovery" && (
           <section className="space-y-4">
+            {statuses.length > 0 ? (
+              <div className="rounded-2xl border border-border/80 bg-card/60 p-4 shadow-[var(--shadow-control)]">
+                <p className="text-sm font-semibold">Statuses (24h)</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Fresh updates from the community.
+                </p>
+                <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {statuses.map((s) => (
+                    <div
+                      key={`${s.user_id}-${s.created_at}`}
+                      className="min-w-[15rem] shrink-0 rounded-xl border border-border/70 bg-popover/35 px-3 py-2"
+                    >
+                      <p className="text-sm font-semibold text-foreground truncate">Player</p>
+                      <p className="mt-0.5 text-sm text-muted-foreground line-clamp-2">{s.body}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="rounded-2xl border border-border/80 bg-card/60 p-4 shadow-[var(--shadow-control)]">
               <p className="text-sm font-semibold">Near you</p>
               <p className="mt-1 text-xs text-muted-foreground">

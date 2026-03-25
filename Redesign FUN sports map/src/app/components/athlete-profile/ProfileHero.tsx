@@ -13,6 +13,7 @@ import { formatRelativeShort, isWithinHours } from "../../../lib/formatRelative"
 import { sportEmoji } from "../../../lib/sportVisuals";
 import { ChevronLeft, Pencil } from "lucide-react";
 import { cn } from "../ui/utils";
+import { StarRating } from "../ui/StarRating";
 
 type Props = {
   displayName: string;
@@ -35,6 +36,8 @@ type Props = {
   availability: AvailabilityValue | null;
   verified: boolean;
   sportsmanshipBadge: boolean;
+  rating?: number | null;
+  statusText?: string | null;
   lastGameIso: string | null;
   onBack: () => void;
   /** Opens settings / edit sheet (full profile editor). */
@@ -148,6 +151,8 @@ export function ProfileHero({
   availability,
   verified,
   sportsmanshipBadge,
+  rating,
+  statusText,
   lastGameIso,
   onBack,
   onOpenSettings,
@@ -222,6 +227,13 @@ export function ProfileHero({
               {fallbackInitial}
             </AvatarFallback>
           </Avatar>
+          {statusText?.trim() ? (
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2 max-w-[min(16rem,80vw)]">
+              <div className="rounded-full border border-white/12 bg-black/70 px-3 py-1 text-xs font-semibold text-slate-100 backdrop-blur-md shadow-lg">
+                <span className="truncate block">{statusText.trim()}</span>
+              </div>
+            </div>
+          ) : null}
           {favoriteSport?.trim() ? (
             <span
               className={cn(
@@ -286,9 +298,10 @@ export function ProfileHero({
               )}
             >
               {handle ? (
-                <p className="shrink-0 font-mono text-sm text-slate-500">
-                  @{handle.replace(/^@/, "")}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="shrink-0 font-mono text-sm text-slate-500">@{handle.replace(/^@/, "")}</p>
+                  <StarRating value={rating} size={12} className="shrink-0 text-amber-300/95" />
+                </div>
               ) : null}
               {minimal && bio?.trim() ? (
                 <>
