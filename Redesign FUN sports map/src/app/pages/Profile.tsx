@@ -29,6 +29,46 @@ import { useAuth } from "../contexts/AuthContext";
 import { getAthleteReputation } from "../../lib/endorsements";
 import { getLatestStatus, upsertMyStatus } from "../../lib/status";
 
+class ProfileSettingsErrorBoundary extends React.Component<
+  { onReset: () => void; children: React.ReactNode },
+  { hasError: boolean; message: string }
+> {
+  state = { hasError: false, message: "" };
+
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      hasError: true,
+      message: error instanceof Error ? error.message : "Something went wrong opening settings.",
+    };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("[FUN] Profile settings crashed", error);
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 px-4 text-white">
+        <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0A0F1C] p-4 shadow-2xl">
+          <p className="text-sm font-semibold">Settings failed to open</p>
+          <p className="mt-2 text-xs text-slate-400">{this.state.message}</p>
+          <button
+            type="button"
+            onClick={() => {
+              this.setState({ hasError: false, message: "" });
+              this.props.onReset();
+            }}
+            className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-xl bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/40"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
 export default function Profile() {
   const { user } = useAuth();
   const { displayName, avatarUrl, updateProfile, refetch, athleteProfile, loading } = useMyProfile();
@@ -186,7 +226,10 @@ export default function Profile() {
     <div className="min-h-screen w-full bg-[#0D1117] text-white">
       <ProfileHubHeader
         onBack={() => navigate("/")}
-        onOpenSettings={() => setEditOpen(true)}
+        onOpenSettings={() => {
+          navigate("/profile?settings=1");
+          setEditOpen(true);
+        }}
         notifications={notifications}
         unreadCount={unreadCount}
         onMarkRead={markRead}
@@ -480,32 +523,42 @@ export default function Profile() {
           }}
         />
 
-        <ProfileEditSheet
-          open={editOpen}
-          onOpenChange={setEditOpen}
-          editDisplayName={editDisplayName}
-          onEditDisplayNameChange={setEditDisplayName}
-          currentAvatarUrl={avatarUrl}
-          athleteProfile={athleteProfile}
-          profileLevel={stats?.level ?? 1}
-          profileXp={stats?.xp ?? 0}
-          onSignOut={() => void handleSignOut()}
-          onSaveAthleteProfile={async (next, options) => {
-            let avatar_url: string | undefined;
-            if (options?.avatarFile) {
-              const { url, error: upErr } = await uploadAvatarImage(options.avatarFile);
-              if (upErr) throw new Error(upErr.message);
-              if (url) avatar_url = url;
-            }
-            const err = await updateProfile({
-              display_name: editDisplayName.trim() || null,
-              ...(avatar_url !== undefined ? { avatar_url } : {}),
-              athlete_profile: next,
-            });
-            if (err) throw new Error(err.message);
-            await refetch();
+        <ProfileSettingsErrorBoundary
+          onReset={() => {
+            setEditOpen(false);
+            navigate("/profile", { replace: true });
           }}
-        />
+        >
+          <ProfileEditSheet
+            open={editOpen}
+            onOpenChange={(open) => {
+              setEditOpen(open);
+              if (!open) navigate("/profile", { replace: true });
+            }}
+            editDisplayName={editDisplayName}
+            onEditDisplayNameChange={setEditDisplayName}
+            currentAvatarUrl={avatarUrl}
+            athleteProfile={athleteProfile}
+            profileLevel={stats?.level ?? 1}
+            profileXp={stats?.xp ?? 0}
+            onSignOut={() => void handleSignOut()}
+            onSaveAthleteProfile={async (next, options) => {
+              let avatar_url: string | undefined;
+              if (options?.avatarFile) {
+                const { url, error: upErr } = await uploadAvatarImage(options.avatarFile);
+                if (upErr) throw new Error(upErr.message);
+                if (url) avatar_url = url;
+              }
+              const err = await updateProfile({
+                display_name: editDisplayName.trim() || null,
+                ...(avatar_url !== undefined ? { avatar_url } : {}),
+                athlete_profile: next,
+              });
+              if (err) throw new Error(err.message);
+              await refetch();
+            }}
+          />
+        </ProfileSettingsErrorBoundary>
       </div>
     </div>
   );

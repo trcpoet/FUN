@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Filter, Navigation, MapPinned, X, MessageCircle, Rss, EyeOff, Shield, Globe, Bell, UserRound } from 'lucide-react';
+import { Search, Filter, Navigation, MapPinned, X, MessageCircle, Rss, EyeOff, Shield, Globe, Bell, UserRound, Satellite } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useIsMobile } from './ui/use-mobile';
 import { useNavigate } from "react-router";
@@ -69,6 +69,9 @@ export type TopNavigationProps = {
   onOpenFilters?: () => void;
   /** Open game chat inbox (threads for joined games). */
   onOpenMessages?: () => void;
+  /** Satellite basemap toggle (optional). */
+  satelliteOn?: boolean;
+  onToggleSatellite?: () => void;
   /** Notifications list shown in bell dropdown. */
   notifications?: NotificationRow[];
   /** Unread notification count shown as badge. */
@@ -116,6 +119,8 @@ export const TopNavigation = (props: TopNavigationProps) => {
     onCenterOnUser,
     onOpenFilters,
     onOpenMessages,
+    satelliteOn = false,
+    onToggleSatellite,
     notifications = [],
     notificationsUnreadCount = 0,
     onMarkNotificationRead,
@@ -507,6 +512,26 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   <span className="text-[9px] font-medium text-slate-500 leading-none">Location</span>
                 </div>
               )}
+              {onToggleSatellite ? (
+                <div className="flex flex-col items-center gap-0.5">
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.95 }}
+                    onClick={onToggleSatellite}
+                    className={cn(
+                      "relative",
+                      satelliteOn ? MAP_GLASS_ICON_BTN_SM_EMERALD : MAP_GLASS_ICON_BTN_SM_SKY,
+                    )}
+                    aria-label={satelliteOn ? "Switch to standard map" : "Switch to satellite map"}
+                    title={satelliteOn ? "Standard" : "Satellite"}
+                  >
+                    <Satellite className="w-5 h-5" />
+                  </motion.button>
+                  <span className="text-[9px] font-medium text-slate-500 leading-none">
+                    {satelliteOn ? "Standard" : "Satellite"}
+                  </span>
+                </div>
+              ) : null}
               <div className="flex flex-col items-center gap-0.5">
                 <Popover>
                   <PopoverTrigger asChild>

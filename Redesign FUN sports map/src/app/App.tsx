@@ -147,6 +147,7 @@ export default function App() {
   /** Idle prefetch so opening Messages isn't blocked by cold RPCs. */
   const [gameInboxBootstrap, setGameInboxBootstrap] = useState<GameInboxRow[] | null>(null);
   const [dmInboxBootstrap, setDmInboxBootstrap] = useState<DmInboxRow[] | null>(null);
+  const [satelliteOn, setSatelliteOn] = useState(false);
   const [liveNowOpen, setLiveNowOpen] = useState(false);
   const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
   const lastNearbyIdsRef = useRef<Set<string>>(new Set());
@@ -745,6 +746,7 @@ export default function App() {
           venueSportsFilter={appliedFilters.sports}
           onVenuesFetchLoadingChange={handleVenuesFetchLoading}
           pauseVenueFetch={messagesOpen}
+          mapStyleUrl={satelliteOn ? "mapbox://styles/mapbox/satellite-streets-v12" : null}
           gamePopupRequest={gamePopupRequest}
           onJoinGame={handleJoin}
           onOpenMessagesForGame={handleOpenChatForGame}
@@ -827,6 +829,8 @@ export default function App() {
           setMessengerFocus(null);
           setMessagesOpen(true);
         }}
+        satelliteOn={satelliteOn}
+        onToggleSatellite={() => setSatelliteOn((v) => !v)}
         notifications={notifications}
         notificationsUnreadCount={notifications.filter((n) => !n.is_read).length}
         onMarkNotificationRead={(id) => void markRead(id)}

@@ -144,6 +144,8 @@ type MapboxMapProps = {
   mapMinuteEpoch?: number;
   /** When true, skip starting venue Overpass/DB fetches (e.g. messenger open) so chat APIs get bandwidth. */
   pauseVenueFetch?: boolean;
+  /** Optional basemap style override (e.g. satellite). */
+  mapStyleUrl?: string | null;
 };
 
 export type VenueSelection = {
@@ -186,6 +188,7 @@ export function MapboxMap(props: MapboxMapProps) {
     onVenuesFetchLoadingChange,
     mapMinuteEpoch = 0,
     pauseVenueFetch = false,
+    mapStyleUrl = null,
   } = props;
   const navigate = useNavigate();
   const currentUserId = props.currentUserId ?? null;
@@ -220,6 +223,8 @@ export function MapboxMap(props: MapboxMapProps) {
   const [mapUxHint, setMapUxHint] = useState<string | null>(null);
   /** Bumps when venue GL layers are first created so hover/selection paint expressions apply. */
   const [venueLayerEpoch, setVenueLayerEpoch] = useState(0);
+  const activeStyleUrl = (mapStyleUrl ?? "").trim() || MAP_STYLE_URL;
+  const lastAppliedStyleUrlRef = useRef(activeStyleUrl);
   const venuesFetchCenter = venuesCenter ?? userCoords;
   /** Debounced anchor so rapid search / map moves don’t spam Overpass + Supabase. */
   const [debouncedVenueFetchCenter, setDebouncedVenueFetchCenter] = useState(venuesFetchCenter);
@@ -402,7 +407,7 @@ export function MapboxMap(props: MapboxMapProps) {
       try {
         map = new mapboxgl.default.Map({
           container,
-          style: MAP_STYLE_URL,
+          style: activeStyleUrl,
           center: userCoords ? [userCoords.lng, userCoords.lat] : [-98, 40],
           zoom: 15,
           pitch: enable3D ? 50 : 0,
@@ -422,6 +427,7 @@ export function MapboxMap(props: MapboxMapProps) {
       }
 
       mapRef.current = map;
+      lastAppliedStyleUrlRef.current = activeStyleUrl;
 
       map.on("load", () => {
         if (cancelled || mapRef.current !== map) return;
@@ -478,7 +484,42 @@ export function MapboxMap(props: MapboxMapProps) {
         mapRef.current = null;
       }
     };
-  }, [MAPBOX_TOKEN, enable3D, userCoords]);
+  }, [MAPBOX_TOKEN, activeStyleUrl, enable3D, userCoords]);
+
+  // —— Basemap style toggle (satellite, etc.) ———
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !MAPBOX_TOKEN) return;
+    const prev = lastAppliedStyleUrlRef.current;
+    const next = activeStyleUrl;
+    if (!next || next === prev) return;
+
+    lastAppliedStyleUrlRef.current = next;
+    gameLayersInitedRef.current = false;
+    venueClustersRef.current = [];
+    setMapLoaded(false);
+
+    let cancelled = false;
+    const onStyleLoad = () => {
+      if (cancelled) return;
+      // After setStyle, custom sources/layers are removed; our effects will re-add them.
+      setMapLoaded(true);
+    };
+
+    try {
+      map.once("style.load", onStyleLoad);
+      map.setStyle(next);
+    } catch (_) {
+      setMapLoaded(true);
+    }
+
+    return () => {
+      cancelled = true;
+      try {
+        map.off("style.load", onStyleLoad);
+      } catch (_) {}
+    };
+  }, [MAPBOX_TOKEN, activeStyleUrl]);
 
   // One-time fly to user when coords first become available (avoid fighting search / sport camera)
   useEffect(() => {
