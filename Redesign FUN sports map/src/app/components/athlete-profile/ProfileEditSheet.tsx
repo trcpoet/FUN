@@ -329,7 +329,7 @@ export function ProfileEditSheet({
       <SheetContent
         side="bottom"
         hideCloseButton
-        className="relative flex h-[92vh] flex-col gap-0 overflow-hidden rounded-t-2xl border-white/10 bg-[#0A0F1C] p-0 text-white"
+        className="flex h-[92vh] flex-col gap-0 overflow-hidden rounded-t-2xl border-white/10 bg-[#0A0F1C] p-0 text-white"
       >
         {/* Mobile: Back + Close together; sm+: Close only (Back stays in header next to Preview). */}
         <div
@@ -437,7 +437,7 @@ export function ProfileEditSheet({
           className={cn(
             "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain sm:overflow-hidden",
             /* sm: 4 cols × 6 rows — preview 2×6 | edit panel 2×6 (was 3 cols with menu 1×3 on home). */
-            "sm:grid sm:min-h-0 sm:grid-cols-4 sm:grid-rows-6 sm:items-start sm:gap-x-4 sm:gap-y-0 sm:px-3 sm:pb-2",
+            "sm:grid sm:min-h-0 sm:grid-cols-4 sm:grid-rows-6 sm:gap-x-4 sm:gap-y-0 sm:px-3 sm:pb-2",
           )}
         >
         <div
@@ -605,12 +605,12 @@ export function ProfileEditSheet({
 
         <div
           className={cn(
-            "flex min-h-0 min-w-0 flex-1 flex-col overflow-visible sm:min-h-0 sm:overflow-y-auto",
+            "flex min-w-0 shrink-0 flex-col sm:min-h-0 sm:flex-1 sm:overflow-y-auto",
             "sm:col-span-2 sm:row-span-6 sm:col-start-3",
           )}
         >
 
-        <div className="min-h-0 flex-1 overflow-visible px-0 sm:min-h-0 sm:overflow-y-auto">
+        <div className="px-0 sm:min-h-0 sm:flex-1 sm:overflow-y-auto">
           {/* Home: fill narrow grid column; sub-pages: cap line length for forms */}
           <div
             className={cn(

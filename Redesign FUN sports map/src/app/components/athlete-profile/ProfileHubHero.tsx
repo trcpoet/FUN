@@ -75,13 +75,7 @@ export function ProfileHubHero({
                 {fallbackInitial}
               </AvatarFallback>
             </Avatar>
-            {statusText?.trim() ? (
-              <div className="absolute -top-2 left-1/2 -translate-x-1/2 max-w-[min(16rem,70vw)]">
-                <div className="rounded-full border border-white/12 bg-black/70 px-2.5 py-1 text-[11px] font-semibold text-slate-100 backdrop-blur-md shadow-lg">
-                  <span className="truncate block">{statusText.trim()}</span>
-                </div>
-              </div>
-            ) : null}
+
             {verified ? (
               <span
                 className="absolute bottom-0 right-0 flex size-6 items-center justify-center rounded-full bg-[#00F5FF] shadow-md ring-2 ring-[#161B22]"
@@ -185,13 +179,7 @@ export function ProfileHubHero({
                   {fallbackInitial}
                 </AvatarFallback>
               </Avatar>
-            {statusText?.trim() ? (
-              <div className="absolute -top-2 left-1/2 -translate-x-1/2 max-w-[min(20rem,50vw)]">
-                <div className="rounded-full border border-white/12 bg-black/70 px-3 py-1 text-xs font-semibold text-slate-100 backdrop-blur-md shadow-lg">
-                  <span className="truncate block">{statusText.trim()}</span>
-                </div>
-              </div>
-            ) : null}
+
               {verified ? (
                 <span
                   className="absolute bottom-0.5 right-0.5 flex size-7 items-center justify-center rounded-full bg-[#00F5FF] shadow-md ring-2 ring-[#0D1117]"

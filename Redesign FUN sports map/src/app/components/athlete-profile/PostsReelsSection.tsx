@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { MessageCircle, Heart, Repeat, Share, Grid3X3, PlaySquare, Mail, UserSquare2 } from "lucide-react";
 import type { ActivityPost, HighlightEntry } from "../../../lib/athleteProfile";
 import { HighlightsGrid } from "./HighlightsGrid";
 import { PostGrid, PinnedProfileRibbon } from "./PostGrid";
@@ -17,6 +18,7 @@ type Props = {
   onAddPost: () => void;
   /** Performance Hub layout: Instagram-style tabs + cyan accent. */
   variant?: "default" | "hub";
+  userMeta?: { name?: string; handle?: string; avatarUrl?: string | null };
   className?: string;
 };
 
@@ -127,18 +129,96 @@ function CombinedGrid({
   );
 }
 
-const TABS: { id: ProfileFeedTab; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "posts", label: "Posts" },
-  { id: "reels", label: "Reels" },
+const TABS: { id: ProfileFeedTab; icon: React.ReactNode }[] = [
+  { id: "all", icon: <Grid3X3 className="size-6 sm:size-5" aria-label="All" /> },
+  { id: "posts", icon: <Grid3X3 className="size-6 sm:size-5" aria-label="Posts" /> },
+  { id: "reels", icon: <PlaySquare className="size-6 sm:size-5" aria-label="Reels" /> },
 ];
 
-const HUB_TABS: { id: HubFeedTab; label: string }[] = [
-  { id: "posts", label: "Posts" },
-  { id: "reels", label: "Reels" },
-  { id: "statuses", label: "Statuses" },
-  { id: "tagged", label: "Tagged" },
+const HUB_TABS = [
+  { id: "posts" as HubFeedTab, icon: <Grid3X3 className="size-6 sm:size-5" aria-label="Posts" /> },
+  { id: "reels" as HubFeedTab, icon: <PlaySquare className="size-6 sm:size-5" aria-label="Reels" /> },
+  { id: "statuses" as HubFeedTab, icon: <Mail className="size-6 sm:size-5" aria-label="Statuses" /> },
+  { id: "tagged" as HubFeedTab, icon: <UserSquare2 className="size-6 sm:size-5" aria-label="Tagged" /> },
 ];
+
+function StatusFeedItem({ post, userMeta }: { post: ActivityPost; userMeta?: Props["userMeta"] }) {
+  return (
+    <div className="flex gap-3 px-4 py-3 border-b border-white/[0.08] last:border-0 hover:bg-white/[0.02] transition-colors relative">
+      <div className="shrink-0 pt-0.5">
+        <div className="size-10 rounded-full bg-[#161B22] overflow-hidden ring-1 ring-white/10">
+          {userMeta?.avatarUrl ? (
+            <img src={userMeta.avatarUrl} alt="" className="size-full object-cover" />
+          ) : (
+            <div className="size-full bg-[#161B22] flex items-center justify-center text-slate-400 font-bold text-sm">
+              {userMeta?.name?.[0]?.toUpperCase() || "?"}
+            </div>
+          )}
+        </div>
+      </div>
+      
+      <div className="flex flex-col min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-[14px]">
+          <span className="font-bold text-slate-200 truncate">{userMeta?.name || "Player"}</span>
+          {userMeta?.handle && (
+            <span className="text-slate-500 truncate text-[13px]">@{userMeta.handle}</span>
+          )}
+          <span className="text-slate-600 px-0.5">&middot;</span>
+          <span className="text-slate-500 whitespace-nowrap text-[13px]">{post.timeAgo || "now"}</span>
+        </div>
+        
+        <p className="text-[14px] text-slate-300 mt-0.5 whitespace-pre-wrap leading-snug break-words">
+          {post.caption}
+        </p>
+        
+        <div className="flex items-center justify-between max-w-sm mt-3 text-slate-500 pr-8">
+          <button type="button" className="flex items-center gap-1.5 group hover:text-[#00F5FF] transition-colors" aria-label="Reply">
+            <div className="p-1.5 rounded-full group-hover:bg-[#00F5FF]/10 transition-colors">
+              <MessageCircle className="size-4" />
+            </div>
+            <span className="text-xs">{(post as any).comments || 0}</span>
+          </button>
+          <button type="button" className="flex items-center gap-1.5 group hover:text-emerald-500 transition-colors" aria-label="Repost">
+            <div className="p-1.5 rounded-full group-hover:bg-emerald-500/10 transition-colors">
+              <Repeat className="size-4" />
+            </div>
+          </button>
+          <button type="button" className="flex items-center gap-1.5 group hover:text-rose-500 transition-colors" aria-label="Like">
+            <div className="p-1.5 rounded-full group-hover:bg-rose-500/10 transition-colors">
+              <Heart className="size-4" />
+            </div>
+            <span className="text-xs">{(post as any).likes || 0}</span>
+          </button>
+          <button type="button" className="flex items-center gap-1.5 group hover:text-[#00F5FF] transition-colors" aria-label="Share">
+            <div className="p-1.5 rounded-full group-hover:bg-[#00F5FF]/10 transition-colors">
+              <Share className="size-4" />
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusFeedList({ statuses, userMeta, onAdd }: { statuses: ActivityPost[]; userMeta?: Props["userMeta"]; onAdd: () => void }) {
+  if (statuses.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-white/[0.1] bg-[#161B22]/50 px-4 py-12 text-center text-sm text-slate-500">
+        No statuses yet.
+        <div className="mt-3">
+          <button type="button" onClick={onAdd} className="text-[#00F5FF] hover:underline">Share an update</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-white/[0.08] bg-[#161B22]/30 flex flex-col mb-4 overflow-hidden">
+      {statuses.map((s) => (
+        <StatusFeedItem key={s.id} post={s} userMeta={userMeta} />
+      ))}
+    </div>
+  );
+}
 
 export function PostsReelsSection({
   reels,
@@ -147,6 +227,7 @@ export function PostsReelsSection({
   onAddReel,
   onAddPost,
   variant = "default",
+  userMeta,
   className,
 }: Props) {
   const [tab, setTab] = useState<ProfileFeedTab>("all");
@@ -172,13 +253,13 @@ export function PostsReelsSection({
               type="button"
               onClick={() => setHubTab(t.id)}
               className={cn(
-                "min-w-[5.5rem] flex-1 shrink-0 py-3 text-[11px] font-bold uppercase tracking-wider transition-colors relative sm:min-w-0 sm:text-xs",
+                "flex-1 shrink-0 py-4 flex items-center justify-center transition-colors relative",
                 hubTab === t.id ? "text-[#00F5FF]" : "text-slate-500 hover:text-slate-300",
               )}
             >
-              {t.label}
+              {t.icon}
               {hubTab === t.id && (
-                <span className={cn("absolute bottom-0 left-3 right-3 h-0.5 rounded-full", accent)} aria-hidden />
+                <span className={cn("absolute bottom-0 left-0 right-0 max-w-[4rem] mx-auto h-0.5 rounded-full", accent)} aria-hidden />
               )}
             </button>
           ))}
@@ -197,7 +278,7 @@ export function PostsReelsSection({
           )}
 
           {hubTab === "statuses" && (
-            <PostGrid posts={statusPosts} onAdd={onAddPost} />
+            <StatusFeedList statuses={statusPosts} userMeta={userMeta} onAdd={onAddPost} />
           )}
 
           {hubTab === "tagged" && (
@@ -219,11 +300,11 @@ export function PostsReelsSection({
             type="button"
             onClick={() => setTab(t.id)}
             className={cn(
-              "flex-1 py-3 text-[13px] font-semibold transition-colors relative",
+              "flex-1 py-3 flex items-center justify-center transition-colors relative", // Removed text-related classes
               tab === t.id ? "text-white" : "text-slate-500 hover:text-slate-300"
             )}
           >
-            {t.label}
+            {t.icon} {/* Replaced t.label with t.icon */}
             {tab === t.id && (
               <span className="absolute bottom-0 left-3 right-3 h-[2px] rounded-full bg-white" aria-hidden />
             )}

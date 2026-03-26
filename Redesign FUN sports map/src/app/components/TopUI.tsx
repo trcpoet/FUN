@@ -425,7 +425,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                 </button>
               </div>
             ) : null}
-            <div className="inline-flex items-center rounded-2xl border border-white/12 bg-slate-950/60 p-1 shadow-[var(--shadow-control)] backdrop-blur-md">
+            <div className="inline-flex items-center p-1">
               <button
                 type="button"
                 onClick={() => navigate("/feed")}
@@ -493,52 +493,15 @@ export const TopNavigation = (props: TopNavigationProps) => {
             </button>
           </div>
 
-          {/* Map tools: grouped column — map / alerts / chats (labels clarify icon-only controls) */}
+          {/* Map tools: grouped column — alerts / chats (labels clarify icon-only controls) */}
           <div className="flex flex-col items-end gap-1">
-            <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-500 pr-0.5">Map &amp; alerts</p>
-            <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md flex flex-col items-center gap-1.5">
-              {onCenterOnUser && (
-                <div className="flex flex-col items-center gap-0.5">
-                  <motion.button
-                    type="button"
-                    whileTap={{ scale: 0.95 }}
-                    onClick={onCenterOnUser}
-                    className={MAP_GLASS_ICON_BTN_SM_EMERALD}
-                    aria-label="Center map on my location"
-                    title="Recenter map on you"
-                  >
-                    <Navigation className="w-5 h-5" />
-                  </motion.button>
-                  <span className="text-[9px] font-medium text-slate-500 leading-none">Location</span>
-                </div>
-              )}
-              {onToggleSatellite ? (
-                <div className="flex flex-col items-center gap-0.5">
-                  <motion.button
-                    type="button"
-                    whileTap={{ scale: 0.95 }}
-                    onClick={onToggleSatellite}
-                    className={cn(
-                      "relative",
-                      satelliteOn ? MAP_GLASS_ICON_BTN_SM_EMERALD : MAP_GLASS_ICON_BTN_SM_SKY,
-                    )}
-                    aria-label={satelliteOn ? "Switch to standard map" : "Switch to satellite map"}
-                    title={satelliteOn ? "Standard" : "Satellite"}
-                  >
-                    <Satellite className="w-5 h-5" />
-                  </motion.button>
-                  <span className="text-[9px] font-medium text-slate-500 leading-none">
-                    {satelliteOn ? "Standard" : "Satellite"}
-                  </span>
-                </div>
-              ) : null}
+            <div className="flex flex-col items-center gap-1.5">
               <div className="flex flex-col items-center gap-0.5">
                 <Popover>
                   <PopoverTrigger asChild>
-                    <motion.button
+                    <button
                       type="button"
-                      whileTap={{ scale: 0.95 }}
-                      className={cn("relative", MAP_GLASS_ICON_BTN_SM_SKY)}
+                      className={cn("relative transition-transform active:scale-95", MAP_GLASS_ICON_BTN_SM_SKY)}
                       aria-label="Notifications"
                       title="Alerts"
                     >
@@ -548,7 +511,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                           {notificationsUnreadCount > 9 ? "9+" : notificationsUnreadCount}
                         </span>
                       )}
-                    </motion.button>
+                    </button>
                   </PopoverTrigger>
                   <PopoverContent
                     align="end"
@@ -593,25 +556,63 @@ export const TopNavigation = (props: TopNavigationProps) => {
                     </div>
                   </PopoverContent>
                 </Popover>
-                <span className="text-[9px] font-medium text-slate-500 leading-none">Alerts</span>
               </div>
               {onOpenMessages ? (
                 <div className="flex flex-col items-center gap-0.5">
-                  <motion.button
+                  <button
                     type="button"
-                    whileTap={{ scale: 0.95 }}
                     onClick={onOpenMessages}
-                    className={cn("relative", MAP_GLASS_ICON_BTN_SM_SKY)}
+                    className={cn("relative transition-transform active:scale-95", MAP_GLASS_ICON_BTN_SM_SKY)}
                     aria-label="Game chats"
                     title="Messages"
                   >
                     <MessageCircle className="w-5 h-5" />
-                  </motion.button>
-                  <span className="text-[9px] font-medium text-slate-500 leading-none">Chats</span>
+                  </button>
                 </div>
               ) : null}
             </div>
           </div>
+        </div>
+      </div>
+
+      <div
+        className={cn(
+          "fixed right-4 z-50 flex flex-col items-center gap-2 pointer-events-none transition-all duration-300",
+          liveNowOpen ? "bottom-[230px]" : "bottom-6"
+        )}
+      >
+        <div className="flex flex-col items-center gap-2 pointer-events-auto">
+          {onCenterOnUser && (
+            <div className="flex flex-col items-center gap-0.5">
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.95 }}
+                onClick={onCenterOnUser}
+                className={MAP_GLASS_ICON_BTN_SM_EMERALD}
+                aria-label="Center map on my location"
+                title="Recenter map on you"
+              >
+                <Navigation className="w-5 h-5" />
+              </motion.button>
+            </div>
+          )}
+          {onToggleSatellite ? (
+            <div className="flex flex-col items-center gap-0.5">
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.95 }}
+                onClick={onToggleSatellite}
+                className={cn(
+                  "relative",
+                  satelliteOn ? MAP_GLASS_ICON_BTN_SM_EMERALD : MAP_GLASS_ICON_BTN_SM_SKY,
+                )}
+                aria-label={satelliteOn ? "Switch to standard map" : "Switch to satellite map"}
+                title={satelliteOn ? "Standard" : "Satellite"}
+              >
+                <Satellite className="w-5 h-5" />
+              </motion.button>
+            </div>
+          ) : null}
         </div>
       </div>
 

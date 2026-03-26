@@ -7,9 +7,10 @@ const SPORT_EMOJI: Record<string, string> = {
   Volleyball: "🏐",
   Tennis: "🎾",
   Pickleball: "🏓",
-  Running: "🏃",
   Gym: "🏋️",
   "Martial Arts": "🥋",
+  Wrestling: "🤼",
+  Boxing: "🥊",
   Chess: "♟️",
   Yoga: "🧘",
   Pilates: "🧘‍♀️",
@@ -23,10 +24,27 @@ const SPORT_EMOJI: Record<string, string> = {
 };
 
 export function sportEmojiFor(name: string): string {
+  if (!name) return "🏆";
   if (SPORT_EMOJI[name]) return SPORT_EMOJI[name];
   const lower = name.toLowerCase();
   const hit = Object.keys(SPORT_EMOJI).find((k) => k.toLowerCase() === lower);
-  return hit ? SPORT_EMOJI[hit]! : "🎯";
+  if (hit) return SPORT_EMOJI[hit]!;
+
+  // Keyword fallbacks for unknown sports (like "Pinik Ball" -> "🏐")
+  if (lower.includes("ball")) return "🏐";
+  if (lower.includes("run") || lower.includes("track") || lower.includes("jog")) return "🏃";
+  if (lower.includes("swim") || lower.includes("water") || lower.includes("pool")) return "🏊";
+  if (lower.includes("gym") || lower.includes("lift") || lower.includes("weight")) return "🏋️";
+  if (lower.includes("fight") || lower.includes("box") || lower.includes("mma")) return "🥊";
+  if (lower.includes("bike") || lower.includes("cycl")) return "🚴";
+  if (lower.includes("golf")) return "⛳";
+  if (lower.includes("skat")) return "🛹";
+  if (lower.includes("snow") || lower.includes("ski") || lower.includes("ice")) return "🏂";
+  if (lower.includes("frisbee") || lower.includes("disc")) return "🥏";
+  if (lower.includes("yoga") || lower.includes("stretch")) return "🧘";
+
+  // Generic fallback if no keyword matches
+  return "🏆";
 }
 
 export type SportChoice = { id: SportOption; label: string; icon: string };

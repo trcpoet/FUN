@@ -108,11 +108,11 @@ export default function Profile() {
   }, [editOpen, displayName]);
 
   useEffect(() => {
-    if (openedSettingsRef.current) return;
     const qs = new URLSearchParams(location.search);
     if (qs.get("settings") === "1") {
-      openedSettingsRef.current = true;
       setEditOpen(true);
+    } else {
+      setEditOpen(false);
     }
   }, [location.search]);
 
@@ -317,7 +317,24 @@ export default function Profile() {
             <ProfileComposerCard
               onPhoto={openAddPost}
               onVideo={openAddReel}
-              onStatus={() => setStatusDialogOpen(true)}
+              onSubmitText={async (text) => {
+                const postId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `post-${Date.now()}`;
+                const newPost = { id: postId, caption: text, timeAgo: "now" };
+                const nextProfile = { ...athleteProfile, posts: [newPost, ...(athleteProfile.posts ?? [])] };
+                
+                const err = await updateProfile({ athlete_profile: nextProfile });
+                if (err) {
+                  alert(err.message);
+                  throw new Error(err.message);
+                }
+
+                // Also publish to the global Discover feed
+                await upsertMyStatus(text);
+                
+                setStatusText(text);
+                await refetch();
+                alert("Update posted to your profile and Discovery feed!");
+              }}
             />
 
             <PostsReelsSection
@@ -327,6 +344,11 @@ export default function Profile() {
               pinnedPost={pinnedPost}
               onAddReel={openAddReel}
               onAddPost={openAddPost}
+              userMeta={{
+                name: displayName || undefined,
+                handle: athleteProfile.handle || undefined,
+                avatarUrl: avatarUrl || undefined,
+              }}
             />
           </div>
         )}
@@ -493,9 +515,18 @@ export default function Profile() {
           open={statusDialogOpen}
           onOpenChange={setStatusDialogOpen}
           onSave={async (post) => {
+            const postId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `post-${Date.now()}`;
+            const newPost = { id: postId, caption: post.caption, timeAgo: "now" };
+            const nextProfile = { ...athleteProfile, posts: [newPost, ...(athleteProfile.posts ?? [])] };
+            
+            const profileErr = await updateProfile({ athlete_profile: nextProfile });
+            if (profileErr) throw new Error(profileErr.message);
+
             const err = await upsertMyStatus(post.caption);
             if (err) throw new Error(err.message);
+
             setStatusText(post.caption);
+            await refetch();
           }}
         />
 

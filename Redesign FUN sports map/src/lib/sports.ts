@@ -8,6 +8,8 @@ export const SPORT_OPTIONS = [
   "Running",
   "Gym",
   "Martial Arts",
+  "Wrestling",
+  "Boxing",
   "Chess",
   "Yoga",
   "Pilates",

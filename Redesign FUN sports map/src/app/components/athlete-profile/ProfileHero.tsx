@@ -227,13 +227,7 @@ export function ProfileHero({
               {fallbackInitial}
             </AvatarFallback>
           </Avatar>
-          {statusText?.trim() ? (
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2 max-w-[min(16rem,80vw)]">
-              <div className="rounded-full border border-white/12 bg-black/70 px-3 py-1 text-xs font-semibold text-slate-100 backdrop-blur-md shadow-lg">
-                <span className="truncate block">{statusText.trim()}</span>
-              </div>
-            </div>
-          ) : null}
+
           {favoriteSport?.trim() ? (
             <span
               className={cn(

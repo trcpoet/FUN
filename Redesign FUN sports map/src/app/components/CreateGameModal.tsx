@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { motion, useAnimate } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import { getSportsForPicker, filterSportsByQuery } from "../../lib/sportDisplay";
+import { getSportsForPicker, filterSportsByQuery, sportEmojiFor } from "../../lib/sportDisplay";
 import {
   LEVEL_OPTIONS,
   AGE_RANGE_OPTIONS,
@@ -411,18 +411,37 @@ export function CreateGameModal({
               role="listbox"
               aria-label="Sport options"
             >
-              {filteredSports.length === 0 ? (
-                <p className="text-slate-500 text-xs py-3 text-center">No sports match &quot;{sportQuery}&quot;</p>
-              ) : (
-                filteredSports.map((s) => (
-                  <SportOptionRow
-                    key={s.id}
-                    selected={sport === s.id}
-                    icon={s.icon}
-                    label={s.label}
-                    onSelect={() => setSport(s.id)}
-                  />
-                ))
+              {sportQuery.trim().length > 0 && !ALL_SPORTS.some(s => s.id.toLowerCase() === sportQuery.trim().toLowerCase()) && (
+                <SportOptionRow
+                  selected={sport === sportQuery.trim()}
+                  icon={sportEmojiFor(sportQuery.trim())}
+                  label={`Use custom: "${sportQuery.trim()}"`}
+                  onSelect={() => {
+                    setSport(sportQuery.trim());
+                  }}
+                />
+              )}
+              {sport && !ALL_SPORTS.some(s => s.id === sport) && sport !== sportQuery.trim() && (
+                <SportOptionRow
+                  selected={true}
+                  icon={sportEmojiFor(sport)}
+                  label={sport}
+                  onSelect={() => {}}
+                />
+              )}
+              {filteredSports.map((s) => (
+                <SportOptionRow
+                  key={s.id}
+                  selected={sport === s.id}
+                  icon={s.icon}
+                  label={s.label}
+                  onSelect={() => {
+                    setSport(s.id);
+                  }}
+                />
+              ))}
+              {filteredSports.length === 0 && sportQuery.trim().length === 0 && (
+                <p className="text-slate-500 text-xs py-3 text-center">Type to search sports</p>
               )}
             </div>
           </div>
