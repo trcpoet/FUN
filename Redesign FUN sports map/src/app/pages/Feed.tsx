@@ -225,7 +225,7 @@ export default function Feed() {
           <section className="space-y-4">
             {statuses.length > 0 ? (
               <div className="rounded-2xl border border-border/80 bg-card/60 p-4 shadow-[var(--shadow-control)]">
-                <p className="text-sm font-semibold">Statuses (24h)</p>
+                <p className="text-sm font-semibold">Statuses</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Fresh updates from the community.
                 </p>

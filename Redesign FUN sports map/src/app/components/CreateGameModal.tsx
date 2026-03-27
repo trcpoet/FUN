@@ -134,6 +134,8 @@ export function CreateGameModal({
   const [error, setError] = useState<string | null>(null);
   const [playerPrefsOpen, setPlayerPrefsOpen] = useState(false);
   const [req, setReq] = useState<GameRequirementsPayload>(emptyGameRequirements());
+  const [nearbyGames, setNearbyGames] = useState<any[]>([]);
+  const [showWarning, setShowWarning] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -147,6 +149,8 @@ export function CreateGameModal({
       setError(null);
       setPlayerPrefsOpen(false);
       setReq(emptyGameRequirements());
+      setNearbyGames([]);
+      setShowWarning(false);
     }
   }, [open]);
 
@@ -252,8 +256,32 @@ export function CreateGameModal({
     }
     const startsAt = startDate.toISOString();
 
+    // Check rate limits
     setLoading(true);
     setError(null);
+    const { data: activeCount, error: countErr } = await supabase.rpc("get_active_hosted_games_count");
+    if (!countErr && typeof activeCount === 'number' && activeCount >= 3) {
+      setLoading(false);
+      setError("You've reached your active hosting limit (max 3 at a time). Join existing games!");
+      return;
+    }
+
+    // Check nearby
+    if (!showWarning) {
+      const { data: nearby, error: nearbyErr } = await supabase.rpc("check_nearby_similar_games", {
+        p_sport: sport,
+        p_lat: userCoords.lat,
+        p_lng: userCoords.lng,
+        p_starts_at: startsAt,
+        p_radius_km: 5.0,
+      });
+      if (!nearbyErr && nearby && nearby.length > 0) {
+        setLoading(false);
+        setNearbyGames(nearby);
+        setShowWarning(true);
+        return;
+      }
+    }
 
     const { error: err } = await supabase.rpc("create_game", {
       p_title: title.trim() || "Pickup game",
@@ -744,6 +772,18 @@ export function CreateGameModal({
             <p className="text-sm text-red-400/95" role="alert">
               {error}
             </p>
+          )}
+
+          {showWarning && nearbyGames.length > 0 && (
+            <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 mt-1">
+              <h3 className="text-amber-500 font-semibold mb-1 text-xs">Similar games nearby!</h3>
+              <ul className="text-[11px] text-amber-500/80 mb-2 space-y-1">
+                {nearbyGames.map(g => (
+                  <li key={g.id}>• {g.title} ({g.sport}) starting around {format(new Date(g.starts_at), "h:mm a")}</li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-amber-500">Are you sure you want to create a new game?</p>
+            </div>
           )}
         </div>
 

@@ -2,7 +2,7 @@
 -- Adds RPCs for host rate-limiting and smart-merging overlapping games
 
 -- 1. Host Rate Limiting
--- Returns the number of active games a user has created in the last 7 days.
+-- Returns the number of active games a user has created currently.
 create or replace function public.get_active_hosted_games_count(p_user_id uuid default auth.uid())
 returns int
 language sql
@@ -13,7 +13,8 @@ as $$
   from public.games
   where created_by = coalesce(p_user_id, auth.uid())
     and status in ('open', 'full')
-    and created_at >= (now() - interval '7 days');
+    -- Only count games starting in the future (ignores past ghost games)
+    and (starts_at is null or starts_at >= now());
 $$;
 
 -- 2. Smart Merge (Nearby Similar Games)

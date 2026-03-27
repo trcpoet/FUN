@@ -61,7 +61,7 @@ export function ProfileComposerCard({ onPhoto, onVideo, onSubmitText, className 
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-3">
-        <div className="flex flex-wrap gap-1 text-slate-400 sm:gap-2 md:text-[#00F5FF]">
+        <div className="ml-auto flex flex-wrap gap-1 text-slate-400 sm:gap-2 md:text-[#00F5FF]">
           <button
             type="button"
             onClick={onPhoto}
