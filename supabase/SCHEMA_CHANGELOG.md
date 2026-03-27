@@ -1,5 +1,25 @@
 # Schema changelog
 
+## 2026-03-27 – Performance: Counter caches, spatial indexes, optimized RPCs
+
+**File:** `migrations/20260327000000_performance_optimizations.sql`
+
+### What was added
+
+| Change | Purpose |
+|--------|---------|
+| **`games.participant_count`** | Counter cache updated via trigger on `game_participants`; replaces expensive runtime counts in nearby queries |
+| **`profiles.sportsmanship_avg`** | Aggregate cache for athlete endorsements; updated via trigger on `athlete_endorsements` |
+| **`profile_locations.location_geography`** | `geography(point, 4326)` column with **GIST index**; enables high-performance spatial queries without runtime conversion |
+| **Partial GIST index on `games(location)`** | `WHERE status IN ('open', 'full', 'live')`; speeds up the primary "active games" map search |
+| **Optimized RPCs** | `get_games_nearby`, `get_profiles_nearby`, `get_my_game_inbox` updated to use cached columns and spatial indexes |
+
+### Privacy & Logic Improvements
+
+- **Guest Restrictions:** Both `get_games_nearby` and `get_profiles_nearby` now enforce that the caller must have completed onboarding and is not a guest (`is_anonymous = false`).
+- **Target Filtering:** `get_profiles_nearby` only returns non-anonymous, onboarded users.
+- **Status Consistency:** Updated to reflect the removal of `expires_at` in the `status_updates` table.
+
 ## 2026-03-22 – `create_game` RPC 404 on client
 
 **Symptom:** `POST .../rest/v1/rpc/create_game` returns **404 Not Found**.
