@@ -566,20 +566,20 @@ export default function App() {
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
         <BottomCarousel
           games={liveNowOpen ? liveStripGames : displayGames}
-          selectedGameId={selectedGame?.id ?? null}
+          selectedGame={selectedGame}
           onSelectGame={(g) => {
             setSelectedGame(g);
             if (g) handleOpenGameFromCard(g);
           }}
-          onJoinGame={handleJoinGame}
-          onLeaveGame={handleLeaveGame}
-          onDeleteGame={handleDeleteHostedGame}
-          onStartGame={handleStartHostedGame}
-          onEndGame={handleEndHostedGame}
-          onOpenUserProfile={handleOpenUserProfile}
+          onOpenGame={handleOpenGameFromCard}
           joinedGameIds={joinedGameIds}
-          hostGameIds={hostGameIds}
-          userCoords={userCoords}
+          currentUserId={currentUserId}
+          liveNowOpen={liveNowOpen}
+          mapMinuteEpoch={mapMinuteEpoch}
+          onOpenMessages={() => {
+            setMessengerFocus(null);
+            setMessagesOpen(true);
+          }}
         />
       </div>
 
@@ -603,8 +603,8 @@ export default function App() {
       <FiltersModal
         open={filtersOpen}
         onOpenChange={setFiltersOpen}
-        filters={filtersDraft}
-        onFiltersChange={setFiltersDraft}
+        value={filtersDraft}
+        onChange={setFiltersDraft}
         onApply={() => {
           setAppliedFilters(filtersDraft);
           setFilterApplySync(true);

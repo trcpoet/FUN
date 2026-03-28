@@ -542,13 +542,59 @@ export function ProfileEditSheet({
 
                 {editTab === "athletic" && (
                   <div className={sectionCard("space-y-6 animate-in fade-in slide-in-from-right-4 duration-500")}>
-                    
+
+                    {/* Athlete Specs */}
                     <div className="space-y-4">
-                      <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Combat Attributes</Label>
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Athlete Specs</Label>
+                      <div className="grid grid-cols-2 gap-3">
+                        {[
+                          { label: "Height", key: "height", placeholder: "e.g. 5'10\"" },
+                          { label: "Weight", key: "weight", placeholder: "e.g. 175 lbs" },
+                          { label: "Position", key: "position", placeholder: "e.g. Forward" },
+                          { label: "Play Style", key: "playStyle", placeholder: "e.g. Aggressive" },
+                        ].map(({ label, key, placeholder }) => (
+                          <div key={key} className="p-4 rounded-[28px] bg-white/[0.03] border border-white/5 space-y-2">
+                            <Label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{label}</Label>
+                            <Input
+                              value={
+                                key === "position"
+                                  ? (draft.snapshot?.positions?.[0] ?? "")
+                                  : key === "playStyle"
+                                  ? (draft.snapshot?.playStyle ?? "")
+                                  : key === "height"
+                                  ? (draft.snapshot?.height ?? "")
+                                  : (draft.snapshot?.weight ?? "")
+                              }
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setDraft((d) => ({
+                                  ...d,
+                                  snapshot: {
+                                    ...d.snapshot,
+                                    ...(key === "position"
+                                      ? { positions: val ? [val] : [] }
+                                      : key === "playStyle"
+                                      ? { playStyle: val }
+                                      : key === "height"
+                                      ? { height: val }
+                                      : { weight: val }),
+                                  },
+                                }));
+                              }}
+                              placeholder={placeholder}
+                              className="h-9 rounded-xl bg-white/[0.03] border-white/5 text-white font-black italic uppercase tracking-tighter text-sm"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-white/[0.05] pt-6 space-y-4">
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Skills</Label>
                       {ratings.map((row, idx) => (
                         <div key={`${row.key}-${idx}`} className="space-y-4 p-4 rounded-3xl bg-white/[0.02] border border-white/5">
                           <div className="space-y-2">
-                            <Label className="text-[9px] font-black uppercase tracking-widest text-slate-500 px-1">Attribute Name</Label>
+                            <Label className="text-[9px] font-black uppercase tracking-widest text-slate-500 px-1">Skill Name</Label>
                             <Input
                               value={row.label}
                               onChange={(e) => {
@@ -565,7 +611,7 @@ export function ProfileEditSheet({
                           </div>
                           <div className="space-y-2">
                             <div className="flex justify-between items-center px-1">
-                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Power Level</span>
+                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 px-1">Proficiency Level</span>
                               <span className="text-sm font-black italic text-primary">{row.value}</span>
                             </div>
                             <Slider value={[row.value]} max={100} step={1} variant="game" onValueChange={([n]) => setDraft((d) => {
@@ -709,7 +755,7 @@ export function ProfileEditSheet({
                     disabled={saving}
                     onClick={() => void handleSave()}
                   >
-                    {saving ? "SAVING_PROFILE..." : "FINALIZE_CHANGES"}
+                    {saving ? "SAVING PROFILE . . ." : "FINALIZE CHANGES"}
                   </Button>
                 </div>
               </div>

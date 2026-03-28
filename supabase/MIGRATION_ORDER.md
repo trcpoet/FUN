@@ -39,6 +39,8 @@ Run each file **once**, in this order, in **Supabase → SQL Editor → New quer
 | 13 | `migrations/20250325000000_games_host_delete_rls.sql` ← **Delete hosted game: `DELETE` on `games` where `created_by = auth.uid()`** |
 | 14 | `migrations/20260321000000_games_requirements.sql` ← **`games.requirements` jsonb + `create_game` / `get_games_nearby` include `p_requirements`** |
 | 15 | `migrations/20260327000000_performance_optimizations.sql` ← **Performance: Counter caches, spatial indexes, optimized RPCs** |
+| 16 | `migrations/20260328000000_include_self_on_map.sql` ← **Privacy: Ensure user can always see themselves on map** |
+| 17 | `migrations/20260328000001_fix_self_visibility_staleness.sql` ← **Privacy: Fix self-avatar staleness check** |
 
 If you are unsure what is already applied, run steps 7–9 first for the current app features (athlete profile JSON, game description, chat/roster RPCs). Steps 2–6 are required if your database predates gamification (no `avatar_id`, `games.status`, `complete_game`, etc.).
 

@@ -649,7 +649,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
           
           {/* Favorite Sport Badge Overlay - no background, just the emoji */}
           {favoriteSport && (
-            <div className="absolute -top-1 -right-1 flex items-center justify-center text-2xl drop-shadow-lg z-10 pointer-events-none">
+            <div className="absolute -top-1 -right-1 flex items-center justify-center text-3xl drop-shadow-xl z-10 pointer-events-none">
               {sportEmojiFor(favoriteSport)}
             </div>
           )}
