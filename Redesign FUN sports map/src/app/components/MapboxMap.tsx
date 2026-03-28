@@ -2098,9 +2098,18 @@ export function MapboxMap(props: MapboxMapProps) {
           games={colocatedModalGames}
           viewerCoords={userCoords}
           joinedGameIds={joinedSet}
+          hostGameIds={hostSet}
           onClose={() => setColocatedModalGames(null)}
           onJoinGame={(g) => {
             onJoinGame?.(g);
+            setColocatedModalGames(null);
+          }}
+          onLeaveGame={(g) => {
+            onLeaveGame?.(g);
+            setColocatedModalGames(null);
+          }}
+          onDeleteGame={(g) => {
+            onDeleteHostedGame?.(g);
             setColocatedModalGames(null);
           }}
           onOpenChat={(g) => {

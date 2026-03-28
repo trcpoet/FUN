@@ -475,11 +475,23 @@ export default function App() {
           avatarGlbUrl={avatarGlbUrl}
           use2DAvatar={true}
           currentUserId={currentUserId}
+          joinedGameIds={joinedGameIds}
+          hostGameIds={hostGameIds}
+          onJoinGame={(game) => handleJoinGame(game.id)}
+          onLeaveGame={(game) => handleLeaveGame(game.id)}
+          onDeleteHostedGame={handleDeleteHostedGame}
+          onStartHostedGame={handleStartHostedGame}
+          onEndHostedGame={handleEndHostedGame}
+          onOpenMessagesForGame={(game) => {
+            setMessengerFocus({ kind: "game", gameId: game.id });
+            setMessagesOpen(true);
+          }}
           onVenuesFetchLoadingChange={handleVenuesFetchLoading}
           venueSportsFilter={appliedFilters.sports}
           venueSearchRadiusKm={gamesRadiusKm}
           mapMinuteEpoch={mapMinuteEpoch}
           pauseVenueFetch={messagesOpen}
+          mapStyleUrl={satelliteOn ? "mapbox://styles/mapbox/satellite-streets-v12" : null}
         />
       </Suspense>
 
@@ -574,14 +586,18 @@ export default function App() {
       <GameMessengerSheet
         open={messagesOpen}
         onOpenChange={setMessagesOpen}
-        focus={messengerFocus}
-        onFocusChange={setMessengerFocus}
+        focusThread={messengerFocus}
+        onFocusThreadChange={setMessengerFocus}
+        currentUserId={currentUserId}
+        ensureSession={ensureSession}
         joinedGameIds={joinedGameIds}
-        onLeaveGame={handleLeaveGame}
-        bootstrapGameInbox={gameInboxBootstrap}
-        bootstrapDmInbox={dmInboxBootstrap}
-        onOpenUserProfile={handleOpenUserProfile}
-        onCenterOnCoords={handleCenterOnCoords}
+        onLeaveThread={handleLeaveGame}
+        inboxBootstrap={gameInboxBootstrap}
+        dmInboxBootstrap={dmInboxBootstrap}
+        onSelectGameOnMap={(gameId) => {
+          const game = games.find((g) => g.id === gameId);
+          if (game) handleCenterOnCoords({ lat: game.lat, lng: game.lng });
+        }}
       />
 
       <FiltersModal
@@ -600,13 +616,13 @@ export default function App() {
       <CreateGameModal
         open={createGameOpen}
         onOpenChange={setCreateGameOpen}
-        initialCoords={createGameCoords}
-        initialLocationLabel={createGameLocationLabel}
+        userCoords={createGameCoords ?? effectiveUserCoords}
+        locationLabel={createGameLocationLabel}
         anchorPoint={createGameAnchorPoint}
-        onCreated={(gameId) => {
+        onSuccess={() => {
           setCreateGameOpen(false);
           refetchGames();
-          reloadJoinedGameIds();
+          void reloadJoinedGameIds();
         }}
       />
     </div>

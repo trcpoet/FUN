@@ -183,11 +183,14 @@ export function formatLiveStripCardSummary(game: GameRow, nowMs: number): string
   return spots;
 }
 
-/** Map + carousels: only scheduled games (trust & clarity). Completed/cancelled excluded. */
+/** Map + carousels: scheduled games plus untimed games within their TTL. Completed/cancelled excluded. */
 export function filterGamesVisibleOnMap(games: GameRow[], nowMs: number): GameRow[] {
   return games.filter((g) => {
     if (g.status === "completed" || g.status === "cancelled") return false;
-    return Boolean(g.starts_at?.trim());
+    if (g.starts_at?.trim()) return true;
+    // Untimed pickup games: show for MAP_UNTIMED_TTL_MS after creation
+    const created = new Date(g.created_at).getTime();
+    return nowMs - created <= MAP_UNTIMED_TTL_MS;
   });
 }
 

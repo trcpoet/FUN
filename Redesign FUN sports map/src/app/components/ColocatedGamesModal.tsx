@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { X, MapPin, ChevronRight, MessageCircle, Share2 } from "lucide-react";
+import { X, MapPin, ChevronRight, MessageCircle, Share2, Trash2, LogOut } from "lucide-react";
 import { format } from "date-fns";
 import type { GameRow } from "../../lib/supabase";
 import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";
@@ -9,8 +9,11 @@ type ColocatedGamesModalProps = {
   games: GameRow[];
   viewerCoords?: { lat: number; lng: number } | null;
   joinedGameIds?: Set<string>;
+  hostGameIds?: Set<string>;
   onClose: () => void;
   onJoinGame?: (game: GameRow) => void;
+  onLeaveGame?: (game: GameRow) => void;
+  onDeleteGame?: (game: GameRow) => void;
   onOpenChat?: (game: GameRow) => void;
 };
 
@@ -33,8 +36,11 @@ export function ColocatedGamesModal({
   games,
   viewerCoords,
   joinedGameIds = new Set(),
+  hostGameIds = new Set(),
   onClose,
   onJoinGame,
+  onLeaveGame,
+  onDeleteGame,
   onOpenChat,
 }: ColocatedGamesModalProps) {
   const [expandedSport, setExpandedSport] = useState<string | null>(null);
@@ -160,36 +166,61 @@ export function ColocatedGamesModal({
                     <ul className="border-t border-white/[0.06] bg-black/20 px-2 py-2 space-y-2">
                       {list.map((g) => {
                         const joined = joinedGameIds.has(g.id);
+                        const isHost = hostGameIds.has(g.id);
                         return (
                           <li
                             key={g.id}
                             className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2.5 py-2.5"
                           >
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm text-slate-100 truncate">{g.title || "Pickup game"}</p>
+                              <p className="text-sm text-slate-100 truncate">
+                                {g.title || "Pickup game"}
+                                {isHost && <span className="ml-1.5 text-[10px] text-amber-400 font-semibold">HOST</span>}
+                              </p>
                               <p className="text-[11px] text-slate-500">
                                 {g.starts_at ? format(new Date(g.starts_at), "MMM d · h:mm a") : "—"}
                               </p>
                             </div>
-                            {joined ? (
-                              <button
-                                type="button"
-                                onClick={() => onOpenChat?.(g)}
-                                className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal-600/90 hover:bg-teal-500 text-white text-xs font-medium"
-                              >
-                                <MessageCircle className="w-3.5 h-3.5" />
-                                Chat
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => onJoinGame?.(g)}
-                                className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-white text-xs font-medium"
-                              >
-                                Join
-                                <ChevronRight className="w-3.5 h-3.5 opacity-80" />
-                              </button>
-                            )}
+                            <div className="shrink-0 flex items-center gap-1.5">
+                              {joined && (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenChat?.(g)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal-600/90 hover:bg-teal-500 text-white text-xs font-medium"
+                                >
+                                  <MessageCircle className="w-3.5 h-3.5" />
+                                  Chat
+                                </button>
+                              )}
+                              {isHost ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteGame?.(g)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-700/80 hover:bg-red-600 text-white text-xs font-medium"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  Delete
+                                </button>
+                              ) : joined ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onLeaveGame?.(g)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium"
+                                >
+                                  <LogOut className="w-3.5 h-3.5" />
+                                  Leave
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => onJoinGame?.(g)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-white text-xs font-medium"
+                                >
+                                  Join
+                                  <ChevronRight className="w-3.5 h-3.5 opacity-80" />
+                                </button>
+                              )}
+                            </div>
                           </li>
                         );
                       })}
