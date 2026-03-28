@@ -445,6 +445,12 @@ export default function App() {
           onSelectVenue={setSelectedVenue}
           mapCameraRequest={mapCameraRequest}
           gamePopupRequest={gamePopupRequest}
+          onMapDoubleClick={(lat, lng, viewportPoint) => {
+            setCreateGameCoords({ lat, lng });
+            setCreateGameAnchorPoint(viewportPoint ?? null);
+            setCreateGameLocationLabel(null);
+            setCreateGameOpen(true);
+          }}
           onCreateGameAtVenue={(venue, viewportPoint) => {
             setCreateGameCoords({ lat: venue.center.lat, lng: venue.center.lng });
             setCreateGameAnchorPoint(viewportPoint ?? null);
