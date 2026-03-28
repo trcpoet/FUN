@@ -1505,9 +1505,9 @@ export function MapboxMap(props: MapboxMapProps) {
     playerMarkersRef.current = [];
     playerMarkerEntriesRef.current = [];
 
-    // Ensure our own profile is included in the markers if nearbyProfiles doesn't have it
+    // Exclude self — the dedicated self-avatar marker already shows the current user
     const others = [...nearbyProfiles].filter(
-      (p) => Number.isFinite(p.lng) && Number.isFinite(p.lat)
+      (p) => Number.isFinite(p.lng) && Number.isFinite(p.lat) && p.profile_id !== currentUserId
     );
 
     loadMapboxGl().then((mapboxgl) => {
