@@ -1,11 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bell, Compass, Globe, HeartPulse, PenSquare, Sparkles, Users } from "lucide-react";
+import { 
+  Bell, 
+  Compass, 
+  Globe, 
+  HeartPulse, 
+  PenSquare, 
+  Sparkles, 
+  Users, 
+  Search, 
+  ChevronRight,
+  TrendingUp,
+  MapPin,
+  Flame
+} from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { cn } from "../components/ui/utils";
 import { Button } from "../components/ui/button";
 import { ActivityFeed } from "../components/athlete-profile/ActivityFeed";
 import { useNotifications } from "../../hooks/useNotifications";
 import { getRecentStatuses, type StatusRow } from "../../lib/status";
+import { useMyProfile } from "../../hooks/useMyProfile";
+import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
+import { Badge } from "../components/ui/badge";
+import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 
 function notificationLabel(n: { type: string; payload?: unknown }): string {
   if (n.type === "badge_earned") {
@@ -36,44 +53,14 @@ function TabButton(props: {
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-semibold transition-colors",
+        "relative flex items-center gap-2 rounded-2xl px-4 py-2 text-xs font-bold uppercase tracking-widest transition-all duration-300",
         active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border/80 bg-card/50 text-muted-foreground hover:bg-accent hover:text-foreground"
+          ? "bg-primary text-white shadow-[0_8px_16px_-4px_rgba(225,29,72,0.4)] scale-105 z-10"
+          : "bg-white/[0.03] text-muted-foreground border border-white/5 hover:bg-white/[0.08] hover:text-white"
       )}
     >
-      <Icon className="size-4" />
+      <Icon className={cn("size-3.5", active && "animate-pulse")} />
       {label}
-    </button>
-  );
-}
-
-function IconTabButton(props: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-  icon: React.ComponentType<{ className?: string }>;
-  unreadDot?: boolean;
-}) {
-  const { active, label, onClick, icon: Icon, unreadDot } = props;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "relative inline-flex size-10 items-center justify-center rounded-full border transition-colors",
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border/80 bg-card/50 text-muted-foreground hover:bg-accent hover:text-foreground",
-        "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-      )}
-      aria-label={label}
-      title={label}
-    >
-      <Icon className="size-5" />
-      {unreadDot ? (
-        <span className="absolute right-2 top-2 size-2 rounded-full bg-rose-500 ring-2 ring-background" />
-      ) : null}
     </button>
   );
 }
@@ -83,6 +70,7 @@ export default function Feed() {
   const navigate = useNavigate();
   const location = useLocation();
   const { notifications, markRead } = useNotifications({ limit: 12 });
+  const { displayName, avatarUrl } = useMyProfile();
   const unreadCount = notifications.filter((n) => !n.is_read).length;
   const [statuses, setStatuses] = useState<StatusRow[]>([]);
 
@@ -111,7 +99,7 @@ export default function Feed() {
     () => [
       {
         id: "p1",
-        caption: "Morning run + mobility. Feeling fast today.",
+        caption: "Morning run + mobility. Feeling fast today. ⚡",
         timeAgo: "2h ago",
         likes: 12,
         comments: 2,
@@ -120,7 +108,7 @@ export default function Feed() {
       },
       {
         id: "p2",
-        caption: "Looking for a pickup squad tonight — who’s in?",
+        caption: "Looking for a pickup squad tonight — who’s in? 🏀",
         timeAgo: "Yesterday",
         likes: 7,
         comments: 1,
@@ -132,47 +120,73 @@ export default function Feed() {
   );
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-[60] border-b border-border/70 bg-background/60 backdrop-blur-xl">
-        <div className="w-full px-4 py-4">
-          {/* 3-column wrapper: keep globe left, title truly centered (right column is equal-width spacer). */}
-          <div className="grid grid-cols-[2.5rem_1fr_2.5rem] items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate("/")}
-              className="header-map-btn flex size-9 shrink-0 items-center justify-center rounded-full text-[#00F5FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00F5FF]/50"
-              aria-label="Back to map"
-              title="Back to map"
-            >
-              <Globe className="size-5" aria-hidden />
-            </button>
+    <div className="min-h-screen bg-[#050505] text-foreground selection:bg-primary selection:text-white">
+      {/* Dynamic Background Elements */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-[10%] -left-[10%] size-[40%] rounded-full bg-primary/10 blur-[120px]" />
+        <div className="absolute top-[20%] -right-[5%] size-[30%] rounded-full bg-blue-500/5 blur-[100px]" />
+      </div>
 
-            <div className="flex min-w-0 justify-center text-center">
-              <div className="w-full max-w-3xl min-w-0">
-                <h1 className="text-lg font-semibold tracking-tight">Feed</h1>
-                <p className="text-xs text-muted-foreground">
-                  Your city’s pickup pulse — games, players, and moments.
-                </p>
+      <header className="sticky top-0 z-[60] border-b border-white/[0.05] bg-black/60 backdrop-blur-2xl">
+        <div className="mx-auto max-w-3xl w-full px-4 pt-6 pb-4">
+          <div className="flex items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => navigate("/")}
+                className="flex size-10 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-primary transition-all hover:bg-primary hover:text-white hover:scale-110 active:scale-95"
+                aria-label="Back to map"
+              >
+                <Globe className="size-5" />
+              </button>
+              <div>
+                <h1 className="text-2xl font-black italic tracking-tighter uppercase text-white leading-none">
+                  Discovery
+                </h1>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pulse Active</span>
+                </div>
               </div>
             </div>
 
-            {/* Spacer (matches left column width) */}
-            <div />
+            <div className="flex items-center gap-2">
+              <button 
+                className="flex size-10 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-muted-foreground hover:text-white hover:bg-white/[0.08] transition-all"
+                aria-label="Search"
+              >
+                <Search className="size-5" />
+              </button>
+              <button 
+                onClick={() => setTab("notifications")}
+                className={cn(
+                  "relative flex size-10 items-center justify-center rounded-2xl transition-all",
+                  tab === "notifications" 
+                    ? "bg-primary text-white" 
+                    : "bg-white/[0.03] border border-white/5 text-muted-foreground hover:text-white hover:bg-white/[0.08]"
+                )}
+              >
+                <Bell className="size-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-rose-600 text-[10px] font-black ring-2 ring-black">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div className="mx-auto w-full max-w-3xl px-4 pb-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-2">
+          <ScrollArea className="w-full whitespace-nowrap">
+            <div className="flex w-max space-x-3 pb-2">
               <TabButton
                 active={tab === "discovery"}
-                label="Discovery"
+                label="Explore"
                 icon={Compass}
                 onClick={() => setTab("discovery")}
               />
               <TabButton
                 active={tab === "activity"}
-                label="Activity"
+                label="Feed"
                 icon={HeartPulse}
                 onClick={() => setTab("activity")}
               />
@@ -184,156 +198,193 @@ export default function Feed() {
               />
               <TabButton
                 active={tab === "friends"}
-                label="Friends"
+                label="Following"
                 icon={Sparkles}
                 onClick={() => setTab("friends")}
               />
-
-              <IconTabButton
-                active={tab === "notifications"}
-                label="Notifications"
-                icon={Bell}
-                unreadDot={unreadCount > 0}
-                onClick={() => setTab("notifications")}
-              />
             </div>
-
-            {/* New post icon (right) */}
-            <button
-              type="button"
-              onClick={() => {
-                // Placeholder: wire to post composer when ready.
-              }}
-              className={cn(
-                "inline-flex size-10 items-center justify-center rounded-full",
-                "border border-border/80 bg-card/50 text-muted-foreground",
-                "hover:bg-accent hover:text-foreground",
-                "transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
-                "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-              )}
-              aria-label="New post"
-              title="New post"
-            >
-              <PenSquare className="size-5" />
-            </button>
-          </div>
+            <ScrollBar orientation="horizontal" className="opacity-0" />
+          </ScrollArea>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl px-4 py-6">
+      <main className="relative mx-auto w-full max-w-3xl px-4 py-8 pb-32">
         {tab === "discovery" && (
-          <section className="space-y-4">
-            {statuses.length > 0 ? (
-              <div className="rounded-2xl border border-border/80 bg-card/60 p-4 shadow-[var(--shadow-control)]">
-                <p className="text-sm font-semibold">Statuses</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Fresh updates from the community.
-                </p>
-                <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {statuses.map((s) => (
-                    <div
-                      key={`${s.user_id}-${s.created_at}`}
-                      className="min-w-[15rem] shrink-0 rounded-xl border border-border/70 bg-popover/35 px-3 py-2"
-                    >
-                      <p className="text-sm font-semibold text-foreground truncate">Player</p>
-                      <p className="mt-0.5 text-sm text-muted-foreground line-clamp-2">{s.body}</p>
+          <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Statuses Strip */}
+            {statuses.length > 0 && (
+              <section className="space-y-4">
+                <div className="flex items-center justify-between px-1">
+                  <div className="flex items-center gap-2">
+                    <div className="flex size-8 items-center justify-center rounded-xl bg-orange-500/10 text-orange-500">
+                      <TrendingUp className="size-4" />
                     </div>
-                  ))}
+                    <h2 className="text-sm font-black uppercase tracking-widest text-white">Live Updates</h2>
+                  </div>
+                  <button className="text-[10px] font-bold uppercase tracking-widest text-primary hover:underline">View All</button>
                 </div>
+                
+                <ScrollArea className="w-full">
+                  <div className="flex space-x-4 pb-4">
+                    {statuses.map((s, i) => (
+                      <div
+                        key={`${s.user_id}-${i}`}
+                        className="group relative w-[240px] shrink-0 overflow-hidden rounded-3xl border border-white/[0.08] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04] hover:border-primary/20"
+                      >
+                        <div className="flex items-center gap-3 mb-4">
+                          <Avatar className="size-10 border border-white/10 ring-2 ring-black/50">
+                            <AvatarFallback className="bg-primary/20 text-primary font-bold text-xs uppercase">PL</AvatarFallback>
+                          </Avatar>
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-white leading-none">Athlete</span>
+                            <span className="text-[9px] font-medium text-muted-foreground mt-1 uppercase tracking-tighter">Nearby</span>
+                          </div>
+                        </div>
+                        <p className="text-sm font-medium text-slate-300 leading-relaxed line-clamp-3 italic">
+                          "{s.body}"
+                        </p>
+                        <div className="absolute bottom-2 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-primary">Join Game</span>
+                          <ChevronRight className="size-3 text-primary" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <ScrollBar orientation="horizontal" className="hidden" />
+                </ScrollArea>
+              </section>
+            )}
+
+            {/* Recommendations Grid */}
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 px-1">
+                <div className="flex size-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Flame className="size-4" />
+                </div>
+                <h2 className="text-sm font-black uppercase tracking-widest text-white">Hot Picks</h2>
               </div>
-            ) : null}
-            <div className="rounded-2xl border border-border/80 bg-card/60 p-4 shadow-[var(--shadow-control)]">
-              <p className="text-sm font-semibold">Near you</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                The best next play, based on distance, timing, and vibes.
-              </p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-border/70 bg-popover/35 p-3">
-                  <p className="text-sm font-semibold">Recommended games</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Your next run, rally, or rival — picked for you.
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-popover/35 p-3">
-                  <p className="text-sm font-semibold">Popular venues</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Courts and pitches where the energy’s already up.
-                  </p>
-                </div>
+              
+              <div className="grid gap-4 sm:grid-cols-2">
+                <button className="group relative h-48 overflow-hidden rounded-[32px] border border-white/[0.08] bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-[0_20px_40px_-15px_rgba(225,29,72,0.15)]">
+                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity">
+                    <Compass className="size-24 -rotate-12" />
+                  </div>
+                  <div className="relative h-full flex flex-col justify-between">
+                    <div>
+                      <Badge className="bg-primary/20 text-primary border-none text-[9px] font-black uppercase tracking-[0.2em] mb-3">AI Choice</Badge>
+                      <h3 className="text-xl font-black italic tracking-tighter text-white uppercase leading-none">Recommended<br/>Games</h3>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground group-hover:text-white transition-colors">
+                      Explore Personalized Runs <ChevronRight className="size-4 text-primary" />
+                    </div>
+                  </div>
+                </button>
+
+                <button className="group relative h-48 overflow-hidden rounded-[32px] border border-white/[0.08] bg-card p-6 text-left transition-all hover:border-blue-500/40 hover:shadow-[0_20px_40px_-15px_rgba(37,99,235,0.15)]">
+                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity">
+                    <MapPin className="size-24 -rotate-12 text-blue-500" />
+                  </div>
+                  <div className="relative h-full flex flex-col justify-between">
+                    <div>
+                      <Badge className="bg-blue-500/20 text-blue-500 border-none text-[9px] font-black uppercase tracking-[0.2em] mb-3">Trending</Badge>
+                      <h3 className="text-xl font-black italic tracking-tighter text-white uppercase leading-none">Popular<br/>Venues</h3>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground group-hover:text-white transition-colors">
+                      See where the energy is <ChevronRight className="size-4 text-blue-500" />
+                    </div>
+                  </div>
+                </button>
               </div>
-            </div>
-          </section>
+            </section>
+          </div>
         )}
 
         {tab === "activity" && (
-          <ActivityFeed
-            posts={placeholderPosts as any}
-            pinnedFallback={{ title: "No pinned post yet", subtitle: "Pin availability, city, or training goals." }}
-          />
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <ActivityFeed
+              posts={placeholderPosts as any}
+              pinnedFallback={{ 
+                title: "No pinned post yet", 
+                subtitle: "Pin availability, city, or training goals to stand out." 
+              }}
+              userMeta={{
+                displayName: displayName ?? "Athlete",
+                avatarUrl: avatarUrl ?? undefined
+              }}
+            />
+          </div>
         )}
 
         {tab === "similar" && (
-          <section className="space-y-3">
-            <div className="rounded-2xl border border-border/80 bg-card/60 p-4 shadow-[var(--shadow-control)]">
-              <p className="text-sm font-semibold">Similar players</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Find your people: teammates, rivals, and regulars.
-              </p>
+          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 text-center py-20">
+            <div className="size-20 bg-white/[0.03] border border-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Users className="size-8 text-muted-foreground" />
             </div>
+            <h2 className="text-xl font-black italic uppercase text-white mb-2">Finding Rivals</h2>
+            <p className="text-sm text-muted-foreground max-w-xs mx-auto">We're scanning the city for athletes that match your vibe and skill level.</p>
           </section>
         )}
 
         {tab === "friends" && (
-          <section className="space-y-3">
-            <div className="rounded-2xl border border-border/80 bg-card/60 p-4 shadow-[var(--shadow-control)]">
-              <p className="text-sm font-semibold">Friends posts</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                What your crew’s up to — highlights, invites, and “who’s in?” posts.
-              </p>
+          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 text-center py-20">
+            <div className="size-20 bg-white/[0.03] border border-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Sparkles className="size-8 text-muted-foreground" />
             </div>
+            <h2 className="text-xl font-black italic uppercase text-white mb-2">Following</h2>
+            <p className="text-sm text-muted-foreground max-w-xs mx-auto">Updates from your squad will appear here. Start following players from the map!</p>
           </section>
         )}
 
         {tab === "notifications" && (
-          <section className="space-y-3">
-            <div className="rounded-2xl border border-border/80 bg-card/60 p-4 shadow-[var(--shadow-control)]">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold">Notifications</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Quick hits — tap to jump to the profile.
-                  </p>
-                </div>
-                {unreadCount > 0 ? (
-                  <span className="rounded-full border border-border/70 bg-background/40 px-2 py-1 text-xs font-semibold tabular-nums text-foreground">
-                    {unreadCount} unread
-                  </span>
-                ) : null}
+          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-4">
+             <div className="flex items-center justify-between px-2 mb-6">
+              <div className="space-y-1">
+                <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                  Alerts
+                </h2>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">Stay updated</p>
               </div>
+              {unreadCount > 0 && (
+                <Badge className="bg-rose-500/20 text-rose-500 border-none font-black tabular-nums">{unreadCount} NEW</Badge>
+              )}
+            </div>
 
-              <div className="mt-3 overflow-hidden rounded-xl border border-border/70 bg-background/30">
-                <ul className="max-h-[22rem] overflow-y-auto py-1">
-                  {notifications.length === 0 ? (
-                    <li className="px-3 py-10 text-center text-sm text-muted-foreground">
-                      You&apos;re all caught up.
-                    </li>
-                  ) : (
-                    notifications.map((n) => (
-                      <li key={n.id}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!n.is_read) markRead(n.id);
-                            const actorId = notificationActorUserId(n.payload);
-                            if (actorId) navigate(`/athlete/${actorId}`);
-                          }}
-                          className={cn(
-                            "flex w-full flex-col gap-0.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent/60",
-                            !n.is_read && "bg-primary/10",
-                          )}
-                        >
-                          <span className="text-foreground/90">{notificationLabel(n)}</span>
-                          <span className="text-[11px] text-muted-foreground">
+            <div className="overflow-hidden rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md">
+              <ul className="divide-y divide-white/[0.05]">
+                {notifications.length === 0 ? (
+                  <li className="px-6 py-20 text-center flex flex-col items-center gap-4">
+                    <div className="size-16 rounded-full bg-white/[0.03] flex items-center justify-center">
+                      <Bell className="size-6 text-slate-700" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-slate-300 uppercase tracking-widest">Clear Skies</p>
+                      <p className="text-xs text-slate-500">You're all caught up for now.</p>
+                    </div>
+                  </li>
+                ) : (
+                  notifications.map((n) => (
+                    <li key={n.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!n.is_read) markRead(n.id);
+                          const actorId = notificationActorUserId(n.payload);
+                          if (actorId) navigate(`/athlete/${actorId}`);
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-4 px-6 py-5 text-left transition-all hover:bg-white/[0.03]",
+                          !n.is_read && "bg-primary/[0.03] relative",
+                        )}
+                      >
+                        {!n.is_read && (
+                          <div className="absolute left-2 top-1/2 -translate-y-1/2 size-1.5 rounded-full bg-primary" />
+                        )}
+                        <div className="size-10 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-center shrink-0">
+                          {n.type === "badge_earned" ? <Sparkles className="size-5 text-amber-500" /> : <HeartPulse className="size-5 text-primary" />}
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm font-bold text-white tracking-tight">{notificationLabel(n)}</span>
+                          <span className="text-[10px] text-muted-foreground mt-1 uppercase tracking-tighter">
                             {new Date(n.created_at).toLocaleString(undefined, {
                               month: "short",
                               day: "numeric",
@@ -341,17 +392,31 @@ export default function Feed() {
                               minute: "2-digit",
                             })}
                           </span>
-                        </button>
-                      </li>
-                    ))
-                  )}
-                </ul>
-              </div>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground ml-auto" />
+                      </button>
+                    </li>
+                  ))
+                )}
+              </ul>
             </div>
           </section>
         )}
       </main>
+
+      {/* Persistent Action Bar */}
+      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[70] w-full max-w-xs px-4">
+        <button
+          type="button"
+          onClick={() => {
+            // Wire to post composer
+          }}
+          className="flex w-full items-center justify-center gap-3 rounded-[32px] bg-primary px-8 py-5 text-sm font-black uppercase italic tracking-tighter text-white shadow-[0_20px_40px_-10px_rgba(225,29,72,0.4)] transition-all hover:scale-105 active:scale-95 group"
+        >
+          <PenSquare className="size-5 group-hover:rotate-12 transition-transform" />
+          Post Update
+        </button>
+      </div>
     </div>
   );
 }
-

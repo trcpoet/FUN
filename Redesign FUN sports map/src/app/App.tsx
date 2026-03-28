@@ -130,8 +130,6 @@ export default function App() {
   const { notifications, markRead } = useNotifications({ limit: 10 });
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [locationVisibility, setLocationVisibility] = useState<LocationVisibilityMode>(() => readLocationVisibility());
-  const [toast, setToast] = useState<{ id: string; message: string; type: string } | null>(null);
-  const toastShownIds = useRef<Set<string>>(new Set());
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
   const [selectedVenue, setSelectedVenue] = useState<VenueSelection | null>(null);
   const [gamePopupRequest, setGamePopupRequest] = useState<{ nonce: number; gameId: string } | null>(null);
@@ -150,102 +148,15 @@ export default function App() {
   const [satelliteOn, setSatelliteOn] = useState(false);
   const [liveNowOpen, setLiveNowOpen] = useState(false);
   const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
-  const lastNearbyIdsRef = useRef<Set<string>>(new Set());
-  const lastProxNotifAtRef = useRef<number>(0);
 
-  const canFireProximityNotif = useCallback((): boolean => {
-    try {
-      const key = "fun_prox_notifs_v1";
-      const raw = localStorage.getItem(key);
-      const now = Date.now();
-      const dayMs = 24 * 60 * 60 * 1000;
-      const ts: number[] = raw ? (JSON.parse(raw) as number[]) : [];
-      const recent = ts.filter((t) => typeof t === "number" && now - t < dayMs);
-      if (recent.length >= 3) return false;
-      // also avoid bursts (even within the cap)
-      if (now - lastProxNotifAtRef.current < 60_000) return false;
-      recent.push(now);
-      localStorage.setItem(key, JSON.stringify(recent));
-      lastProxNotifAtRef.current = now;
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
-
-  const distMeters = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
-    const R = 6371000;
-    const toRad = (d: number) => (d * Math.PI) / 180;
-    const dLat = toRad(b.lat - a.lat);
-    const dLng = toRad(b.lng - a.lng);
-    const sLat = Math.sin(dLat / 2);
-    const sLng = Math.sin(dLng / 2);
-    const x = sLat * sLat + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sLng * sLng;
-    return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
-  };
-
-  // Proximity notifications (top 3 signals, hard-capped)
+  // Sync user location to DB so avatar shows up on map
   useEffect(() => {
-    if (!userCoords) return;
-    if (!nearbyProfiles) return;
-    const prev = lastNearbyIdsRef.current;
-    const next = new Set(nearbyProfiles.map((p) => p.profile_id));
-    lastNearbyIdsRef.current = next;
-
-    const prevCount = prev.size;
-    const nextCount = next.size;
-    const newCount = nearbyProfiles.filter((p) => !prev.has(p.profile_id)).length;
-
-    // 1) First players nearby
-    if (prevCount === 0 && nextCount > 0) {
-      if (canFireProximityNotif()) {
-        setToast({
-          id: `prox-nearby-${Date.now()}`,
-          type: "info",
-          message: `${Math.min(99, nextCount)} player${nextCount === 1 ? "" : "s"} near you right now`,
-        });
-      }
-      return;
-    }
-
-    // 2) A new player appeared near you
-    if (newCount > 0) {
-      if (canFireProximityNotif()) {
-        setToast({
-          id: `prox-new-${Date.now()}`,
-          type: "info",
-          message: `New player nearby (+${Math.min(9, newCount)})`,
-        });
-      }
-      return;
-    }
-
-    // 3) Players near your currently selected venue
-    if (selectedVenue) {
-      const venueKey = `fun_prox_venue_once_${selectedVenue.id}`;
-      let already = false;
-      try {
-        already = localStorage.getItem(venueKey) === "1";
-      } catch {
-        already = false;
-      }
-      if (!already) {
-        const nearVenue = nearbyProfiles.some((p) => distMeters(selectedVenue.center, { lat: p.lat, lng: p.lng }) <= 250);
-        if (nearVenue && canFireProximityNotif()) {
-          try {
-            localStorage.setItem(venueKey, "1");
-          } catch {
-            /* ignore */
-          }
-          setToast({
-            id: `prox-venue-${selectedVenue.id}-${Date.now()}`,
-            type: "info",
-            message: "Players are active near this venue",
-          });
-        }
-      }
-    }
-  }, [nearbyProfiles, selectedVenue?.id, selectedVenue?.center.lat, selectedVenue?.center.lng, userCoords?.lat, userCoords?.lng, canFireProximityNotif]);
+    if (!supabase || !userCoords) return;
+    void supabase.rpc("update_my_location", {
+      p_lat: userCoords.lat,
+      p_lng: userCoords.lng,
+    });
+  }, [userCoords]);
 
   useEffect(() => {
     prefetchMapboxGl();
@@ -253,203 +164,94 @@ export default function App() {
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setCurrentUserId(session?.user?.id ?? null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN") {
+        setCurrentUserId(session?.user.id ?? null);
+      } else if (event === "SIGNED_OUT") {
+        setCurrentUserId(null);
+      }
     });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setCurrentUserId(session?.user?.id ?? null);
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUserId(session?.user.id ?? null);
     });
     return () => subscription.unsubscribe();
   }, []);
 
-  /** Restore joined games from DB (uses getUser() so it works right after sign-in, before React state updates). */
-  const reloadJoinedGameIds = useCallback(async () => {
-    if (!supabase) {
-      setJoinedGameIds(new Set());
-      return;
+  const ensureSession = async (): Promise<boolean> => {
+    if (currentUserId) return true;
+    const { data: { session } } = await supabase!.auth.getSession();
+    if (session?.user) {
+      setCurrentUserId(session.user.id);
+      return true;
     }
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setJoinedGameIds(new Set());
-      return;
-    }
-    const { data } = await supabase
-      .from("game_participants")
-      .select("game_id, role")
-      .eq("user_id", user.id);
+    navigate("/login");
+    return false;
+  };
 
-    const rows = data ?? [];
-    setJoinedGameIds(new Set(rows.map((r) => r.game_id as string)));
-    setHostGameIds(new Set(rows.filter((r) => r.role === "host").map((r) => r.game_id as string)));
-  }, []);
+  const reloadJoinedGameIds = useCallback(async () => {
+    if (!supabase || !currentUserId) return;
+    const { data } = await supabase.from("game_participants").select("game_id, role").eq("user_id", currentUserId);
+    if (data) {
+      setJoinedGameIds(new Set(data.map((r) => r.game_id)));
+      setHostGameIds(new Set(data.filter((r) => r.role === "host").map((r) => r.game_id)));
+    }
+  }, [currentUserId]);
 
   useEffect(() => {
     void reloadJoinedGameIds();
-  }, [currentUserId, reloadJoinedGameIds]);
+  }, [reloadJoinedGameIds]);
 
-  /** Warm game + DM inboxes after login so Messages opens with data while venues/games still load. */
-  useEffect(() => {
-    if (!currentUserId) {
-      setGameInboxBootstrap(null);
-      setDmInboxBootstrap(null);
-      return;
-    }
-    let cancelled = false;
-    const run = () => {
-      void fetchMyGameInbox().then(({ data, error }) => {
-        if (cancelled || error) return;
-        setGameInboxBootstrap(data ?? []);
-      });
-      void fetchMyDmInbox().then(({ data, error }) => {
-        if (cancelled || error) return;
-        setDmInboxBootstrap(data ?? []);
-      });
-    };
-    const idle =
-      typeof window.requestIdleCallback !== "undefined"
-        ? window.requestIdleCallback(run, { timeout: 5000 })
-        : window.setTimeout(run, 1500);
-    return () => {
-      cancelled = true;
-      if (typeof window.cancelIdleCallback !== "undefined") {
-        window.cancelIdleCallback(idle as number);
-      } else {
-        clearTimeout(idle as number);
-      }
-    };
-  }, [currentUserId]);
-
-  const ensureSession = async (): Promise<boolean> => {
-    if (!supabase) return false;
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-      setCurrentUserId(session.user?.id ?? null);
-      return true;
-    }
-    const { error } = await supabase.auth.signInAnonymously();
-    if (error) {
-      console.warn("[FUN] Anonymous sign-in failed. Enable it in Supabase: Authentication → Providers → Anonymous.", error);
-      return false;
-    }
-    const { data: { user } } = await supabase.auth.getUser();
-    setCurrentUserId(user?.id ?? null);
-    return true;
+  const handlePickGeocode = (f: ForwardGeocodeFeature) => {
+    setMapSearchLocation({ lat: f.center[1], lng: f.center[0] });
+    setSearchQuery("");
+    setSportFocus(null);
+    mapCameraIdRef.current += 1;
+    setMapCameraRequest({
+      id: mapCameraIdRef.current,
+      kind: "fly",
+      lat: f.center[1],
+      lng: f.center[0],
+      zoom: LOCATION_SEARCH_ZOOM,
+    });
   };
 
-  // Deep-link: open a DM thread from `/?dm=<userId>`
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const dm = params.get("dm");
-    if (!dm) return;
-    if (!supabase) return;
+  const handlePickSport = (sport: string) => {
+    setSportFocus({ sport });
+    setSearchQuery("");
+    setMapSearchLocation(null);
+  };
 
-    let cancelled = false;
-    void (async () => {
-      const ok = await ensureSession();
-      if (!ok || cancelled) return;
-      const { threadId, error } = await getOrCreateDmThread(dm);
-      if (cancelled) return;
-      if (error || !threadId) return;
+  const handlePickPerson = (p: ProfileSearchRow) => {
+    setSearchQuery("");
+    setMapSearchLocation(null);
+    setSportFocus(null);
+    navigate(`/athlete/${p.profile_id}`);
+  };
 
-      let displayName: string | null = null;
-      let avatarUrl: string | null = null;
-      try {
-        const { data } = await supabase.from("profiles").select("display_name, avatar_url").eq("id", dm).single();
-        const row = data as { display_name?: string | null; avatar_url?: string | null } | null;
-        displayName = row?.display_name ?? null;
-        avatarUrl = row?.avatar_url ?? null;
-      } catch {
-        displayName = null;
-        avatarUrl = null;
-      }
+  const clearMapSearch = () => {
+    setSearchQuery("");
+    setMapSearchLocation(null);
+    setSportFocus(null);
+    setGamesRadiusKm(DEFAULT_FILTERS.gamesRadiusKm);
+  };
 
-      setMessengerFocus({
-        kind: "dm",
-        threadId,
-        otherUserId: dm,
-        displayName,
-        avatarUrl,
-      });
-      setMessagesOpen(true);
+  const handleCenterOnUser = () => {
+    if (userCoords) {
+      setCenterOnUserTrigger((n) => n + 1);
+    }
+  };
 
-      // Clean URL (remove dm param) so refresh doesn't reopen.
-      navigate("/", { replace: true });
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [location.search, navigate]);
-
-  // Publish our location so other players see us (only if already signed in — no auto sign-in on load)
-  useEffect(() => {
-    if (locationVisibility === "ghost") return;
-    if (!userCoords?.lat || !userCoords?.lng || !supabase) return;
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user && supabase) {
-        setCurrentUserId(session.user.id);
-        supabase.rpc("update_my_location", { p_lat: userCoords.lat, p_lng: userCoords.lng }).then(() => {}, () => {});
-      }
-    });
-  }, [userCoords?.lat, userCoords?.lng, locationVisibility]);
-
-  const handleJoin = async (game: GameRow) => {
+  const handleJoinGame = async (gameId: string) => {
     const ok = await ensureSession();
     if (!ok) return;
-    const err = await joinGame(game.id);
+    const err = await joinGame(gameId);
     if (!err) {
       await reloadJoinedGameIds();
       refetchGames();
-      setMessengerFocus({
-        kind: "game",
-        gameId: game.id,
-        title: game.title || "Pickup game",
-        sport: game.sport,
-        startsAt: game.starts_at,
-        createdAt: game.created_at,
-        participantCount: game.participant_count,
-        spotsRemaining: game.spots_remaining,
-      });
-      setMessagesOpen(true);
     }
   };
 
-  const handleOpenChatForGame = (game: GameRow) => {
-    setMessengerFocus({
-      kind: "game",
-      gameId: game.id,
-      title: game.title || "Pickup game",
-      sport: game.sport,
-      startsAt: game.starts_at,
-      createdAt: game.created_at,
-      participantCount: game.participant_count,
-      spotsRemaining: game.spots_remaining,
-    });
-    setMessagesOpen(true);
-  };
-
-  const handleLeave = async (game: GameRow) => {
-    const ok = await ensureSession();
-    if (!ok) return;
-
-    const err = await leaveGame(game.id);
-    if (!err) {
-      await reloadJoinedGameIds();
-      refetchGames();
-
-      // If the user is currently viewing the thread for this game, close it.
-      if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
-        setMessagesOpen(false);
-        setMessengerFocus(null);
-      }
-    }
-  };
-
-  const handleLeaveThreadById = async (gameId: string) => {
+  const handleLeaveGame = async (gameId: string) => {
     const ok = await ensureSession();
     if (!ok) return;
 
@@ -471,7 +273,6 @@ export default function App() {
     if (!ok) return false;
     const err = await deleteHostedGame(game.id);
     if (err) {
-      setToast({ id: `del-game-${game.id}`, message: err.message, type: "error" });
       return false;
     }
     await reloadJoinedGameIds();
@@ -489,7 +290,6 @@ export default function App() {
     if (!ok) return;
     const err = await startGame(game.id);
     if (err) {
-      setToast({ id: `start-game-${game.id}`, message: err.message, type: "error" });
       return;
     }
     refetchGames();
@@ -500,7 +300,6 @@ export default function App() {
     if (!ok) return;
     const err = await endGame(game.id);
     if (err) {
-      setToast({ id: `end-game-${game.id}`, message: err.message, type: "error" });
       return;
     }
     await reloadJoinedGameIds();
@@ -523,20 +322,16 @@ export default function App() {
       zoom: 16,
     });
 
-    // 2) Open the join modal (GameEventPopup) after the camera moves.
+    // 2) Trigger the popup to open once the camera arrives (or immediately).
     openGamePopupNonceRef.current += 1;
     setGamePopupRequest({ nonce: openGamePopupNonceRef.current, gameId: game.id });
   };
 
-  const handleSelectGameOnMapFromChat = async (gameId: string) => {
-    // Prefer coordinates from our already-fetched `games` list (used for map markers),
-    // so chat clicks still work even if the RPC isn't available yet.
-    const inMemoryGame = games.find((g) => g.id === gameId);
-    const coords =
-      inMemoryGame && typeof inMemoryGame.lat === "number" && typeof inMemoryGame.lng === "number"
-        ? { lat: inMemoryGame.lat, lng: inMemoryGame.lng }
-        : await getGameLatLng(gameId);
-    if (!coords) return;
+  const handleOpenUserProfile = (userId: string) => {
+    navigate(`/athlete/${userId}`);
+  };
+
+  const handleCenterOnCoords = (coords: { lat: number; lng: number }) => {
     mapCameraIdRef.current += 1;
     setMapCameraRequest({
       id: mapCameraIdRef.current,
@@ -546,20 +341,6 @@ export default function App() {
       zoom: 16,
     });
   };
-
-  useEffect(() => {
-    const last = notifications[0];
-    if (!last || last.is_read || toastShownIds.current.has(last.id)) return;
-    toastShownIds.current.add(last.id);
-    const msg =
-      last.type === "badge_earned"
-        ? `Badge earned: ${(last.payload as { badge_slug?: string }).badge_slug ?? "?"}`
-        : last.type === "game_completed"
-          ? "A game you joined was completed."
-          : "New notification";
-    setToast({ id: last.id, message: msg, type: last.type });
-    markRead(last.id);
-  }, [notifications, markRead]);
 
   const searchAnchorLat = gamesFetchLat;
   const searchAnchorLng = gamesFetchLng;
@@ -590,11 +371,6 @@ export default function App() {
         emptySportToastSportRef.current !== sportFocus.sport
       ) {
         emptySportToastSportRef.current = sportFocus.sport;
-        setToast({
-          id: `sport-empty-${sportFocus.sport}`,
-          message: `No ${sportFocus.sport} games found in range. Try creating one on the map.`,
-          type: "info",
-        });
       }
       return;
     }
@@ -645,123 +421,30 @@ export default function App() {
     [liveNowOpen, liveStripGames, displayGames]
   );
 
-  useEffect(() => {
-    if (!selectedGame) return;
-    if (!mapGames.some((g) => g.id === selectedGame.id)) {
-      setSelectedGame(null);
-    }
-  }, [mapGames, selectedGame]);
-
-  const clearMapSearch = () => {
-    setSearchQuery("");
-    setMapSearchLocation(null);
-    setSportFocus(null);
-    setGamesRadiusKm(appliedFilters.gamesRadiusKm);
-    sportCameraSigRef.current = "";
-    emptySportToastSportRef.current = null;
-    if (userCoords) {
-      mapCameraIdRef.current += 1;
-      setMapCameraRequest({
-        id: mapCameraIdRef.current,
-        kind: "fly",
-        lat: userCoords.lat,
-        lng: userCoords.lng,
-        zoom: 16,
-      });
-    } else {
-      setMapCameraRequest(null);
-    }
-  };
-
-  const handlePickGeocode = (f: ForwardGeocodeFeature) => {
-    const [lng, lat] = f.center;
-    setMapSearchLocation({ lat, lng });
-    setSelectedVenue(null);
-    setSportFocus(null);
-    setGamesRadiusKm(appliedFilters.gamesRadiusKm);
-    sportCameraSigRef.current = "";
-    emptySportToastSportRef.current = null;
-    mapCameraIdRef.current += 1;
-    setMapCameraRequest({
-      id: mapCameraIdRef.current,
-      kind: "fly",
-      lat,
-      lng,
-      zoom: LOCATION_SEARCH_ZOOM,
-    });
-    setSearchQuery(f.place_name);
-  };
-
-  const handlePickSport = (sport: string) => {
-    setSportFocus({ sport });
-    setMapSearchLocation(null);
-    setGamesRadiusKm(appliedFilters.gamesRadiusKm);
-    sportCameraSigRef.current = "";
-    emptySportToastSportRef.current = null;
-    setSearchQuery(sport);
-  };
-
-  const handleCenterOnUser = () => {
-    setMapSearchLocation(null);
-    setSportFocus(null);
-    setGamesRadiusKm(appliedFilters.gamesRadiusKm);
-    sportCameraSigRef.current = "";
-    emptySportToastSportRef.current = null;
-    setSearchQuery("");
-    setMapCameraRequest(null);
-    setCenterOnUserTrigger((n) => n + 1);
-  };
-
-  const avatarGlbUrl = avatarId ? avatarIdToGlbUrl(avatarId, "low") : null;
-
-  const handlePickPerson = (p: ProfileSearchRow) => {
-    navigate(`/athlete/${p.profile_id}`);
-  };
+  const avatarGlbUrl = avatarIdToGlbUrl(avatarId);
 
   return (
-    <div className="relative w-full h-screen bg-[#0A0F1C] overflow-hidden font-sans touch-none selection:bg-emerald-500/30">
-      {/* Real map (Mapbox) — code-split; mapbox-gl prefetched on mount */}
+    <div className="relative h-screen w-full overflow-hidden bg-[#0A0F1C] font-sans selection:bg-emerald-500/30">
       <Suspense
         fallback={
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0A0F1C] text-slate-400">
-            <Loader2 className="h-8 w-8 animate-spin text-emerald-400" aria-hidden />
-            <p className="text-sm">Loading map…</p>
+          <div className="flex h-full w-full items-center justify-center bg-[#0A0F1C]">
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+              <p className="text-sm font-medium text-slate-400">Booting map engine…</p>
+            </div>
           </div>
         }
       >
         <MapboxMap
           userCoords={effectiveUserCoords}
           games={mapGames}
-          mapMinuteEpoch={mapMinuteEpoch}
-          mapCameraRequest={mapCameraRequest}
-          nearbyProfiles={nearbyProfiles}
-          currentUserId={currentUserId}
-          userSportsmanship={athleteProfile?.trust?.sportsmanship ?? null}
+          nearbyProfiles={nearbyProfiles ?? []}
           selectedGameId={selectedGame?.id ?? null}
-          onSelectGame={setSelectedGame}
           selectedVenue={selectedVenue}
+          onSelectGame={setSelectedGame}
           onSelectVenue={setSelectedVenue}
-          venuesCenter={mapSearchLocation ?? effectiveUserCoords}
-          venueSearchRadiusKm={appliedFilters.venueRadiusKm}
-          venueSportsFilter={appliedFilters.sports}
-          onVenuesFetchLoadingChange={handleVenuesFetchLoading}
-          pauseVenueFetch={messagesOpen}
-          mapStyleUrl={satelliteOn ? "mapbox://styles/mapbox/satellite-streets-v12" : null}
+          mapCameraRequest={mapCameraRequest}
           gamePopupRequest={gamePopupRequest}
-          onJoinGame={handleJoin}
-          onOpenMessagesForGame={handleOpenChatForGame}
-          onLeaveGame={handleLeave}
-          onDeleteHostedGame={handleDeleteHostedGame}
-          onStartHostedGame={handleStartHostedGame}
-          onEndHostedGame={handleEndHostedGame}
-          joinedGameIds={joinedGameIds}
-          hostGameIds={hostGameIds}
-          onMapDoubleClick={(lat, lng, viewportPoint) => {
-            setCreateGameCoords({ lat, lng });
-            setCreateGameAnchorPoint(viewportPoint ?? null);
-            setCreateGameLocationLabel(null);
-            setCreateGameOpen(true);
-          }}
           onCreateGameAtVenue={(venue, viewportPoint) => {
             setCreateGameCoords({ lat: venue.center.lat, lng: venue.center.lng });
             setCreateGameAnchorPoint(viewportPoint ?? null);
@@ -784,6 +467,13 @@ export default function App() {
           enable3D={true}
           userAvatarUrl={avatarUrl ?? null}
           avatarGlbUrl={avatarGlbUrl}
+          use2DAvatar={true}
+          currentUserId={currentUserId}
+          onVenuesFetchLoadingChange={handleVenuesFetchLoading}
+          venueSportsFilter={appliedFilters.sports}
+          venueSearchRadiusKm={gamesRadiusKm}
+          mapMinuteEpoch={mapMinuteEpoch}
+          pauseVenueFetch={messagesOpen}
         />
       </Suspense>
 
@@ -811,15 +501,6 @@ export default function App() {
         </div>
       )}
 
-      {toast && (
-        <div
-          className="absolute top-24 left-4 right-4 z-50 rounded-lg px-4 py-3 text-sm font-medium text-white shadow-lg border border-slate-600 bg-slate-800/95 backdrop-blur-sm"
-          role="status"
-        >
-          {toast.message}
-        </div>
-      )}
-
       <TopNavigation
         liveNowOpen={liveNowOpen}
         onLiveNowToggle={() => setLiveNowOpen((v) => !v)}
@@ -840,6 +521,9 @@ export default function App() {
           setLocationVisibility(mode);
           writeLocationVisibility(mode);
         }}
+        onOpenProfile={() => navigate("/profile")}
+        userAvatarUrl={avatarUrl ?? null}
+        favoriteSport={favoriteSport}
         mapSearch={{
           query: searchQuery,
           onQueryChange: setSearchQuery,
@@ -862,109 +546,61 @@ export default function App() {
       />
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/90 to-transparent pointer-events-none -z-10 h-full" />
-        <div className="absolute bottom-6 left-4 z-50 pointer-events-none">
-          <div className="relative w-20 h-20 pointer-events-auto">
-            <button
-              type="button"
-              onClick={() => navigate("/profile")}
-              className="w-full h-full cursor-pointer rounded-full border-2 border-slate-700/50 bg-slate-800/80 backdrop-blur-md overflow-hidden flex items-center justify-center shadow-lg transition-[box-shadow,transform,border-color] duration-200 ease-out hover:border-cyan-400/55 hover:ring-2 hover:ring-cyan-400/35 hover:shadow-[0_0_20px_rgba(34,211,238,0.25)] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]"
-              aria-label="Profile"
-            >
-              <img
-                src={avatarUrl?.trim() || DEFAULT_AVATAR_IMAGE}
-                alt=""
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-slate-800" />
-            </button>
-            <div className="pointer-events-none absolute -bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-white/10 bg-slate-950/80 px-2 py-1 backdrop-blur-md">
-              <StarRating value={athleteProfile.trust?.sportsmanship ?? null} size={10} />
-            </div>
-            {favoriteSport ? (
-              <span
-                className="pointer-events-none absolute z-20 -top-1 -right-1 select-none text-3xl leading-none drop-shadow-[0_1px_3px_rgba(0,0,0,0.95),0_0_8px_rgba(0,0,0,0.5)]"
-                title={favoriteSport}
-                role="img"
-                aria-label={`Favorite sport: ${favoriteSport}`}
-              >
-                {sportEmoji(favoriteSport)}
-              </span>
-            ) : null}
-          </div>
-        </div>
         <BottomCarousel
-          games={mapGames}
-          selectedGame={selectedGame}
-          onSelectGame={setSelectedGame}
-          onOpenGame={handleOpenGameFromCard}
-          joinedGameIds={joinedGameIds}
-          currentUserId={currentUserId}
-          liveNowOpen={liveNowOpen}
-          mapMinuteEpoch={mapMinuteEpoch}
-          onOpenMessages={() => {
-            setMessengerFocus(null);
-            setMessagesOpen(true);
+          games={liveNowOpen ? liveStripGames : displayGames}
+          selectedGameId={selectedGame?.id ?? null}
+          onSelectGame={(g) => {
+            setSelectedGame(g);
+            if (g) handleOpenGameFromCard(g);
           }}
+          onJoinGame={handleJoinGame}
+          onLeaveGame={handleLeaveGame}
+          onDeleteGame={handleDeleteHostedGame}
+          onStartGame={handleStartHostedGame}
+          onEndGame={handleEndHostedGame}
+          onOpenUserProfile={handleOpenUserProfile}
+          joinedGameIds={joinedGameIds}
+          hostGameIds={hostGameIds}
+          userCoords={userCoords}
         />
       </div>
 
-      <CreateGameModal
-        open={createGameOpen}
-        onOpenChange={(open) => {
-          setCreateGameOpen(open);
-          if (!open) {
-            setCreateGameCoords(null);
-            setCreateGameAnchorPoint(null);
-            setCreateGameLocationLabel(null);
-          }
-        }}
-        userCoords={createGameCoords ?? effectiveUserCoords}
-        locationLabel={createGameLocationLabel}
-        anchorPoint={createGameAnchorPoint}
-        onSuccess={() => {
-          void reloadJoinedGameIds();
-          refetchGames();
-        }}
-        ensureSession={ensureSession}
-      />
-
       <GameMessengerSheet
         open={messagesOpen}
-        onOpenChange={(open) => {
-          setMessagesOpen(open);
-          if (!open) setMessengerFocus(null);
-        }}
-        focusThread={messengerFocus}
-        onFocusThreadChange={setMessengerFocus}
-        currentUserId={currentUserId}
-        ensureSession={ensureSession}
-        onSelectGameOnMap={handleSelectGameOnMapFromChat}
+        onOpenChange={setMessagesOpen}
+        focus={messengerFocus}
+        onFocusChange={setMessengerFocus}
         joinedGameIds={joinedGameIds}
-        onLeaveThread={handleLeaveThreadById}
-        inboxBootstrap={gameInboxBootstrap}
-        dmInboxBootstrap={dmInboxBootstrap}
+        onLeaveGame={handleLeaveGame}
+        bootstrapGameInbox={gameInboxBootstrap}
+        bootstrapDmInbox={dmInboxBootstrap}
+        onOpenUserProfile={handleOpenUserProfile}
+        onCenterOnCoords={handleCenterOnCoords}
       />
 
       <FiltersModal
         open={filtersOpen}
-        onOpenChange={(open) => {
-          setFiltersOpen(open);
-          if (open) setFiltersDraft(appliedFilters);
-        }}
-        value={filtersDraft}
-        onChange={setFiltersDraft}
+        onOpenChange={setFiltersOpen}
+        filters={filtersDraft}
+        onFiltersChange={setFiltersDraft}
         onApply={() => {
-          filterApplyStartedAtRef.current = Date.now();
-          setFilterApplySync(true);
           setAppliedFilters(filtersDraft);
-          setGamesRadiusKm(filtersDraft.gamesRadiusKm);
-        }}
-        onClear={() => {
-          filterApplyStartedAtRef.current = Date.now();
           setFilterApplySync(true);
-          setAppliedFilters(DEFAULT_FILTERS);
-          setGamesRadiusKm(DEFAULT_FILTERS.gamesRadiusKm);
+          filterApplyStartedAtRef.current = Date.now();
+          setFiltersOpen(false);
+        }}
+      />
+
+      <CreateGameModal
+        open={createGameOpen}
+        onOpenChange={setCreateGameOpen}
+        initialCoords={createGameCoords}
+        initialLocationLabel={createGameLocationLabel}
+        anchorPoint={createGameAnchorPoint}
+        onCreated={(gameId) => {
+          setCreateGameOpen(false);
+          refetchGames();
+          reloadJoinedGameIds();
         }}
       />
     </div>

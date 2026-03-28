@@ -151,6 +151,7 @@ export type AthleteProfilePayload = {
   posts?: ActivityPost[];
   endorsements?: EndorsementEntry[];
   trust?: TrustSignals;
+  is_private?: boolean;
   /** @deprecated Unused in UI; cleared on save. Kept for parse/merge of old rows. */
   coverUrl?: string | null;
   /** Single sport shown as a small badge on the profile avatar. */
@@ -183,6 +184,7 @@ export function emptyAthleteProfile(): AthleteProfilePayload {
     posts: [],
     endorsements: [],
     trust: {},
+    is_private: false,
     coverUrl: null,
     favoriteSport: null,
     playedWithCount: null,
@@ -419,6 +421,7 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
       communication: asNum(trust.communication),
       organizerTrust: asNum(trust.organizerTrust),
     },
+    is_private: asBool(o.is_private),
     coverUrl: asStr(o.coverUrl),
     favoriteSport: asStr(o.favoriteSport),
     playedWithCount: asNum(o.playedWithCount),
@@ -446,6 +449,7 @@ export function mergeAthleteProfile(
     endorsements: patch.endorsements ?? base.endorsements,
     snapshot: { ...base.snapshot, ...patch.snapshot },
     trust: { ...base.trust, ...patch.trust },
+    is_private: patch.is_private !== undefined ? patch.is_private : base.is_private,
     coverUrl: patch.coverUrl !== undefined ? patch.coverUrl : base.coverUrl,
     favoriteSport: patch.favoriteSport !== undefined ? patch.favoriteSport : base.favoriteSport,
     playedWithCount: patch.playedWithCount !== undefined ? patch.playedWithCount : base.playedWithCount,

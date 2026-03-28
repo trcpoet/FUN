@@ -1,10 +1,11 @@
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
-import { BadgeCheck, Info, Share2 } from "lucide-react";
+import { BadgeCheck, Info, Share2, MapPin, Award, Zap, Users, Play, Settings, ChevronRight } from "lucide-react";
 import { Button } from "../ui/button";
 import { cn } from "../ui/utils";
 import { StarRating } from "../ui/StarRating";
 import type { PerformanceMetricEntry } from "../../../lib/athleteProfile";
 import { visibleMetrics } from "../../../lib/athleteProfile";
+import { Badge } from "../ui/badge";
 
 type Props = {
   displayName: string;
@@ -24,11 +25,18 @@ type Props = {
   homeBaseLabel?: string | null;
   onAbout?: () => void;
   onShare?: () => void;
+  isOwnProfile?: boolean;
   className?: string;
 };
 
 function cleanHandle(h: string) {
   return h.replace(/^@/, "").trim();
+}
+
+/** Reputation Rating is 0-10, derived from 0-5 star average. */
+function formatReputation(starAvg: number | null): string {
+  if (starAvg == null || starAvg === 0) return "0.0";
+  return (starAvg * 2).toFixed(1);
 }
 
 export function ProfileHubHero({
@@ -49,6 +57,7 @@ export function ProfileHubHero({
   homeBaseLabel,
   onAbout,
   onShare,
+  isOwnProfile,
   className,
 }: Props) {
   const bioText = bio?.trim() ?? "";
@@ -62,217 +71,175 @@ export function ProfileHubHero({
   const ratingN = ratingCount ?? 0;
 
   return (
-    <div className={cn(className)}>
-      {/* Mobile: display name, handle, bio, metrics in one card */}
-      <section className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161B22] p-4 md:hidden">
-        <div className="flex items-start gap-3">
-          <div className="relative shrink-0">
-            <Avatar className="size-[4.5rem] rounded-full border-2 border-[#00F5FF]/50 shadow-lg ring-2 ring-black/20">
-              {avatarUrl?.trim() ? (
-                <AvatarImage src={avatarUrl} alt="" className="object-cover" />
-              ) : null}
-              <AvatarFallback className="rounded-full bg-slate-800 text-2xl font-bold text-slate-200">
-                {fallbackInitial}
-              </AvatarFallback>
-            </Avatar>
+    <div className={cn("relative", className)}>
+      {/* Visual Background / Cover Area */}
+      <div className="absolute inset-x-0 -top-24 h-64 overflow-hidden rounded-b-[48px] md:h-80">
+        <div className="absolute inset-0 bg-gradient-to-b from-primary/20 via-primary/5 to-[#0D1117]" />
+        <div className="absolute inset-0 opacity-30 mix-blend-overlay bg-[url('https://images.unsplash.com/photo-1541252260730-0412e8e2108e?q=80&w=2000')] bg-cover bg-center" />
+        <div className="absolute inset-0 bg-[#0D1117]/20 backdrop-blur-[2px]" />
+      </div>
 
-            {verified ? (
-              <span
-                className="absolute bottom-0 right-0 flex size-6 items-center justify-center rounded-full bg-[#00F5FF] shadow-md ring-2 ring-[#161B22]"
-                title="Verified athlete"
-              >
-                <BadgeCheck className="size-3.5 text-[#0D1117]" aria-hidden />
-              </span>
-            ) : null}
-          </div>
-
-          <div className="min-w-0 flex-1 space-y-0.5">
-            <h1 className="truncate text-lg font-bold leading-tight tracking-tight text-white">
-              {displayName}
-            </h1>
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="min-w-0 flex-1">
-                {handleClean ? (
-                  <div className="flex min-w-0 items-center gap-2">
-                    <p className="min-w-0 truncate font-mono text-sm leading-snug text-[#00F5FF]/90">
-                      @{handleClean}
-                    </p>
-                    <StarRating value={rating} size={12} className="shrink-0 text-amber-300/95" />
-                  </div>
-                ) : (
-                  <p className="text-sm leading-snug text-slate-500">Add a handle in settings</p>
-                )}
-              </div>
-              {(onShare || onAbout) && (
-                <div className="flex shrink-0 flex-row items-center justify-center gap-1">
-                  {onShare ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="size-9 shrink-0 border-white/12 bg-white/[0.04] text-slate-200"
-                      onClick={onShare}
-                      aria-label="Share profile"
-                    >
-                      <Share2 className="size-4" />
-                    </Button>
-                  ) : null}
-                  {onAbout ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="size-9 shrink-0 border-white/12 bg-white/[0.04] text-slate-200"
-                      onClick={onAbout}
-                      aria-label="About"
-                    >
-                      <Info className="size-4" />
-                    </Button>
-                  ) : null}
+      <section className="relative pt-12 md:pt-24">
+        {/* Profile Card Main */}
+        <div className="rounded-[40px] border border-white/[0.08] bg-card/40 backdrop-blur-xl p-6 md:p-10 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.5)]">
+          <div className="flex flex-col items-center text-center md:flex-row md:text-left md:items-start gap-6 md:gap-10">
+            {/* Avatar Section */}
+            <div className="relative shrink-0 group">
+              <div className="absolute inset-0 rounded-full bg-primary/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              <Avatar className="size-28 md:size-40 rounded-full border-[6px] border-[#0D1117] shadow-2xl ring-2 ring-white/10 transition-transform duration-500 group-hover:scale-[1.02]">
+                <AvatarImage src={avatarUrl ?? undefined} className="object-cover" />
+                <AvatarFallback className="bg-slate-800 text-4xl font-black text-slate-200 italic tracking-tighter">
+                  {fallbackInitial}
+                </AvatarFallback>
+              </Avatar>
+              
+              {verified && (
+                <div className="absolute bottom-2 right-2 flex size-8 md:size-10 items-center justify-center rounded-full bg-primary text-white shadow-[0_4px_12px_rgba(225,29,72,0.4)] ring-4 ring-[#0D1117]">
+                  <BadgeCheck className="size-5 md:size-6" />
                 </div>
               )}
             </div>
-          </div>
-        </div>
 
-        <div className="mt-4 border-t border-white/[0.08] pt-4">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Bio</p>
-          {bioText ? (
-            <p className="mt-2 text-sm leading-relaxed text-slate-200">{bioText}</p>
-          ) : (
-            <p className="mt-2 text-sm text-slate-500">No bio yet — tell people who you are in Edit profile.</p>
-          )}
-        </div>
+            {/* Identity & Bio */}
+            <div className="flex-1 min-w-0 space-y-4">
+              <div className="space-y-1">
+                <h1 className="text-3xl md:text-5xl font-black italic tracking-tighter uppercase text-white leading-tight">
+                  {displayName}
+                </h1>
+                <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
+                  {handleClean ? (
+                    <span className="text-lg font-bold text-primary tracking-tight">@{handleClean}</span>
+                  ) : (
+                    <span className="text-sm font-medium text-slate-500 italic">No handle set</span>
+                  )}
+                  
+                  {/* Rating Pill + Home Base */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
+                      <span className="text-xs font-black text-amber-400">{ratingValue?.toFixed(1) || "0.0"}</span>
+                      <StarRating value={ratingValue ?? 0} size={10} className="text-amber-400" />
+                      <span className="text-[10px] font-bold text-amber-500/60 tabular-nums">({ratingN})</span>
+                    </div>
+                    
+                    {homeBase && (
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20">
+                        <MapPin className="size-3 text-blue-400" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">{homeBase}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
 
-        <div className="mt-4 border-t border-white/[0.08] pt-4">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Metrics</p>
-          {visibleMetricList.length === 0 ? (
-            <p className="mt-2 rounded-lg border border-dashed border-white/[0.1] bg-[#0D1117]/40 px-3 py-3 text-center text-xs text-slate-500">
-              Add performance metrics in <span className="text-slate-400">Edit profile</span>.
-            </p>
-          ) : (
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {visibleMetricList.map((m) => (
-                <div
-                  key={m.id}
-                  className="min-w-0 rounded-lg border border-white/[0.08] bg-[#0D1117]/50 px-2 py-2"
+              {bioText ? (
+                <p className="max-w-2xl text-base md:text-lg font-medium text-slate-300 leading-relaxed italic">
+                  "{bioText}"
+                </p>
+              ) : (
+                <p className="text-sm font-medium text-slate-500 italic uppercase tracking-widest opacity-60">Athlete at Large</p>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-2">
+                <Button 
+                  onClick={onAbout}
+                  className="rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[10px] h-10 px-6"
                 >
-                  <p className="text-[9px] font-medium uppercase tracking-wider text-slate-500">{m.label}</p>
-                  <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-[#00F5FF]">{m.value}</p>
+                  <Info className="mr-2 size-3.5" /> About
+                </Button>
+                <Button 
+                  onClick={onShare}
+                  className="rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[10px] h-10 px-6"
+                >
+                  <Share2 className="mr-2 size-3.5" /> Share
+                </Button>
+                {!isOwnProfile && (
+                  <Button 
+                    variant="ghost"
+                    className="rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all font-black uppercase tracking-widest text-[10px] h-10 px-6 group"
+                  >
+                    Follow <ChevronRight className="ml-1 size-3.5 group-hover:translate-x-1 transition-transform" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Metrics Strip */}
+          <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="rounded-3xl border border-white/[0.05] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04]">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="size-7 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                  <Play className="size-3.5 text-blue-500 fill-current" />
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Games</span>
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-black italic tracking-tighter text-white uppercase">{games}</span>
+                <span className="text-[10px] font-bold text-blue-500/60 uppercase">Played</span>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/[0.05] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04]">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="size-7 rounded-xl bg-rose-500/10 flex items-center justify-center">
+                  <Users className="size-3.5 text-rose-500" />
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Network</span>
+              </div>
+              <div className="flex items-baseline gap-3">
+                <div className="flex items-baseline gap-1">
+                  <span className="text-3xl font-black italic tracking-tighter text-white uppercase">{followers}</span>
+                  <span className="text-[9px] font-bold text-rose-500/60 uppercase tracking-tighter">Followers</span>
+                </div>
+                <div className="w-px h-4 bg-white/10 self-center" />
+                <div className="flex items-baseline gap-1">
+                  <span className="text-3xl font-black italic tracking-tighter text-white uppercase">{following}</span>
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">Following</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/[0.05] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04]">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="size-7 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Award className="size-3.5 text-primary" />
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Reputation</span>
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-black italic tracking-tighter text-white uppercase">
+                  {formatReputation(ratingValue)}
+                </span>
+                <span className="text-[10px] font-bold text-primary/60 uppercase">Rating</span>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/[0.05] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04]">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="size-7 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+                  <Zap className="size-3.5 text-emerald-500" />
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Power</span>
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-black italic tracking-tighter text-white uppercase">LVL 1</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Performance Highlights (Mini Badges) */}
+          {visibleMetricList.length > 0 && (
+            <div className="mt-6 flex flex-wrap gap-2 justify-center md:justify-start">
+              {visibleMetricList.map((m) => (
+                <div key={m.id} className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-white/[0.03] border border-white/5">
+                  <Zap className="size-3 text-primary fill-current" />
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{m.label}</span>
+                  <span className="text-xs font-black text-white">{m.value}</span>
                 </div>
               ))}
             </div>
           )}
-        </div>
-      </section>
-
-      {/* Desktop: avatar + identity (no cover banner) */}
-      <section className="relative hidden overflow-hidden rounded-2xl border border-white/[0.06] bg-[#161B22] md:block">
-        <div className="relative z-10 flex flex-col gap-4 px-4 pb-5 pt-4 md:flex-row md:items-start md:gap-6">
-          <div className="flex min-w-0 flex-1 items-start gap-4">
-            <div className="relative shrink-0">
-              <Avatar className="size-24 rounded-full border-4 border-[#0D1117] shadow-xl ring-2 ring-white/10 sm:size-28 md:size-32">
-                {avatarUrl?.trim() ? (
-                  <AvatarImage src={avatarUrl} alt="" className="object-cover" />
-                ) : null}
-                <AvatarFallback className="rounded-full bg-slate-800 text-2xl font-bold text-slate-200">
-                  {fallbackInitial}
-                </AvatarFallback>
-              </Avatar>
-
-              {verified ? (
-                <span
-                  className="absolute bottom-0.5 right-0.5 flex size-7 items-center justify-center rounded-full bg-[#00F5FF] shadow-md ring-2 ring-[#0D1117]"
-                  title="Verified athlete"
-                >
-                  <BadgeCheck className="size-4 text-[#0D1117]" aria-hidden />
-                </span>
-              ) : null}
-            </div>
-
-            <div className="min-w-0 flex-1 space-y-0.5 pb-1">
-              <h1 className="truncate text-xl font-bold leading-tight tracking-tight text-white sm:text-2xl md:text-3xl">
-                {displayName}
-              </h1>
-              <div className="flex min-w-0 items-center gap-2">
-                <div className="min-w-0 flex-1">
-                  {handleClean ? (
-                    <div className="flex min-w-0 items-center gap-2">
-                      <p className="min-w-0 truncate font-mono text-sm leading-snug text-[#00F5FF]/90">
-                        @{handleClean}
-                      </p>
-                      <StarRating value={rating} size={12} className="shrink-0 text-amber-300/95" />
-                    </div>
-                  ) : (
-                    <p className="text-sm leading-snug text-slate-500">Add a handle in settings</p>
-                  )}
-                </div>
-                {(onShare || onAbout) && (
-                  <div className="flex shrink-0 flex-row items-center justify-center gap-1">
-                    {onShare ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="size-9 shrink-0 border-white/12 bg-white/[0.04] text-slate-200"
-                        onClick={onShare}
-                        aria-label="Share profile"
-                      >
-                        <Share2 className="size-4" />
-                      </Button>
-                    ) : null}
-                    {onAbout ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="size-9 shrink-0 border-white/12 bg-white/[0.04] text-slate-200"
-                        onClick={onAbout}
-                        aria-label="About"
-                      >
-                        <Info className="size-4" />
-                      </Button>
-                    ) : null}
-                  </div>
-                )}
-              </div>
-
-              {/* Compact stats row (minimal, high-signal) */}
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
-                  <span className="font-semibold tabular-nums text-white">{followers}</span>{" "}
-                  <span className="text-slate-400">Followers</span>
-                </span>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
-                  <span className="font-semibold tabular-nums text-white">{following}</span>{" "}
-                  <span className="text-slate-400">Following</span>
-                </span>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
-                  <span className="font-semibold tabular-nums text-white">{games}</span>{" "}
-                  <span className="text-slate-400">Games</span>
-                </span>
-                {ratingValue != null ? (
-                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
-                    <span className="font-semibold tabular-nums text-white">
-                      {ratingValue.toFixed(1).replace(/\.0$/, "")}
-                    </span>{" "}
-                    <span className="text-amber-300/95">★</span>{" "}
-                    <span className="text-slate-500 tabular-nums">({ratingN})</span>
-                  </span>
-                ) : null}
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
-                  <span className="text-slate-400">Home Base</span>{" "}
-                  <span className="font-semibold text-white">{homeBase || "—"}</span>
-                </span>
-              </div>
-              <p className="mt-3 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Bio</p>
-              {bioText ? (
-                <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-300">{bioText}</p>
-              ) : (
-                <p className="mt-1 text-sm text-slate-500">No bio yet.</p>
-              )}
-            </div>
-          </div>
         </div>
       </section>
     </div>

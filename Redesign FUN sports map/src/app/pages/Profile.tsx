@@ -28,6 +28,9 @@ import { cn } from "../components/ui/utils";
 import { useAuth } from "../contexts/AuthContext";
 import { getAthleteReputation } from "../../lib/endorsements";
 import { getLatestStatus, upsertMyStatus } from "../../lib/status";
+import { Badge } from "../components/ui/badge";
+import { Progress } from "../components/ui/progress";
+import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 
 class ProfileSettingsErrorBoundary extends React.Component<
   { onReset: () => void; children: React.ReactNode },
@@ -50,18 +53,21 @@ class ProfileSettingsErrorBoundary extends React.Component<
     if (!this.state.hasError) return this.props.children;
     return (
       <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 px-4 text-white">
-        <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0A0F1C] p-4 shadow-2xl">
-          <p className="text-sm font-semibold">Settings failed to open</p>
-          <p className="mt-2 text-xs text-slate-400">{this.state.message}</p>
+        <div className="w-full max-w-md rounded-[32px] border border-white/10 bg-[#0A0F1C] p-8 shadow-2xl text-center">
+          <div className="size-16 rounded-full bg-rose-500/10 flex items-center justify-center mx-auto mb-6">
+            <span className="text-2xl">⚠️</span>
+          </div>
+          <p className="text-lg font-black italic uppercase tracking-tighter text-white">System Error</p>
+          <p className="mt-2 text-sm font-medium text-slate-400">{this.state.message}</p>
           <button
             type="button"
             onClick={() => {
               this.setState({ hasError: false, message: "" });
               this.props.onReset();
             }}
-            className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-xl bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/40"
+            className="mt-8 inline-flex h-12 w-full items-center justify-center rounded-2xl bg-primary text-sm font-black uppercase tracking-widest text-white hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-primary/20"
           >
-            Close
+            Reset Session
           </button>
         </div>
       </div>
@@ -89,7 +95,6 @@ export default function Profile() {
   const [statusText, setStatusText] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const openedSettingsRef = useRef(false);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
@@ -181,7 +186,6 @@ export default function Profile() {
         return;
       } catch (e) {
         if ((e as Error).name === "AbortError") return;
-        /* fall through to clipboard */
       }
     }
 
@@ -219,11 +223,14 @@ export default function Profile() {
     setAddFeedOpen(true);
   };
 
-  /* pt-14 clears fixed header on all breakpoints (hero no longer extends under the bar). */
-  const shellClass = cn("mx-auto w-full max-w-lg px-3 pb-28 pt-14 md:max-w-6xl md:px-8");
-
   return (
-    <div className="min-h-screen w-full bg-[#0D1117] text-white">
+    <div className="min-h-screen w-full bg-[#050505] text-white selection:bg-primary selection:text-white">
+      {/* Dynamic Background Elements */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-[10%] -right-[10%] size-[50%] rounded-full bg-primary/10 blur-[120px]" />
+        <div className="absolute bottom-[5%] -left-[5%] size-[40%] rounded-full bg-blue-500/5 blur-[100px]" />
+      </div>
+
       <ProfileHubHeader
         onBack={() => navigate("/")}
         onOpenSettings={() => {
@@ -235,47 +242,56 @@ export default function Profile() {
         onMarkRead={markRead}
       />
 
-      <div className={shellClass}>
+      <main className="relative mx-auto w-full max-w-6xl px-4 md:px-8 pb-32 pt-20">
         {loading ? (
-          <div className="mt-4 space-y-4 md:mt-0">
-            <div className="h-48 animate-pulse rounded-2xl bg-white/[0.04]" />
-            <div className="h-16 animate-pulse rounded-xl bg-white/[0.04]" />
-            <div className="h-32 animate-pulse rounded-xl bg-white/[0.04]" />
+          <div className="space-y-8 animate-pulse">
+            <div className="h-80 rounded-[48px] bg-white/[0.03]" />
+            <div className="grid grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map(i => <div key={i} className="h-24 rounded-3xl bg-white/[0.03]" />)}
+            </div>
+            <div className="h-64 rounded-[40px] bg-white/[0.03]" />
           </div>
         ) : (
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <ProfileHubHero
-                displayName={displayName?.trim() || "Player"}
-                handle={athleteProfile.handle ?? null}
-                avatarUrl={avatarUrl}
-                fallbackInitial={fallbackInitial}
-                verified={!!athleteProfile.verified}
-                rating={repAvg ?? athleteProfile.trust?.sportsmanship ?? null}
-                ratingCount={repCount}
-                gamesPlayed={stats?.games_played_total ?? 0}
-                statusText={statusText}
-                bio={athleteProfile.bio ?? null}
-                performanceMetrics={athleteProfile.performanceMetrics ?? []}
-                primarySports={primarySports}
-                followersCount={0}
-                followingCount={followingCount}
-                homeBaseLabel={homeBaseLabel}
-                onShare={() => void handleShare()}
-                onAbout={() => setAboutOpen(true)}
-              />
-              {shareCopiedAt !== null ? (
-                <p className="text-right text-xs text-emerald-400/95" role="status">
-                  Copied to clipboard
-                </p>
-              ) : null}
-            </div>
+          <div className="space-y-8">
+            <ProfileHubHero
+              displayName={displayName?.trim() || "Player"}
+              handle={athleteProfile.handle ?? null}
+              avatarUrl={avatarUrl}
+              fallbackInitial={fallbackInitial}
+              verified={!!athleteProfile.verified}
+              rating={repAvg ?? athleteProfile.trust?.sportsmanship ?? null}
+              ratingCount={repCount}
+              gamesPlayed={stats?.games_played_total ?? 0}
+              statusText={statusText}
+              bio={athleteProfile.bio ?? null}
+              performanceMetrics={athleteProfile.performanceMetrics ?? []}
+              primarySports={primarySports}
+              followersCount={0}
+              followingCount={followingCount}
+              homeBaseLabel={homeBaseLabel}
+              onShare={() => void handleShare()}
+              onAbout={() => setAboutOpen(true)}
+              isOwnProfile={true}
+              className="animate-in fade-in slide-in-from-top-4 duration-700"
+            />
 
-            {/* Desktop: metrics + discover toggle on one row; discover panel expands below and pushes content down. */}
-            <div className="hidden md:block">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <PerformanceStatsStrip metrics={athleteProfile.performanceMetrics ?? []} primarySports={primarySports} />
+            {shareCopiedAt !== null && (
+              <div className="fixed top-20 right-8 z-[80] animate-in fade-in zoom-in slide-in-from-top-2">
+                <Badge className="bg-emerald-500 text-white border-none font-black px-4 py-2 shadow-lg shadow-emerald-500/20">
+                  LINK COPIED ⚡
+                </Badge>
+              </div>
+            )}
+
+            {/* Discover Section */}
+            <section className="space-y-4">
+              <div className="flex items-center justify-between px-2">
+                <div className="space-y-1">
+                  <h2 className="text-xl font-bold text-white tracking-tight uppercase italic flex items-center gap-2">
+                    Global Network
+                    <span className="inline-block size-1.5 rounded-full bg-blue-500 animate-pulse" />
+                  </h2>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">Discover Athletes</p>
                 </div>
                 <ProfileActionRow
                   isOwnProfile
@@ -283,73 +299,60 @@ export default function Profile() {
                   onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
                 />
               </div>
-              {user?.id ? (
-                <div className="mt-3">
-                  <DiscoveredPeopleCarousel
-                    expanded={discoverOpen}
-                    onClose={() => setDiscoverOpen(false)}
-                    excludeUserId={user.id}
-                    primarySports={primarySports}
-                  />
+              
+              {user?.id && (
+                <div className={cn(
+                  "overflow-hidden transition-all duration-500",
+                  discoverOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+                )}>
+                  <div className="rounded-[40px] border border-white/[0.05] bg-white/[0.02] p-6 backdrop-blur-xl">
+                    <DiscoveredPeopleCarousel
+                      expanded={discoverOpen}
+                      onClose={() => setDiscoverOpen(false)}
+                      excludeUserId={user.id}
+                      primarySports={primarySports}
+                    />
+                  </div>
                 </div>
-              ) : null}
-            </div>
+              )}
+            </section>
 
-            {/* Mobile: discover toggle lives as its own row (metrics already inside the hero). */}
-            <div className="md:hidden">
-              <ProfileActionRow
-                isOwnProfile
-                discoverExpanded={discoverOpen}
-                onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
+            {/* Composer */}
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+              <ProfileComposerCard
+                onPhoto={openAddPost}
+                onVideo={openAddReel}
+                onSubmitText={async (text) => {
+                  const postId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `post-${Date.now()}`;
+                  const newPost = { id: postId, caption: text, timeAgo: "now" };
+                  const nextProfile = { ...athleteProfile, posts: [newPost, ...(athleteProfile.posts ?? [])] };
+                  
+                  const err = await updateProfile({ athlete_profile: nextProfile });
+                  if (err) throw new Error(err.message);
+
+                  await upsertMyStatus(text);
+                  setStatusText(text);
+                  await refetch();
+                }}
               />
-              {user?.id ? (
-                <div className="mt-3">
-                  <DiscoveredPeopleCarousel
-                    expanded={discoverOpen}
-                    onClose={() => setDiscoverOpen(false)}
-                    excludeUserId={user.id}
-                    primarySports={primarySports}
-                  />
-                </div>
-              ) : null}
             </div>
 
-            <ProfileComposerCard
-              onPhoto={openAddPost}
-              onVideo={openAddReel}
-              onSubmitText={async (text) => {
-                const postId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `post-${Date.now()}`;
-                const newPost = { id: postId, caption: text, timeAgo: "now" };
-                const nextProfile = { ...athleteProfile, posts: [newPost, ...(athleteProfile.posts ?? [])] };
-                
-                const err = await updateProfile({ athlete_profile: nextProfile });
-                if (err) {
-                  alert(err.message);
-                  throw new Error(err.message);
-                }
-
-                // Also publish to the global Discover feed
-                await upsertMyStatus(text);
-                
-                setStatusText(text);
-                await refetch();
-                alert("Update posted to your profile and Discovery feed!");
-              }}
-            />
-
-            <PostsReelsSection
-              variant="hub"
-              reels={athleteProfile.highlights ?? []}
-              posts={athleteProfile.posts ?? []}
-              pinnedPost={pinnedPost}
-              onAddReel={openAddReel}
-              onAddPost={openAddPost}
-              userMeta={{
-                name: displayName || undefined,
-                handle: athleteProfile.handle || undefined,
-                avatarUrl: avatarUrl || undefined,
-              }}
-            />
+            {/* Activity Hub */}
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
+              <PostsReelsSection
+                variant="hub"
+                reels={athleteProfile.highlights ?? []}
+                posts={athleteProfile.posts ?? []}
+                pinnedPost={pinnedPost}
+                onAddReel={openAddReel}
+                onAddPost={openAddPost}
+                userMeta={{
+                  name: displayName || undefined,
+                  handle: athleteProfile.handle || undefined,
+                  avatarUrl: avatarUrl || undefined,
+                }}
+              />
+            </div>
           </div>
         )}
 
@@ -359,155 +362,109 @@ export default function Profile() {
           side={isMobile ? "bottom" : "right"}
           wide={!isMobile}
         >
-          <div>
-            <h3 className="mb-3 text-sm font-semibold text-white">Player info</h3>
-            <ul className="space-y-2 text-sm text-slate-300">
-              <li>
-                <span className="text-slate-500">Skill level · </span>
-                <span className="text-white">Level {stats?.level ?? 1}</span>
-              </li>
-              {athleteProfile.availability ? (
-                <li>
-                  <span className="text-slate-500">Availability · </span>
-                  <span className="text-white">{athleteProfile.availability.replaceAll("_", " ")}</span>
-                </li>
-              ) : null}
-              {athleteProfile.snapshot?.intensity ? (
-                <li>
-                  <span className="text-slate-500">Intensity · </span>
-                  <span className="text-white">{athleteProfile.snapshot.intensity}</span>
-                </li>
-              ) : null}
-              {athleteProfile.trust?.showUpRate != null ? (
-                <li>
-                  <span className="text-slate-500">Show up rate · </span>
-                  <span className="font-semibold tabular-nums text-white">
-                    {Math.round(athleteProfile.trust.showUpRate * 100)}%
-                  </span>
-                </li>
-              ) : null}
-              {athleteProfile.trust?.sportsmanship != null ? (
-                <li>
-                  <span className="text-slate-500">Rating · </span>
-                  <span className="font-semibold tabular-nums text-white">
-                    {athleteProfile.trust.sportsmanship.toFixed(1)}
-                  </span>
-                </li>
-              ) : null}
-              <li>
-                <span className="text-slate-500">Last active · </span>
-                <span className="text-white">—</span>
-              </li>
-            </ul>
-          </div>
+          <div className="p-6 md:p-8 space-y-10">
+            <header className="space-y-2">
+              <h2 className="text-3xl font-black italic uppercase tracking-tighter text-white">Player Specs</h2>
+              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Verified Athletic Profile</p>
+            </header>
 
-          {athleteProfile.bio?.trim() ? (
-            <div>
-              <h3 className="mb-3 text-sm font-semibold text-white">Athlete tagline</h3>
-              <p className="text-sm leading-relaxed text-slate-300">{athleteProfile.bio.trim()}</p>
-            </div>
-          ) : null}
-
-          {(athleteProfile.snapshot?.university?.trim() ||
-            athleteProfile.city?.trim() ||
-            athleteProfile.snapshot?.neighbourhood?.trim() ||
-            athleteProfile.snapshot?.occupation?.trim() ||
-            athleteProfile.favoriteSport?.trim()) && (
-            <div>
-              <h3 className="mb-3 text-sm font-semibold text-white">Location, school &amp; work</h3>
-              <ul className="space-y-2 text-sm text-slate-300">
-                {athleteProfile.snapshot?.occupation?.trim() ? (
-                  <li>
-                    <span className="text-slate-500">Occupation · </span>
-                    <span className="text-white">{athleteProfile.snapshot.occupation.trim()}</span>
-                  </li>
-                ) : null}
-                {athleteProfile.snapshot?.university?.trim() ? (
-                  <li>
-                    <span className="text-slate-500">University · </span>
-                    <span className="text-white">{athleteProfile.snapshot.university.trim()}</span>
-                  </li>
-                ) : null}
-                {athleteProfile.city?.trim() ? (
-                  <li>
-                    <span className="text-slate-500">City / area · </span>
-                    <span className="text-white">{athleteProfile.city.trim()}</span>
-                  </li>
-                ) : null}
-                {athleteProfile.snapshot?.neighbourhood?.trim() ? (
-                  <li>
-                    <span className="text-slate-500">Neighbourhood · </span>
-                    <span className="text-white">{athleteProfile.snapshot.neighbourhood.trim()}</span>
-                  </li>
-                ) : null}
-                {athleteProfile.favoriteSport?.trim() ? (
-                  <li>
-                    <span className="text-slate-500">Favorite sport · </span>
-                    <span className="text-white">{athleteProfile.favoriteSport.trim()}</span>
-                  </li>
-                ) : null}
-              </ul>
-            </div>
-          )}
-
-          {(() => {
-            const s = athleteProfile.snapshot;
-            if (!s) return null;
-            const pos = (s.positions ?? []).filter((p) => p.trim()).join(", ");
-            const rows: { label: string; value: string }[] = [];
-            if (s.height?.trim()) rows.push({ label: "Height", value: s.height.trim() });
-            if (s.weight?.trim()) rows.push({ label: "Weight", value: s.weight.trim() });
-            if (s.handedness?.trim()) rows.push({ label: "Handedness", value: s.handedness.trim() });
-            if (pos) rows.push({ label: "Positions", value: pos });
-            if (s.playStyle?.trim()) rows.push({ label: "Play style", value: s.playStyle.trim() });
-            if (s.yearsExperience != null && String(s.yearsExperience).trim() !== "")
-              rows.push({ label: "Years in sport", value: String(s.yearsExperience) });
-            if (s.fitnessFocus?.trim()) rows.push({ label: "Fitness focus", value: s.fitnessFocus.trim() });
-            if (rows.length === 0) return null;
-            return (
-              <div>
-                <h3 className="mb-3 text-sm font-semibold text-white">Athletic snapshot</h3>
-                <ul className="space-y-2 text-sm text-slate-300">
-                  {rows.map((r) => (
-                    <li key={r.label}>
-                      <span className="text-slate-500">{r.label} · </span>
-                      <span className="text-white">{r.value}</span>
-                    </li>
-                  ))}
-                </ul>
+            <section className="space-y-6">
+              <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">Performance</h3>
+              <div className="grid gap-4">
+                <div className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Skill Level</span>
+                  <span className="text-sm font-black text-white italic uppercase">Level {stats?.level ?? 1}</span>
+                </div>
+                {athleteProfile.availability && (
+                  <div className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Availability</span>
+                    <span className="text-sm font-black text-white italic uppercase">{athleteProfile.availability.replaceAll("_", " ")}</span>
+                  </div>
+                )}
+                {athleteProfile.snapshot?.intensity && (
+                  <div className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Intensity</span>
+                    <span className="text-sm font-black text-white italic uppercase">{athleteProfile.snapshot.intensity}</span>
+                  </div>
+                )}
               </div>
-            );
-          })()}
+            </section>
 
-          <div>
-            <h3 className="mb-3 text-sm font-semibold text-white">Games</h3>
-            {stats ? (
-              <div className="space-y-2 text-sm text-slate-300">
-                <p>
-                  Games played{" "}
-                  <span className="font-semibold tabular-nums text-white">{stats.games_played_total}</span>
-                </p>
-                <p>
-                  Current streak{" "}
-                  <span className="font-semibold tabular-nums text-white">{stats.current_streak_days} days</span>
-                </p>
+            <section className="space-y-6">
+              <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">Athlete Specs</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-5 rounded-[32px] bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Height</p>
+                  <p className="text-sm font-black text-white italic uppercase">{athleteProfile.snapshot?.height || "—"}</p>
+                </div>
+                <div className="p-5 rounded-[32px] bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Weight</p>
+                  <p className="text-sm font-black text-white italic uppercase">{athleteProfile.snapshot?.weight || "—"}</p>
+                </div>
+                <div className="p-5 rounded-[32px] bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Dominant Side</p>
+                  <p className="text-sm font-black text-white italic uppercase">{athleteProfile.snapshot?.handedness || "—"}</p>
+                </div>
+                <div className="p-5 rounded-[32px] bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Experience</p>
+                  <p className="text-sm font-black text-white italic uppercase">{athleteProfile.snapshot?.yearsExperience ? `${athleteProfile.snapshot.yearsExperience} YRS` : "—"}</p>
+                </div>
               </div>
-            ) : (
-              <p className="text-sm text-slate-500">Play games to see your activity here.</p>
+            </section>
+
+            <section className="space-y-6">
+              <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">Trust Matrix</h3>
+              <div className="p-6 rounded-[32px] bg-emerald-500/[0.03] border border-emerald-500/10 space-y-6">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center px-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sportsmanship</span>
+                    <span className="text-sm font-black text-emerald-400">{repAvg?.toFixed(1) || "0.0"} / 5.0</span>
+                  </div>
+                  <Progress value={(repAvg || 0) * 20} className="h-1.5 bg-white/5 [&>[data-slot=progress-indicator]]:bg-emerald-500" />
+                </div>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center px-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Reliability</span>
+                    <span className="text-sm font-black text-cyan-400">{athleteProfile.trust?.showUpRate || 0}%</span>
+                  </div>
+                  <Progress value={athleteProfile.trust?.showUpRate || 0} className="h-1.5 bg-white/5 [&>[data-slot=progress-indicator]]:bg-cyan-500" />
+                </div>
+              </div>
+            </section>
+
+            {athleteProfile.bio?.trim() && (
+              <section className="space-y-4">
+                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">Manifesto</h3>
+                <p className="text-base font-medium text-slate-300 leading-relaxed italic">"{athleteProfile.bio.trim()}"</p>
+              </section>
             )}
-          </div>
 
-          <div>
-            <h3 className="mb-3 text-sm font-semibold text-white">Journey</h3>
-            <ExperienceTimeline
-              items={athleteProfile.experience ?? []}
-              hideHeading
-              className="border-0 rounded-none bg-transparent"
-            />
-          </div>
+            <section className="space-y-6">
+              <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">Stats</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-5 rounded-[32px] bg-white/[0.03] border border-white/5">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Total Games</p>
+                  <p className="text-2xl font-black italic tracking-tighter text-white">{stats?.games_played_total || 0}</p>
+                </div>
+                <div className="p-5 rounded-[32px] bg-white/[0.03] border border-white/5">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Live Streak</p>
+                  <p className="text-2xl font-black italic tracking-tighter text-white">{stats?.current_streak_days || 0}D</p>
+                </div>
+              </div>
+            </section>
 
-          <div className="pt-2">
-            <ProfileBadgesSection badges={badges} className="border-0 rounded-none bg-transparent" />
+            <section className="space-y-6">
+              <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">Journey</h3>
+              <ExperienceTimeline
+                items={athleteProfile.experience ?? []}
+                hideHeading
+                className="border-0 rounded-none bg-transparent px-0"
+              />
+            </section>
+
+            <section className="pt-4">
+              <ProfileBadgesSection badges={badges} className="border-0 rounded-none bg-transparent px-0" />
+            </section>
           </div>
         </AboutSheet>
 
@@ -522,9 +479,7 @@ export default function Profile() {
             const profileErr = await updateProfile({ athlete_profile: nextProfile });
             if (profileErr) throw new Error(profileErr.message);
 
-            const err = await upsertMyStatus(post.caption);
-            if (err) throw new Error(err.message);
-
+            await upsertMyStatus(post.caption);
             setStatusText(post.caption);
             await refetch();
           }}
@@ -590,7 +545,7 @@ export default function Profile() {
             }}
           />
         </ProfileSettingsErrorBoundary>
-      </div>
+      </main>
     </div>
   );
 }

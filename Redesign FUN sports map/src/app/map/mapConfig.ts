@@ -144,13 +144,13 @@ export const VENUE_AREA_RADIUS_METERS = 42;
 // —— Zoom / bounds: when is “near me” meaningful? ——————————————
 
 /** Below this zoom: hide all game layers (clusters + individuals). World / continent view. */
-export const GAME_LAYER_MIN_ZOOM = 8.5;
+export const GAME_LAYER_MIN_ZOOM = 4.0;
 
 /**
  * Below this zoom: hide individual unclustered game symbols; clusters still allowed
  * if within [GAME_LAYER_MIN_ZOOM, GAME_INDIVIDUAL_MIN_ZOOM).
  */
-export const GAME_INDIVIDUAL_MIN_ZOOM = 11.75;
+export const GAME_INDIVIDUAL_MIN_ZOOM = 8.0;
 
 /** First zoom where individual game pins / emoji are allowed (with bounds check). */
 export const GAME_VISIBILITY_MIN_ZOOM = GAME_INDIVIDUAL_MIN_ZOOM;
@@ -174,25 +174,25 @@ export const CLUSTER_ONLY_MAX_ZOOM = GAME_INDIVIDUAL_MIN_ZOOM;
 export const GAME_CLUSTER_RADIUS_PX = 58;
 
 /** Show venue area polygons only when zoom is at or above this (neighborhood+). */
-export const VENUE_FOOTPRINT_MIN_ZOOM = 9.5;
+export const VENUE_FOOTPRINT_MIN_ZOOM = 6.0;
 
 /** Show venue center dots when zoom >= this (slightly earlier than full footprint). */
-export const VENUE_DOT_MIN_ZOOM = 8.5;
+export const VENUE_DOT_MIN_ZOOM = 4.0;
 
 /** Product alias — first zoom where any venue affordance appears (dots). */
 export const VENUE_VISIBILITY_MIN_ZOOM = VENUE_DOT_MIN_ZOOM;
 
 /** Hide everything venue-related below this (optional hard floor). */
-export const VENUE_LAYER_MIN_ZOOM = 8;
+export const VENUE_LAYER_MIN_ZOOM = 3.5;
 
 /** If visible bounds width exceeds this (km), treat as non-local; tighten game display. */
-export const LOCAL_BOUNDS_THRESHOLD_KM = 35;
+export const LOCAL_BOUNDS_THRESHOLD_KM = 120;
 
 /** When zoom is local but many games, cap points sent to the map (nearest to center). */
 export const MAX_VISIBLE_INDIVIDUAL_GAMES = 72;
 
 /** Other players: only when zoomed in enough to be socially relevant. */
-export const PLAYER_MARKERS_MIN_ZOOM = 12.5;
+export const PLAYER_MARKERS_MIN_ZOOM = 5.0;
 
 /** Throttle ms for visibility recalculation on move/zoom */
 export const MAP_VISIBILITY_THROTTLE_MS = 80;

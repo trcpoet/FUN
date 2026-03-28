@@ -84,6 +84,9 @@ export type TopNavigationProps = {
   mapSearch?: UnifiedMapSearchBarProps | null;
   locationVisibility?: LocationVisibilityMode;
   onLocationVisibilityChange?: (mode: LocationVisibilityMode) => void;
+  onOpenProfile?: () => void;
+  userAvatarUrl?: string | null;
+  favoriteSport?: string | null;
 };
 
 function placeSubtitle(placeName: string): string | undefined {
@@ -128,9 +131,11 @@ export const TopNavigation = (props: TopNavigationProps) => {
     mapSearch = null,
     locationVisibility = "public",
     onLocationVisibilityChange,
+    onOpenProfile,
+    userAvatarUrl,
+    favoriteSport,
   } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const [visOpen, setVisOpen] = useState(false);
   const [feedToolbarHintOpen, setFeedToolbarHintOpen] = useState(false);
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
@@ -462,33 +467,36 @@ export const TopNavigation = (props: TopNavigationProps) => {
 
             <button
               type="button"
-              onClick={() => setVisOpen(true)}
+              onClick={() => {
+                const modes: LocationVisibilityMode[] = ["public", "close_friends", "ghost"];
+                const currentIndex = modes.indexOf(locationVisibility);
+                const nextIndex = (currentIndex + 1) % modes.length;
+                onLocationVisibilityChange?.(modes[nextIndex]);
+              }}
               className={cn(
-                "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium",
-                "transition-colors duration-[var(--dur-hover)] ease-[var(--ease-out)]",
-                "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-white/20 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95",
                 locationVisibility === "ghost"
-                  ? "border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]"
+                  ? "border-white/10 bg-white/[0.03] text-slate-500 hover:bg-white/[0.06]"
                   : locationVisibility === "close_friends"
-                    ? "border-cyan-500/30 bg-transparent text-cyan-200/90 hover:bg-cyan-500/10"
-                    : "border-white/15 bg-white/[0.04] text-slate-300 hover:bg-white/[0.07]",
+                    ? "border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
+                    : "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20",
               )}
-              aria-label="Visibility — who can see you on the map"
-              title="Who sees you"
+              aria-label="Visibility — cycle who can see you on the map"
+              title="Click to cycle visibility"
             >
               {locationVisibility === "ghost" ? (
-                <EyeOff className="size-3.5 opacity-90" aria-hidden />
+                <EyeOff className="size-3.5" aria-hidden />
               ) : locationVisibility === "close_friends" ? (
-                <Shield className="size-3.5 opacity-90" aria-hidden />
+                <Shield className="size-3.5" aria-hidden />
               ) : (
-                <Globe className="size-3.5 opacity-90" aria-hidden />
+                <Globe className="size-3.5" aria-hidden />
               )}
               <span className="max-w-[5.5rem] truncate">
                 {locationVisibility === "ghost"
                   ? "Ghost"
                   : locationVisibility === "close_friends"
-                    ? "Close friends"
-                    : "Public"}
+                    ? "Squad"
+                    : "Live"}
               </span>
             </button>
           </div>
@@ -616,82 +624,37 @@ export const TopNavigation = (props: TopNavigationProps) => {
         </div>
       </div>
 
-      <Sheet open={visOpen} onOpenChange={setVisOpen}>
-        <SheetContent
-          side={isMobile ? "bottom" : "right"}
-          className={cn(
-            "border-border/80 bg-popover/95 text-popover-foreground backdrop-blur-xl",
-            isMobile ? "h-[62vh] max-h-[520px] rounded-t-2xl" : "w-full sm:max-w-md",
+      {/* FIXED BOTTOM-LEFT: Profile Avatar with Sport Overlay */}
+      <div className="fixed bottom-6 left-4 z-50 pointer-events-auto">
+        <div className="relative">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            type="button"
+            onClick={onOpenProfile}
+            className={cn(
+              "relative size-20 rounded-full overflow-hidden transition-all duration-300",
+              "border-2 border-white/30 bg-slate-900 shadow-[0_12px_36px_rgba(0,0,0,0.5)]",
+              "hover:border-primary/50 flex items-center justify-center"
+            )}
+            aria-label="Open profile"
+          >
+            {userAvatarUrl ? (
+              <img src={userAvatarUrl} alt="My Profile" className="size-full object-cover" />
+            ) : (
+              <UserRound className="size-10 text-slate-400" />
+            )}
+            <div className="absolute inset-0 border border-primary/10 rounded-full pointer-events-none" />
+          </motion.button>
+          
+          {/* Favorite Sport Badge Overlay - no background, just the emoji */}
+          {favoriteSport && (
+            <div className="absolute -top-1 -right-1 flex items-center justify-center text-2xl drop-shadow-lg z-10 pointer-events-none">
+              {sportEmojiFor(favoriteSport)}
+            </div>
           )}
-        >
-          <SheetHeader className="border-b border-border/70 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))] pr-12 text-left">
-            <SheetTitle className="text-lg">Location visibility</SheetTitle>
-            <SheetDescription className="text-muted-foreground">
-              Choose who can see your live location on the map.
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="px-4 py-4 space-y-2">
-            {(
-              [
-                {
-                  id: "ghost",
-                  title: "Ghost",
-                  desc: "No one can see you.",
-                  Icon: EyeOff,
-                  tone: "border-white/10 bg-white/[0.04] hover:bg-white/[0.06]",
-                },
-                {
-                  id: "close_friends",
-                  title: "Close friends",
-                  desc: "Only your close friends can see you.",
-                  Icon: Shield,
-                  tone: "border-cyan-400/25 bg-cyan-400/10 hover:bg-cyan-400/14",
-                },
-                {
-                  id: "public",
-                  title: "Public",
-                  desc: "Anyone can see you.",
-                  Icon: Globe,
-                  tone: "border-cyan-400/45 bg-cyan-400/22 hover:bg-cyan-400/28",
-                },
-              ] as const
-            ).map((opt) => {
-              const active = locationVisibility === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => {
-                    onLocationVisibilityChange?.(opt.id);
-                    setVisOpen(false);
-                  }}
-                  className={cn(
-                    "w-full rounded-2xl border p-3 text-left transition-colors",
-                    opt.tone,
-                    active ? "ring-2 ring-ring/40" : "",
-                    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                  )}
-                  aria-pressed={active}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className={cn("mt-0.5 inline-flex size-10 items-center justify-center rounded-xl border", opt.tone)}>
-                      <opt.Icon className="size-5" aria-hidden />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-foreground">{opt.title}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{opt.desc}</p>
-                    </div>
-                    {active ? (
-                      <span className="text-xs font-semibold text-primary">Selected</span>
-                    ) : null}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </SheetContent>
-      </Sheet>
+        </div>
+      </div>
     </div>
   );
 };

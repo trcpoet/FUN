@@ -963,7 +963,7 @@ export function MapboxMap(props: MapboxMapProps) {
       filter: ["has", "point_count"],
       paint: {
         "circle-color": "rgba(30, 41, 59, 0.92)",
-        "circle-radius": ["step", ["get", "point_count"], 18, 8, 22, 16, 26, 32, 30],
+        "circle-radius": ["step", ["get", "point_count"], 18, 10, 22, 50, 30],
         "circle-opacity": 0.88,
         "circle-stroke-width": 1.5,
         "circle-stroke-color": "rgba(251, 191, 36, 0.55)",
@@ -1016,42 +1016,13 @@ export function MapboxMap(props: MapboxMapProps) {
         ["!=", ["coalesce", ["get", "marker_kind"], ""], "colocated"],
       ],
       layout: {
-        "text-field": [
-          "let",
-          "rem",
-          ["max", 0, ["-", ["get", "players_total"], ["get", "players_filled"]]],
-          [
-            "case",
-            [">", ["var", "rem"], 0],
-            [
-              "format",
-              ["to-string", ["get", "players_filled"]],
-              { "font-scale": 1.15, "text-color": "#ffffff" },
-              "/",
-              { "font-scale": 0.9, "text-color": "#cbd5e1" },
-              ["to-string", ["get", "players_total"]],
-              { "font-scale": 0.9, "text-color": "#cbd5e1" },
-              ["concat", "  +", ["to-string", ["var", "rem"]]],
-              { "font-scale": 0.85, "text-color": "#fde68a" }
-            ],
-            [
-              "format",
-              ["to-string", ["get", "players_filled"]],
-              { "font-scale": 1.15, "text-color": "#ffffff" },
-              "/",
-              { "font-scale": 0.9, "text-color": "#cbd5e1" },
-              ["to-string", ["get", "players_total"]],
-              { "font-scale": 0.9, "text-color": "#cbd5e1" },
-              "  FULL",
-              { "font-scale": 0.85, "text-color": "#a7f3d0" }
-            ]
-          ]
-        ],
+        "text-field": ["concat", ["to-string", ["get", "players_filled"]], "/", ["to-string", ["get", "players_total"]]],
         "text-size": 11,
         "text-line-height": 1.05,
         "text-offset": [0, 1.55],
         "text-anchor": "top",
         "text-allow-overlap": true,
+        "text-ignore-placement": true,
         "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Regular"],
       },
       paint: {
@@ -1534,9 +1505,10 @@ export function MapboxMap(props: MapboxMapProps) {
     playerMarkersRef.current = [];
     playerMarkerEntriesRef.current = [];
 
-    const others = currentUserId
-      ? nearbyProfiles.filter((p) => p.profile_id !== currentUserId)
-      : nearbyProfiles;
+    // Ensure our own profile is included in the markers if nearbyProfiles doesn't have it
+    const others = [...nearbyProfiles].filter(
+      (p) => Number.isFinite(p.lng) && Number.isFinite(p.lat)
+    );
 
     loadMapboxGl().then((mapboxgl) => {
       others.forEach((profile) => {

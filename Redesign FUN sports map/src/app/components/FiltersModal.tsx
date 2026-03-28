@@ -158,7 +158,7 @@ function SportsFilterRow(props: {
 }
 
 export function FiltersModal(props: FiltersModalProps) {
-  const { open, onOpenChange, value, onChange, onApply, onClear } = props;
+  const { open, onOpenChange, value = DEFAULT_FILTERS, onChange, onApply, onClear } = props;
 
   const update = (patch: Partial<FiltersState>) => {
     onChange({ ...value, ...patch });

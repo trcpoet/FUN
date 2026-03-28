@@ -22,7 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { Progress } from "../ui/progress";
 import { SportIconRow } from "./SportIconRow";
 import { sportEmoji } from "../../../lib/sportVisuals";
@@ -31,24 +30,28 @@ import {
   Plus,
   Trash2,
   LogOut,
-  ChevronDown,
   ArrowLeft,
   User,
   Trophy,
   Dumbbell,
   Shield,
   Camera,
-  Sparkles,
   Eye,
   X,
+  ChevronRight,
+  TrendingUp,
+  Lock,
+  Globe,
+  Zap,
+  Settings,
 } from "lucide-react";
+import { Badge } from "../ui/badge";
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editDisplayName: string;
   onEditDisplayNameChange: (v: string) => void;
-  /** Current map / profile photo URL (2D). */
   currentAvatarUrl: string | null;
   athleteProfile: AthleteProfilePayload;
   onSaveAthleteProfile: (
@@ -56,7 +59,6 @@ type Props = {
     options?: { avatarFile: File | null }
   ) => Promise<void>;
   onSignOut?: () => void | Promise<void>;
-  /** Shown on the live dock (from user_stats). */
   profileLevel?: number;
   profileXp?: number;
 };
@@ -70,7 +72,6 @@ const SKILL_DEFAULTS = [
   { key: "playmaking", label: "Playmaking" },
 ] as const;
 
-/** Up to MAX_STRENGTHS rows for UI + save (custom labels allowed). */
 function seedStrengths(raw: SkillRating[] | undefined): SkillRating[] {
   const src = raw?.length ? [...raw] : [];
   const trimmed = src.slice(0, MAX_STRENGTHS).map((r, i) => ({
@@ -90,37 +91,7 @@ function strengthsForSave(raw: SkillRating[] | undefined): SkillRating[] {
     .slice(0, MAX_STRENGTHS);
 }
 
-type EditTab = "home" | "identity" | "sports" | "athletic" | "trust" | "more";
-
-function statValue(ratings: SkillRating[], id: "speed" | "endurance" | "defense" | "playmaking"): number {
-  const d = SKILL_DEFAULTS.find((x) => x.key === id)!;
-  const hit =
-    ratings.find((r) => r.key === id) ??
-    ratings.find((r) => r.label.trim().toLowerCase() === d.label.toLowerCase());
-  return hit?.value ?? 0;
-}
-
-function synergyMessage(ratings: SkillRating[]): string | null {
-  const m = {
-    speed: statValue(ratings, "speed"),
-    endurance: statValue(ratings, "endurance"),
-    defense: statValue(ratings, "defense"),
-    playmaking: statValue(ratings, "playmaking"),
-  };
-  if (m.speed >= 70 && m.endurance < 35) {
-    return "Balanced athletes win Sundays — try nudging endurance up.";
-  }
-  if (m.endurance >= 70 && m.speed < 35) {
-    return "Speed shows up in transition — consider raising speed for a dual threat.";
-  }
-  if (m.defense >= 65 && m.playmaking >= 65) {
-    return "Floor-general energy: defense + playmaking both high.";
-  }
-  if (m.speed >= 75 && m.defense >= 75) {
-    return "Lockdown pace — speed and defense are carrying your build.";
-  }
-  return null;
-}
+type EditTab = "home" | "identity" | "sports" | "athletic" | "more";
 
 function profileCompletenessPct(
   d: AthleteProfilePayload,
@@ -140,30 +111,12 @@ function profileCompletenessPct(
   if (seedStrengths(d.skillRatings).some((r) => r.value > 0)) ok++;
   if ((d.snapshot?.height ?? "").trim() || (d.snapshot?.weight ?? "").trim()) ok++;
   if (d.trust?.sportsmanship != null || d.trust?.showUpRate != null) ok++;
-  if ((d.performanceMetrics ?? []).length > 0) ok++;
   return Math.round((ok / total) * 100);
-}
-
-function trustMeterPercent(d: AthleteProfilePayload): { pct: number; label: string } {
-  const sm = d.trust?.sportsmanship;
-  const su = d.trust?.showUpRate;
-  let score = 0;
-  let n = 0;
-  if (sm != null && !Number.isNaN(sm)) {
-    score += Math.min(100, Math.max(0, (sm / 5) * 100));
-    n++;
-  }
-  if (su != null && !Number.isNaN(su)) {
-    score += Math.min(100, Math.max(0, su));
-    n++;
-  }
-  if (n === 0) return { pct: 0, label: "Add sportsmanship or show-up % to see reputation" };
-  return { pct: Math.round(score / n), label: "Reputation preview" };
 }
 
 function sectionCard(className?: string) {
   return cn(
-    "rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+    "rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-xl p-6 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.3)]",
     className,
   );
 }
@@ -188,7 +141,6 @@ export function ProfileEditSheet({
   const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
   const [editTab, setEditTab] = useState<EditTab>("home");
   const [sportFilter, setSportFilter] = useState("");
-  const [previewAsPublic, setPreviewAsPublic] = useState(false);
   const prevOpenRef = useRef(false);
 
   useEffect(() => {
@@ -200,7 +152,6 @@ export function ProfileEditSheet({
       setErr(null);
       setEditTab("home");
       setSportFilter("");
-      setPreviewAsPublic(false);
     }
   }, [open, athleteProfile]);
 
@@ -224,10 +175,6 @@ export function ProfileEditSheet({
     };
   }, [avatarObjectUrl]);
 
-  const setSnap = (patch: Partial<NonNullable<AthleteProfilePayload["snapshot"]>>) => {
-    setDraft((d) => ({ ...d, snapshot: { ...d.snapshot, ...patch } }));
-  };
-
   const setMainSport = (sport: string | null) => {
     setDraft((d) => {
       const prim = [...(d.primarySports ?? [])];
@@ -241,20 +188,6 @@ export function ProfileEditSheet({
         primarySports: [sport, ...rest],
         secondarySports: sec.filter((x) => x !== sport),
       };
-    });
-  };
-
-  const toggleAdditionalPrimary = (sport: string) => {
-    setDraft((d) => {
-      const main = d.primarySports?.[0];
-      if (sport === main) return d;
-      const primary = [...(d.primarySports ?? [])];
-      const idx = primary.indexOf(sport);
-      if (idx > 0) {
-        return { ...d, primarySports: primary.filter((x) => x !== sport) };
-      }
-      const secondary = (d.secondarySports ?? []).filter((x) => x !== sport);
-      return { ...d, primarySports: [...primary, sport], secondarySports: secondary };
     });
   };
 
@@ -315,1182 +248,473 @@ export function ProfileEditSheet({
     editDisplayName,
     !!(avatarObjectUrl || currentAvatarUrl)?.trim(),
   );
-  const trustMeter = trustMeterPercent(draft);
-  const synergy = synergyMessage(ratings);
-  const sportQ = sportFilter.trim().toLowerCase();
-  const filteredSports = sportQ
-    ? SPORT_OPTIONS.filter((s) => s.toLowerCase().includes(sportQ))
-    : SPORT_OPTIONS;
   const mainSport = draft.primarySports?.[0] ?? null;
-  // Tabs replaced by senior-friendly list navigation.
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
         hideCloseButton
-        className="flex h-[92vh] flex-col gap-0 overflow-hidden rounded-t-2xl border-white/10 bg-[#0A0F1C] p-0 text-white"
+        className="flex h-[94vh] flex-col gap-0 overflow-hidden rounded-t-[48px] border-white/5 bg-[#050505] p-0 text-white selection:bg-primary selection:text-white"
       >
-        {/* Mobile: Back + Close together; sm+: Close only (Back stays in header next to Preview). */}
-        <div
-          className={cn(
-            "pointer-events-none absolute left-0 right-0 top-0 z-20 flex",
-            "justify-end px-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))]",
-            "sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pt-[max(1rem,env(safe-area-inset-top))]",
-          )}
-        >
-          <div className="pointer-events-auto flex items-center gap-1.5">
-            {editTab !== "home" ? (
-              <button
-                type="button"
-                onClick={() => setEditTab("home")}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-cyan-400/90",
-                  "transition-colors hover:bg-white/[0.08] hover:text-cyan-200",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
-                  "sm:hidden",
-                )}
-                aria-label="Back to all settings"
-              >
-                <ArrowLeft className="size-4 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
-                Back
-              </button>
-            ) : null}
-            <SheetClose
-              className={cn(
-                "rounded-md p-2 opacity-90 transition-[opacity,background-color] hover:bg-white/10 hover:opacity-100",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30",
-              )}
-            >
-              <X className="size-5 text-slate-200" aria-hidden />
-              <span className="sr-only">Close</span>
-            </SheetClose>
-          </div>
+        {/* Decorative Background */}
+        <div className="fixed inset-0 pointer-events-none overflow-hidden opacity-50">
+          <div className="absolute top-0 -right-[10%] size-[40%] rounded-full bg-primary/10 blur-[100px]" />
+          <div className="absolute bottom-0 -left-[10%] size-[40%] rounded-full bg-blue-500/5 blur-[100px]" />
         </div>
 
-        <SheetHeader className="shrink-0 space-y-3 border-b border-white/[0.06] bg-[#0A0F1C] px-4 pb-3 pt-2 text-left shadow-[inset_0_-1px_0_0_rgba(255,255,255,0.03)] sm:pr-10">
-          <div className="flex flex-wrap items-start justify-between gap-2 pr-10 sm:pr-0">
-            <div className="min-w-0 flex-1 pr-2">
-              <SheetTitle className="text-lg text-white">Profile settings</SheetTitle>
-              <SheetDescription className="text-sm text-slate-500">
-                Tap a section to edit. Done saves everything.
-              </SheetDescription>
-            </div>
-            <div className="hidden shrink-0 flex-col items-end gap-1.5 sm:flex">
-              <Button
-                type="button"
-                variant={previewAsPublic ? "secondary" : "ghost"}
-                size="sm"
-                className={cn(
-                  "h-9 gap-2 border px-3 text-xs font-semibold shadow-sm",
-                  previewAsPublic
-                    ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-100 shadow-[0_8px_24px_rgba(16,185,129,0.12)]"
-                    : "border-white/12 bg-white/[0.06] text-slate-100 hover:bg-white/[0.1]",
-                )}
-                onClick={() => setPreviewAsPublic((v) => !v)}
-              >
-                <Eye className="size-3.5 shrink-0" />
-                Preview my profile
-              </Button>
-              {editTab !== "home" ? (
+        {/* Floating Header Controls */}
+        <div className="absolute left-0 right-0 top-0 z-[100] pointer-events-none">
+          <div className="mx-auto max-w-6xl w-full px-6 pt-6 flex items-center justify-between pointer-events-auto">
+            <div className="flex items-center gap-3">
+              {editTab !== "home" && (
                 <button
                   type="button"
                   onClick={() => setEditTab("home")}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-lg py-2 pl-2 pr-3 text-sm font-semibold text-cyan-400/90",
-                    "transition-colors hover:text-cyan-200 hover:bg-white/[0.06]",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
-                  )}
-                  aria-label="Back to all settings"
+                  className="flex size-10 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-primary transition-all hover:bg-primary hover:text-white hover:scale-110 active:scale-95"
+                  aria-label="Back to menu"
                 >
-                  <ArrowLeft className="size-4 shrink-0 opacity-90" strokeWidth={2.25} aria-hidden />
-                  Back
+                  <ArrowLeft className="size-5" />
                 </button>
-              ) : null}
-            </div>
-          </div>
-          <div className="flex justify-end sm:hidden">
-            <Button
-              type="button"
-              variant={previewAsPublic ? "secondary" : "ghost"}
-              size="sm"
-              className={cn(
-                "h-9 gap-2 border px-3 text-xs font-semibold shadow-sm",
-                previewAsPublic
-                  ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-100 shadow-[0_8px_24px_rgba(16,185,129,0.12)]"
-                  : "border-white/12 bg-white/[0.06] text-slate-100 hover:bg-white/[0.1]",
               )}
-              onClick={() => setPreviewAsPublic((v) => !v)}
-            >
-              <Eye className="size-3.5 shrink-0" />
-              Preview my profile
-            </Button>
-          </div>
-          <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-slate-500">
-            <span>{draft.city?.trim() ? `Home base · ${draft.city.trim()}` : "Home base · Not set"}</span>
-            <span className="tabular-nums">{completeness}% complete</span>
-          </div>
-        </SheetHeader>
-
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div
-          className={cn(
-            "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain sm:overflow-hidden",
-            /* sm: 4 cols × 6 rows — preview 2×6 | edit panel 2×6 (was 3 cols with menu 1×3 on home). */
-            "sm:grid sm:min-h-0 sm:grid-cols-4 sm:grid-rows-6 sm:gap-x-4 sm:gap-y-0 sm:px-3 sm:pb-2",
-          )}
-        >
-        <div
-          className={cn(
-            "shrink-0 border-b border-white/[0.06] bg-gradient-to-b px-4 py-4 sm:col-span-2 sm:row-span-6 sm:min-h-0 sm:h-full sm:w-auto sm:max-w-none sm:self-stretch sm:border-b-0 sm:border-r sm:border-white/[0.06] sm:py-5 sm:overflow-y-auto",
-            previewAsPublic
-              ? "from-emerald-950/35 via-[#0c1528]/60 to-[#0A0F1C]"
-              : "from-white/[0.04] via-[#0A0F1C] to-[#0A0F1C]",
-          )}
-        >
-          <div className="flex w-full flex-col items-start text-left sm:max-w-none">
-            <p className="mb-3 text-left text-[11px] font-medium uppercase tracking-[0.2em] text-slate-500">
-              Profile photo
-            </p>
-            <div className="relative shrink-0">
-              <div
-                className={cn(
-                  "overflow-hidden rounded-full border-4 border-[#080c14] bg-slate-800 shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-2 ring-white/10",
-                  editTab === "home"
-                    ? "size-32 sm:size-40 md:size-44"
-                    : "size-[7.5rem]",
-                  previewAsPublic && "ring-emerald-500/50",
-                )}
-              >
-                {(avatarObjectUrl || currentAvatarUrl)?.trim() ? (
-                  <img
-                    src={(avatarObjectUrl || currentAvatarUrl)!.trim()}
-                    alt=""
-                    className="size-full object-cover"
-                  />
-                ) : (
-                  <div className="flex size-full items-center justify-center text-4xl font-bold text-slate-500">
-                    {(editDisplayName.trim() || "?")[0]?.toUpperCase() ?? "?"}
-                  </div>
-                )}
+              <div className="flex flex-col">
+                <SheetTitle className="text-xl font-black italic tracking-tighter uppercase text-white leading-none">
+                  Athlete <span className="text-primary">Config</span>
+                </SheetTitle>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <div className="size-1 rounded-full bg-primary animate-pulse" />
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Session Active</span>
+                </div>
               </div>
-              {draft.favoriteSport?.trim() ? (
-                <span
-                  className="absolute -bottom-1 left-1 flex size-10 items-center justify-center rounded-full border-[3px] border-[#080c14] bg-slate-900 text-xl shadow-lg"
-                  title={draft.favoriteSport.trim()}
-                >
-                  {sportEmoji(draft.favoriteSport.trim())}
-                </span>
-              ) : null}
-              <label
-                htmlFor="profile-settings-avatar-file"
-                className="absolute -bottom-0.5 -right-0.5 flex size-11 cursor-pointer items-center justify-center rounded-full border-2 border-[#080c14] bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-lg shadow-emerald-900/50 transition-transform motion-safe:duration-200 hover:scale-105 active:scale-95"
-              >
-                <Camera className="size-5" aria-hidden />
-                <span className="sr-only">Change profile photo</span>
-              </label>
-              <input
-                id="profile-settings-avatar-file"
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  setAvatarFile(file);
-                  setAvatarObjectUrl((prev) => {
-                    if (prev) URL.revokeObjectURL(prev);
-                    return file ? URL.createObjectURL(file) : null;
-                  });
-                }}
-              />
             </div>
-            <p className="mt-3 text-left text-base font-semibold text-white">
-              {editDisplayName.trim() || "Your name"}
-            </p>
-            <p className="text-left font-mono text-sm text-slate-500">
-              @{(draft.handle ?? "").replace(/^@/, "") || "handle"}
-            </p>
-            {draft.bio?.trim() ? (
-              <p className="mt-2 max-w-[16rem] text-left text-xs leading-relaxed text-slate-300 line-clamp-4">
-                {draft.bio.trim()}
-              </p>
-            ) : null}
-            {(() => {
-              const home =
-                draft.snapshot?.neighbourhood?.trim() || draft.city?.trim() || null;
-              return home ? (
-                <p className="mt-2 max-w-[16rem] text-left text-[11px] text-slate-400">
-                  <span className="font-medium text-slate-500">Home base · </span>
-                  {home}
-                </p>
-              ) : null;
-            })()}
-            {draft.snapshot?.occupation?.trim() ? (
-              <p className="mt-1 max-w-[16rem] text-left text-[11px] text-slate-400">
-                <span className="font-medium text-slate-500">Work · </span>
-                {draft.snapshot.occupation.trim()}
-              </p>
-            ) : null}
-            {draft.snapshot?.university?.trim() ? (
-              <p className="mt-0.5 max-w-[16rem] text-left text-[11px] text-slate-400">
-                <span className="font-medium text-slate-500">School · </span>
-                {draft.snapshot.university.trim()}
-              </p>
-            ) : null}
-            <p className="mt-3 max-w-[16rem] text-left text-xs leading-relaxed text-slate-500">
-              Tap the green button to choose a new photo. Hit <span className="text-slate-200">Done</span> when you&apos;re
-              finished.
-            </p>
-            {avatarFile ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="mt-2 h-8 text-xs text-slate-400 hover:text-white"
-                onClick={() => {
-                  setAvatarFile(null);
-                  setAvatarObjectUrl((prev) => {
-                    if (prev) URL.revokeObjectURL(prev);
-                    return null;
-                  });
-                  const el = document.getElementById("profile-settings-avatar-file") as HTMLInputElement | null;
-                  if (el) el.value = "";
-                }}
-              >
-                Revert to current photo
-              </Button>
-            ) : null}
-            <div className="mt-4 w-full space-y-2 border-t border-white/[0.08] pt-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
-                <span>Preview</span>
-                <span className="tabular-nums">
-                  Lvl {profileLevel} · {profileXp.toLocaleString()} XP
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5">
+                {draft.is_private ? (
+                  <Lock className="size-3.5 text-primary" />
+                ) : (
+                  <Globe className="size-3.5 text-emerald-400" />
+                )}
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                  {draft.is_private ? "Private Account" : "Public Profile"}
                 </span>
+                <Switch
+                  checked={!!draft.is_private}
+                  onCheckedChange={(v) => setDraft((d) => ({ ...d, is_private: v }))}
+                  className="scale-75"
+                />
               </div>
-              <SportIconRow sports={draft.primarySports ?? []} size="sm" className="justify-start gap-1.5" />
-              <div className="flex flex-col gap-1.5 sm:hidden">
-                {ratings.slice(0, MAX_STRENGTHS).map((s) => (
-                  <div key={s.key} className="flex items-center gap-2">
-                    <span className="w-16 truncate text-[9px] font-medium uppercase tracking-wide text-slate-500">
-                      {s.label}
-                    </span>
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400"
-                        style={{ width: `${s.value}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="hidden flex-col gap-1.5 sm:flex">
-                {ratings.slice(0, MAX_STRENGTHS).map((s) => (
-                  <div key={s.key} className="flex items-center gap-2">
-                    <span className="w-24 truncate text-[9px] font-medium uppercase tracking-wide text-slate-500">
-                      {s.label}
-                    </span>
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400"
-                        style={{ width: `${s.value}%` }}
-                      />
-                    </div>
-                    <span className="w-7 text-right text-[9px] tabular-nums text-slate-400">{s.value}</span>
-                  </div>
-                ))}
-              </div>
+              <SheetClose className="size-10 flex items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-slate-400 hover:text-white hover:bg-white/[0.08] transition-all">
+                <X className="size-5" />
+              </SheetClose>
             </div>
           </div>
         </div>
 
-        <div
-          className={cn(
-            "flex min-w-0 shrink-0 flex-col sm:min-h-0 sm:flex-1 sm:overflow-y-auto",
-            "sm:col-span-2 sm:row-span-6 sm:col-start-3",
-          )}
-        >
-
-        <div className="px-0 sm:min-h-0 sm:flex-1 sm:overflow-y-auto">
-          {/* Home: fill narrow grid column; sub-pages: cap line length for forms */}
-          <div
-            className={cn(
-              "mx-auto w-full px-4 py-4 pb-8",
-              editTab === "home" ? "max-w-full space-y-3" : "max-w-lg space-y-6 xl:max-w-xl 2xl:max-w-2xl",
-            )}
-          >
-            {err && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-                {err}
-              </div>
-            )}
-
-            {editTab === "home" && (
-              <section
-                className={cn(
-                  "flex flex-col gap-1.5 sm:gap-2",
-                  sectionCard(),
-                )}
-              >
-                <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="size-4 shrink-0 text-emerald-400/90" />
-                    <h3 className="text-sm font-semibold tracking-wide text-slate-200">Edit your profile</h3>
-                  </div>
-                  <p className="text-xs leading-snug text-slate-400 sm:text-sm">
-                    Pick one section. Keep it simple — you can come back anytime.
-                  </p>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-24">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain sm:grid sm:grid-cols-4 sm:px-6 sm:pb-6 gap-6">
+            
+            {/* Left Column: Profile Preview Visuals (Shrunken for Mobile) */}
+            <div className="sm:col-span-2 overflow-y-auto pr-2 space-y-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <section className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-xl p-6 sm:p-8 shadow-2xl relative overflow-hidden group shrink-0">
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <TrendingUp className="size-24 sm:size-32 -rotate-12" />
                 </div>
-
-                <div className="flex flex-col gap-2">
-                {(
-                  [
-                    {
-                      id: "identity",
-                      title: "My name & photo",
-                      desc: "Name, handle, home base, and bio.",
-                      Icon: User,
-                    },
-                    {
-                      id: "sports",
-                      title: "Sports I play",
-                      desc: "Main sport, extra sports, and skill level.",
-                      Icon: Trophy,
-                    },
-                    {
-                      id: "athletic",
-                      title: "Skill & availability",
-                      desc: "Strength sliders, positions, and how you like to play.",
-                      Icon: Dumbbell,
-                    },
-                    {
-                      id: "trust",
-                      title: "Reputation (optional)",
-                      desc: "Show-up % and sportsmanship rating.",
-                      Icon: Shield,
-                    },
-                    {
-                      id: "more",
-                      title: "More",
-                      desc: "Log out and advanced options.",
-                      Icon: ChevronDown,
-                    },
-                  ] as const
-                ).map((row) => (
-                  <button
-                    key={row.id}
-                    type="button"
-                    onClick={() => setEditTab(row.id)}
-                    className={cn(
-                      "flex min-h-0 w-full flex-col rounded-2xl border border-white/[0.08] bg-white/[0.02] p-2.5 text-left transition-colors sm:p-3",
-                      "hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40",
-                    )}
-                  >
-                    <div className="flex min-h-0 flex-1 flex-row items-start gap-2">
-                      <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-200 sm:mt-0.5 sm:size-10">
-                        <row.Icon className="size-4 sm:size-5" aria-hidden />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold leading-tight text-white sm:text-sm">{row.title}</p>
-                        <p className="mt-0.5 line-clamp-3 text-[10px] leading-snug text-slate-500 sm:line-clamp-none sm:text-xs">
-                          {row.desc}
-                        </p>
-                      </div>
-                      <ChevronDown
-                        className="size-3 shrink-0 -rotate-90 text-slate-600 sm:mt-1 sm:size-4"
-                        aria-hidden
-                      />
+                
+                <div className="relative z-10 flex flex-col items-center sm:items-start text-center sm:text-left">
+                  <div className="relative group/avatar">
+                    <div className="absolute -inset-1 rounded-full bg-gradient-to-br from-primary to-blue-500 opacity-20 blur-lg group-hover/avatar:opacity-40 transition-opacity" />
+                    <div className={cn(
+                      "relative overflow-hidden rounded-full border-[4px] sm:border-[6px] border-[#050505] bg-slate-800 shadow-2xl ring-2 ring-white/10 transition-all duration-500",
+                      "size-24 sm:size-40"
+                    )}>
+                      {(avatarObjectUrl || currentAvatarUrl)?.trim() ? (
+                        <img src={(avatarObjectUrl || currentAvatarUrl)!.trim()} alt="" className="size-full object-cover" />
+                      ) : (
+                        <div className="flex size-full items-center justify-center text-3xl sm:text-5xl font-black italic tracking-tighter text-slate-500">
+                          {(editDisplayName.trim() || "?")[0]?.toUpperCase() ?? "?"}
+                        </div>
+                      )}
                     </div>
-                  </button>
-                ))}
+                    
+                    <label htmlFor="profile-settings-avatar-file" className="absolute -bottom-1 -right-1 flex size-10 sm:size-12 cursor-pointer items-center justify-center rounded-full border-2 sm:border-4 border-[#050505] bg-primary text-white shadow-xl hover:scale-110 active:scale-95 transition-all group-hover/avatar:rotate-12">
+                      <Camera className="size-4 sm:size-5" />
+                    </label>
+                    <input id="profile-settings-avatar-file" type="file" accept="image/*" className="sr-only" onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      setAvatarFile(file);
+                      setAvatarObjectUrl((prev) => {
+                        if (prev) URL.revokeObjectURL(prev);
+                        return file ? URL.createObjectURL(file) : null;
+                      });
+                    }} />
+                  </div>
+
+                  <div className="mt-4 sm:mt-6 space-y-1">
+                    <h3 className="text-xl sm:text-2xl font-black italic tracking-tighter uppercase text-white leading-none">
+                      {editDisplayName.trim() || "Player One"}
+                    </h3>
+                    <p className="text-xs sm:text-sm font-bold text-primary tracking-tight">
+                      @{(draft.handle ?? "").replace(/^@/, "") || "handle_missing"}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 sm:mt-6 w-full space-y-3 sm:space-y-4 border-t border-white/[0.05] pt-4 sm:pt-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-white/[0.05] text-slate-400 border-none font-black text-[8px] sm:text-[9px] uppercase tracking-widest px-2 py-0.5 sm:py-1">BUILD v1.0</Badge>
+                        <span className="text-[9px] sm:text-[10px] font-black italic text-white uppercase tracking-tighter">LVL {profileLevel}</span>
+                      </div>
+                      <span className="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-widest tabular-nums">{completeness}% COMPLETE</span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                      {ratings.slice(0, MAX_STRENGTHS).map((s) => (
+                        <div key={s.key} className="space-y-1.5 p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-white/[0.02] border border-white/[0.05]">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest text-slate-500 truncate">{s.label}</span>
+                            <span className="text-[9px] sm:text-[10px] font-black italic text-white tabular-nums">{s.value}</span>
+                          </div>
+                          <div className="h-1 w-full overflow-hidden rounded-full bg-white/5">
+                            <div className="h-full rounded-full bg-primary" style={{ width: `${s.value}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Performance Metrics Preview */}
+                  { (draft.performanceMetrics ?? []).length > 0 && (
+                    <div className="mt-4 sm:mt-6 w-full flex flex-wrap gap-1.5 sm:gap-2">
+                      {(draft.performanceMetrics ?? []).map((m) => (
+                        <div key={m.id} className="flex items-center gap-1.5 px-2 py-1 rounded-xl bg-white/[0.03] border border-white/5">
+                          <Zap className="size-2.5 text-primary fill-current" />
+                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">{m.label}</span>
+                          <span className="text-[10px] font-black text-white">{m.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </section>
-            )}
+            </div>
 
-            {editTab === "more" && (
-              <section className={cn("space-y-3", sectionCard())}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold tracking-wide text-slate-200">More</h3>
+            {/* Right Column: Edit Controls */}
+            <div className="sm:col-span-2 flex flex-col min-h-0">
+              <div className={cn(
+                "flex-1 overflow-y-auto px-1 pb-32",
+                editTab === "home" ? "space-y-3 sm:space-y-4" : "space-y-4 sm:space-y-6"
+              )}>
+                {err && (
+                  <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs font-bold text-rose-200">
+                    SYSTEM_ERR: {err}
                   </div>
-                </div>
-                <p className="text-sm text-slate-400">Advanced actions.</p>
+                )}
 
-                {onSignOut ? (
+                {editTab === "home" && (
+                  <div className="grid gap-2 sm:gap-3">
+                    {(
+                      [
+                        { id: "identity", title: "IDENTITY", desc: "Identity, handles, home base", Icon: User },
+                        { id: "sports", title: "ROSTER", desc: "Main disciplines & tier", Icon: Trophy },
+                        { id: "athletic", title: "SNAPSHOT", desc: "Combat stats & metrics", Icon: Dumbbell },
+                        { id: "more", title: "SYSTEM", desc: "Auth & advanced settings", Icon: Lock },
+                      ] as const
+                    ).map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => setEditTab(row.id)}
+                        className="group flex items-center gap-3 sm:gap-4 p-4 sm:p-5 rounded-[24px] sm:rounded-3xl border border-white/[0.05] bg-white/[0.02] text-left transition-all hover:bg-white/[0.05] hover:border-primary/20 active:scale-[0.98]"
+                      >
+                        <div className="size-10 sm:size-12 rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-center text-slate-400 group-hover:text-primary transition-colors">
+                          <row.Icon className="size-4 sm:size-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs sm:text-sm font-black italic uppercase tracking-tighter text-white">{row.title}</p>
+                          <p className="text-[9px] sm:text-[10px] font-medium text-slate-500 uppercase tracking-widest mt-0.5">{row.desc}</p>
+                        </div>
+                        <ChevronRight className="size-3.5 sm:size-4 text-slate-700 group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {editTab === "identity" && (
+                  <div className={sectionCard("space-y-6 animate-in fade-in slide-in-from-right-4 duration-500")}>
+                    <div className="space-y-4">
+                      <div className="space-y-2 px-1">
+                        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Global Display Name</Label>
+                        <Input value={editDisplayName} onChange={(e) => onEditDisplayNameChange(e.target.value)} className="h-12 rounded-2xl bg-white/[0.03] border-white/5 text-white font-bold" />
+                      </div>
+                      <div className="space-y-2 px-1">
+                        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Athlete Handle</Label>
+                        <Input value={draft.handle ?? ""} onChange={(e) => setDraft((d) => ({ ...d, handle: e.target.value || null }))} placeholder="handle" className="h-12 rounded-2xl bg-white/[0.03] border-white/5 text-primary font-black italic uppercase tracking-tighter" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 px-1">
+                        <div className="space-y-2">
+                          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Home Base</Label>
+                          <Input value={draft.city ?? ""} onChange={(e) => setDraft((d) => ({ ...d, city: e.target.value || null }))} placeholder="City, State" className="h-12 rounded-2xl bg-white/[0.03] border-white/5 text-white" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Availability</Label>
+                          <Select value={draft.availability ?? "open_to_games"} onValueChange={(v) => setDraft((d) => ({ ...d, availability: v as AvailabilityValue }))}>
+                            <SelectTrigger className="h-12 rounded-2xl bg-white/[0.03] border-white/5 text-white uppercase text-[10px] font-black">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#0D1117] border-white/10 rounded-2xl">
+                              {AVAILABILITY_OPTIONS.map((o) => (
+                                <SelectItem key={o.value} value={o.value} className="uppercase text-[10px] font-black">{o.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="space-y-2 px-1">
+                        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Athlete Manifesto</Label>
+                        <Textarea value={draft.bio ?? ""} onChange={(e) => setDraft((d) => ({ ...d, bio: e.target.value || null }))} placeholder="Explosive winger. Competitive runs only." rows={3} className="rounded-2xl bg-white/[0.03] border-white/5 text-white font-medium italic resize-none" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {editTab === "sports" && (
+                  <div className={sectionCard("space-y-6 animate-in fade-in slide-in-from-right-4 duration-500")}>
+                    <div className="space-y-6">
+                      <div className="space-y-2 px-1">
+                        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Primary Discipline</Label>
+                        <Select value={mainSport ?? "__none__"} onValueChange={(v) => setMainSport(v === "__none__" ? null : v)}>
+                          <SelectTrigger className="h-12 rounded-2xl bg-white/[0.03] border-white/5 text-white font-black uppercase italic tracking-tighter">
+                            <SelectValue placeholder="SELECT MAIN" />
+                          </SelectTrigger>
+                          <SelectContent className="bg-[#0D1117] border-white/10 rounded-2xl max-h-60">
+                            <SelectItem value="__none__">NONE</SelectItem>
+                            {SPORT_OPTIONS.map((s) => (
+                              <SelectItem key={`main-${s}`} value={s}>{s.toUpperCase()}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-3 px-1">
+                        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Secondary Roster</Label>
+                        <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2 rounded-2xl bg-white/[0.02] border border-white/5 p-2">
+                          {SPORT_OPTIONS.map((sport) => {
+                            const inPrimary = (draft.primarySports ?? []).includes(sport);
+                            const isOn = (draft.secondarySports ?? []).includes(sport);
+                            if (inPrimary) return null;
+                            return (
+                              <button
+                                key={`sec-${sport}`}
+                                type="button"
+                                onClick={() => toggleSecondarySport(sport)}
+                                className={cn(
+                                  "flex items-center gap-2 p-2 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all",
+                                  isOn 
+                                    ? "bg-primary/10 border-primary/30 text-primary" 
+                                    : "bg-white/[0.02] border-white/5 text-slate-500 hover:text-white"
+                                )}
+                              >
+                                <span className="text-sm">{sportEmoji(sport)}</span>
+                                {sport}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 px-1">
+                        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Skill Tier</Label>
+                        <Select value={defaultLevel ?? "intermediate"} onValueChange={(v) => setDefaultLevel(v as SportSkillEntry["level"])}>
+                          <SelectTrigger className="h-12 rounded-2xl bg-white/[0.03] border-white/5 text-primary font-black uppercase italic tracking-tighter shadow-lg shadow-primary/10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-[#0D1117] border-white/10 rounded-2xl">
+                            {["casual", "intermediate", "advanced", "competitive"].map(l => (
+                              <SelectItem key={l} value={l} className="font-black uppercase italic tracking-tighter">{l.toUpperCase()}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {editTab === "athletic" && (
+                  <div className={sectionCard("space-y-6 animate-in fade-in slide-in-from-right-4 duration-500")}>
+                    
+                    <div className="space-y-4">
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Combat Attributes</Label>
+                      {ratings.map((row, idx) => (
+                        <div key={`${row.key}-${idx}`} className="space-y-4 p-4 rounded-3xl bg-white/[0.02] border border-white/5">
+                          <div className="space-y-2">
+                            <Label className="text-[9px] font-black uppercase tracking-widest text-slate-500 px-1">Attribute Name</Label>
+                            <Input
+                              value={row.label}
+                              onChange={(e) => {
+                                const label = e.target.value;
+                                setDraft((d) => {
+                                  const list = [...seedStrengths(d.skillRatings)];
+                                  if (!list[idx]) return d;
+                                  list[idx] = { ...list[idx], label };
+                                  return { ...d, skillRatings: list };
+                                });
+                              }}
+                              className="h-10 rounded-xl bg-white/[0.03] border-white/5 text-white font-black uppercase italic tracking-tighter"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center px-1">
+                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Power Level</span>
+                              <span className="text-sm font-black italic text-primary">{row.value}</span>
+                            </div>
+                            <Slider value={[row.value]} max={100} step={1} variant="game" onValueChange={([n]) => setDraft((d) => {
+                              const list = [...seedStrengths(d.skillRatings)];
+                              if (!list[idx]) return d;
+                              list[idx] = { ...list[idx], value: n };
+                              return { ...d, skillRatings: list };
+                            })} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="border-t border-white/[0.05] pt-6 space-y-4">
+                      <div className="flex items-center justify-between px-1">
+                        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Performance Metrics</Label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-7 px-2 rounded-lg bg-primary/10 text-primary font-black text-[9px] uppercase"
+                          onClick={() => {
+                            setDraft(d => ({
+                              ...d,
+                              performanceMetrics: [
+                                ...(d.performanceMetrics ?? []),
+                                { 
+                                  id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `m-${Date.now()}`, 
+                                  label: "New Metric", 
+                                  value: "0" 
+                                }
+                              ]
+                            }));
+                          }}
+                        >
+                          <Plus className="size-3 mr-1" /> Add
+                        </Button>
+                      </div>
+                      
+                      <div className="grid gap-3">
+                        {(draft.performanceMetrics ?? []).map((m, idx) => (
+                          <div key={m.id} className="flex items-center gap-3 p-3 rounded-2xl bg-white/[0.02] border border-white/5 group">
+                            <div className="size-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                              <Zap className="size-4 text-primary fill-current" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 flex-1">
+                              <div className="space-y-1">
+                                <Label className="text-[8px] font-black text-slate-600 uppercase ml-1">Metric Name</Label>
+                                <Input
+                                  value={m.label}
+                                  onChange={(e) => {
+                                    const label = e.target.value;
+                                    setDraft(d => {
+                                      const list = [...(d.performanceMetrics ?? [])];
+                                      list[idx] = { ...list[idx], label };
+                                      return { ...d, performanceMetrics: list };
+                                    });
+                                  }}
+                                  placeholder="e.g. Max Bench"
+                                  className="h-8 rounded-lg bg-white/[0.03] border-white/5 text-[10px] font-bold uppercase tracking-tight"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[8px] font-black text-slate-600 uppercase ml-1">Quantity</Label>
+                                <Input
+                                  value={String(m.value)}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDraft(d => {
+                                      const list = [...(d.performanceMetrics ?? [])];
+                                      list[idx] = { ...list[idx], value: val };
+                                      return { ...d, performanceMetrics: list };
+                                    });
+                                  }}
+                                  placeholder="e.g. 225 lbs"
+                                  className="h-8 rounded-lg bg-white/[0.03] border-white/5 text-[10px] font-bold text-white"
+                                />
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDraft(d => ({
+                                  ...d,
+                                  performanceMetrics: (d.performanceMetrics ?? []).filter((_, i) => i !== idx)
+                                }));
+                              }}
+                              className="p-2 text-slate-600 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          </div>
+                        ))}
+                        
+                        {(draft.performanceMetrics ?? []).length === 0 && (
+                          <div className="py-8 text-center rounded-3xl border border-dashed border-white/5 bg-white/[0.01]">
+                            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">No metrics added</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {editTab === "more" && (
+                  <div className={sectionCard("space-y-6 animate-in fade-in slide-in-from-right-4 duration-500")}>
+                    <div className="space-y-4">
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Public Verification</Label>
+                      <div className="flex items-center justify-between p-5 rounded-[32px] bg-white/[0.02] border border-white/5">
+                        <div className="flex items-center gap-3">
+                          <Trophy className="size-5 text-amber-400" />
+                          <div>
+                            <p className="text-xs font-black uppercase tracking-tighter text-white">Verified Status</p>
+                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Show verified crest</p>
+                          </div>
+                        </div>
+                        <Switch checked={!!draft.verified} onCheckedChange={(v) => setDraft((d) => ({ ...d, verified: v }))} />
+                      </div>
+
+                      {onSignOut && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-14 w-full rounded-[32px] bg-rose-500/5 border border-rose-500/10 text-rose-500 font-black uppercase tracking-widest text-[10px] hover:bg-rose-500 hover:text-white transition-all mt-4"
+                          onClick={() => { void Promise.resolve(onSignOut()); onOpenChange(false); }}
+                        >
+                          <LogOut className="mr-3 size-4" />
+                          Terminate Session
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Persistent Sticky Footer for Actions */}
+              <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-[#050505] via-[#050505]/90 to-transparent pointer-events-none">
+                <div className="mx-auto max-w-lg flex flex-col gap-3 pointer-events-auto">
                   <Button
                     type="button"
-                    variant="outline"
-                    className="h-11 w-full border-red-500/35 text-sm text-red-300 hover:bg-red-500/10 hover:text-red-200"
-                    onClick={() => {
-                      void Promise.resolve(onSignOut());
-                      onOpenChange(false);
-                    }}
+                    className="h-14 w-full bg-primary text-white shadow-[0_20px_40px_-10px_rgba(225,29,72,0.4)] rounded-[32px] font-black uppercase tracking-[0.2em] italic tracking-tighter hover:scale-[1.02] active:scale-[0.98] transition-all"
+                    disabled={saving}
+                    onClick={() => void handleSave()}
                   >
-                    <LogOut className="mr-2 size-4" />
-                    Log out
+                    {saving ? "SAVING_PROFILE..." : "FINALIZE_CHANGES"}
                   </Button>
-                ) : null}
-              </section>
-            )}
-
-            {editTab === "identity" && (
-            <section className={cn("space-y-3", sectionCard())}>
-              <div className="flex items-center gap-2">
-                <Sparkles className="size-4 text-emerald-400/90" />
-                <h3 className="text-sm font-semibold tracking-wide text-slate-200">Identity</h3>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Display name</Label>
-                <Input
-                  value={editDisplayName}
-                  onChange={(e) => onEditDisplayNameChange(e.target.value)}
-                  className="bg-white/5 border-white/10"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Favorite sport</Label>
-                <p className="text-xs text-slate-500">Badge on your profile photo (optional).</p>
-                <Select
-                  value={draft.favoriteSport?.trim() ? draft.favoriteSport.trim() : "__none__"}
-                  onValueChange={(v) =>
-                    setDraft((d) => ({
-                      ...d,
-                      favoriteSport: v === "__none__" ? null : v,
-                    }))
-                  }
-                >
-                  <SelectTrigger className="bg-white/5 border-white/10">
-                    <SelectValue placeholder="None" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#121a2e] border-white/10 text-white max-h-60">
-                    <SelectItem value="__none__">None</SelectItem>
-                    {SPORT_OPTIONS.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Handle</Label>
-                <Input
-                  value={draft.handle ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, handle: e.target.value || null }))}
-                  placeholder="alexplays"
-                  className="bg-white/5 border-white/10 font-mono text-sm"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">City / area</Label>
-                <Input
-                  value={draft.city ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, city: e.target.value || null }))}
-                  placeholder="Arlington, TX"
-                  className="bg-white/5 border-white/10"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Neighbourhood</Label>
-                <Input
-                  value={draft.snapshot?.neighbourhood ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      snapshot: { ...d.snapshot, neighbourhood: e.target.value || null },
-                    }))
-                  }
-                  placeholder="e.g. Clarendon, campus district"
-                  className="bg-white/5 border-white/10"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Occupation</Label>
-                <Input
-                  value={draft.snapshot?.occupation ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      snapshot: { ...d.snapshot, occupation: e.target.value || null },
-                    }))
-                  }
-                  placeholder="e.g. Student, coach, analyst"
-                  className="bg-white/5 border-white/10"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">University</Label>
-                <Input
-                  value={draft.snapshot?.university ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      snapshot: { ...d.snapshot, university: e.target.value || null },
-                    }))
-                  }
-                  placeholder="e.g. State University"
-                  className="bg-white/5 border-white/10"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Athlete tagline</Label>
-                <Textarea
-                  value={draft.bio ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, bio: e.target.value || null }))}
-                  placeholder="Explosive winger. Competitive runs only."
-                  rows={3}
-                  className="bg-white/5 border-white/10 resize-none"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Availability</Label>
-                <Select
-                  value={draft.availability ?? "open_to_games"}
-                  onValueChange={(v) =>
-                    setDraft((d) => ({ ...d, availability: v as AvailabilityValue }))
-                  }
-                >
-                  <SelectTrigger className="bg-white/5 border-white/10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#121a2e] border-white/10 text-white">
-                    {AVAILABILITY_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Tier label (optional)</Label>
-                <Input
-                  value={draft.athleteTierLabel ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, athleteTierLabel: e.target.value || null }))}
-                  placeholder="e.g. Club · A division"
-                  className="bg-white/5 border-white/10"
-                />
-              </div>
-
-              <div className="border-t border-white/[0.07] pt-4">
-                <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  Badges &amp; visibility
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                <div
-                  className={cn(
-                    "rounded-xl border p-4 motion-safe:transition-colors motion-safe:duration-200",
-                    draft.verified
-                      ? "border-amber-400/30 bg-gradient-to-br from-amber-500/10 to-transparent"
-                      : "border-white/[0.08] bg-white/[0.02]",
-                  )}
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-medium text-amber-100/95">Verified crest</p>
-                      <p className="text-xs text-slate-500">Self-claim for now — real verify can replace later.</p>
-                    </div>
-                    <Trophy className="size-5 text-amber-400/80" />
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                    <span className="text-xs text-slate-400">Display on profile</span>
-                    <Switch
-                      checked={!!draft.verified}
-                      onCheckedChange={(v) => setDraft((d) => ({ ...d, verified: v }))}
-                    />
-                  </div>
                 </div>
-                <div
-                  className={cn(
-                    "rounded-xl border p-4 motion-safe:transition-colors motion-safe:duration-200",
-                    draft.sportsmanshipBadge
-                      ? "border-emerald-400/30 bg-gradient-to-br from-emerald-500/10 to-transparent"
-                      : "border-white/[0.08] bg-white/[0.02]",
-                  )}
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-medium text-emerald-100/95">Fair play trophy</p>
-                      <p className="text-xs text-slate-500">Show others you prioritize clean competition.</p>
-                    </div>
-                    <Shield className="size-5 text-emerald-400/80" />
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                    <span className="text-xs text-slate-400">Display on profile</span>
-                    <Switch
-                      checked={!!draft.sportsmanshipBadge}
-                      onCheckedChange={(v) => setDraft((d) => ({ ...d, sportsmanshipBadge: v }))}
-                    />
-                  </div>
-                </div>
-                </div>
-              </div>
-            </section>
-            )}
-
-            {editTab === "sports" && (
-            <section className={cn("space-y-4", sectionCard())}>
-              <div className="flex items-center gap-2">
-                <Trophy className="size-4 text-amber-300/90" />
-                <h3 className="text-sm font-semibold tracking-wide text-slate-200">Sports roster</h3>
-              </div>
-              <p className="text-xs text-slate-500">
-                Pick one <span className="text-emerald-400/90">main</span> sport, add same-tier extras, then casual
-                secondaries.
-              </p>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Main sport</Label>
-                <Select
-                  value={mainSport ?? "__none__"}
-                  onValueChange={(v) => setMainSport(v === "__none__" ? null : v)}
-                >
-                  <SelectTrigger className="bg-white/5 border-white/10">
-                    <SelectValue placeholder="Select main" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-60 bg-[#121a2e] border-white/10 text-white">
-                    <SelectItem value="__none__">None</SelectItem>
-                    {SPORT_OPTIONS.map((s) => (
-                      <SelectItem key={`main-${s}`} value={s}>
-                        {s}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Also compete in (same tier)</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {filteredSports.map((sport) => {
-                    const isOn = (draft.primarySports ?? []).includes(sport) && sport !== mainSport;
-                    return (
-                      <button
-                        key={`ap-${sport}`}
-                        type="button"
-                        disabled={!mainSport || sport === mainSport}
-                        onClick={() => toggleAdditionalPrimary(sport)}
-                        className={cn(
-                          "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors motion-safe:duration-200",
-                          !mainSport || sport === mainSport
-                            ? "cursor-not-allowed opacity-40"
-                            : isOn
-                              ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-100"
-                              : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/20",
-                        )}
-                      >
-                        <span aria-hidden>{sportEmoji(sport)}</span>
-                        {sport}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Secondary (casual)</Label>
-                <Input
-                  placeholder="Search sports…"
-                  value={sportFilter}
-                  onChange={(e) => setSportFilter(e.target.value)}
-                  className="bg-white/5 border-white/10 h-9 text-sm"
-                />
-                <div className="max-h-40 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-2">
-                  <div className="flex flex-wrap gap-1.5">
-                    {filteredSports.map((sport) => {
-                      const inPrimary = (draft.primarySports ?? []).includes(sport);
-                      const isOn = (draft.secondarySports ?? []).includes(sport);
-                      return (
-                        <button
-                          key={`sec-${sport}`}
-                          type="button"
-                          disabled={inPrimary}
-                          onClick={() => toggleSecondarySport(sport)}
-                          className={cn(
-                            "flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors motion-safe:duration-200",
-                            inPrimary
-                              ? "cursor-not-allowed opacity-30"
-                              : isOn
-                                ? "border-cyan-500/45 bg-cyan-500/12 text-cyan-100"
-                                : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/20",
-                          )}
-                        >
-                          <span aria-hidden className="text-sm">
-                            {sportEmoji(sport)}
-                          </span>
-                          {sport}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-400">Level for primary sports</Label>
-                <Select
-                  value={defaultLevel ?? "intermediate"}
-                  onValueChange={(v) => setDefaultLevel(v as SportSkillEntry["level"])}
-                >
-                  <SelectTrigger className="bg-white/5 border-white/10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#121a2e] border-white/10 text-white">
-                    <SelectItem value="casual">Casual</SelectItem>
-                    <SelectItem value="intermediate">Intermediate</SelectItem>
-                    <SelectItem value="advanced">Advanced</SelectItem>
-                    <SelectItem value="competitive">Competitive</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </section>
-            )}
-
-            {editTab === "athletic" && (
-            <>
-            <section className={cn("space-y-3", sectionCard())}>
-              <h3 className="text-sm font-semibold tracking-wide text-slate-200">Athletic snapshot</h3>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-slate-500 text-xs">Height</Label>
-                  <Input
-                    value={draft.snapshot?.height ?? ""}
-                    onChange={(e) => setSnap({ height: e.target.value || null })}
-                    className="bg-white/5 border-white/10 h-9"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-slate-500 text-xs">Weight</Label>
-                  <Input
-                    value={draft.snapshot?.weight ?? ""}
-                    onChange={(e) => setSnap({ weight: e.target.value || null })}
-                    className="bg-white/5 border-white/10 h-9"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-slate-500 text-xs">Hand / foot</Label>
-                  <Input
-                    value={draft.snapshot?.handedness ?? ""}
-                    onChange={(e) => setSnap({ handedness: e.target.value || null })}
-                    className="bg-white/5 border-white/10 h-9"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-slate-500 text-xs">Positions (comma)</Label>
-                  <Input
-                    value={(draft.snapshot?.positions ?? []).join(", ")}
-                    onChange={(e) =>
-                      setSnap({
-                        positions: e.target.value
-                          .split(",")
-                          .map((x) => x.trim())
-                          .filter(Boolean),
-                      })
-                    }
-                    className="bg-white/5 border-white/10 h-9"
-                  />
-                </div>
-                <div className="col-span-2 space-y-1">
-                  <Label className="text-slate-500 text-xs">Play style</Label>
-                  <Input
-                    value={draft.snapshot?.playStyle ?? ""}
-                    onChange={(e) => setSnap({ playStyle: e.target.value || null })}
-                    className="bg-white/5 border-white/10 h-9"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-slate-500 text-xs">Years experience</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={draft.snapshot?.yearsExperience ?? ""}
-                    onChange={(e) =>
-                      setSnap({
-                        yearsExperience: e.target.value === "" ? null : Number(e.target.value),
-                      })
-                    }
-                    className="bg-white/5 border-white/10 h-9"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-slate-500 text-xs">Fitness focus</Label>
-                  <Input
-                    value={draft.snapshot?.fitnessFocus ?? ""}
-                    onChange={(e) => setSnap({ fitnessFocus: e.target.value || null })}
-                    className="bg-white/5 border-white/10 h-9"
-                  />
-                </div>
-                <div className="col-span-2 space-y-1">
-                  <Label className="text-slate-500 text-xs">Intensity</Label>
-                  <Select
-                    value={draft.snapshot?.intensity ?? "none"}
-                    onValueChange={(v) =>
-                      setSnap({
-                        intensity: v === "none" ? null : (v as "low" | "moderate" | "high"),
-                      })
-                    }
-                  >
-                    <SelectTrigger className="bg-white/5 border-white/10 h-9">
-                      <SelectValue placeholder="Select" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-[#121a2e] border-white/10 text-white">
-                      <SelectItem value="none">—</SelectItem>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="moderate">Moderate</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </section>
-
-            <section className={cn("space-y-3", sectionCard())}>
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold tracking-wide text-slate-200">Performance metrics</h3>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 cursor-pointer text-emerald-400"
-                  onClick={() =>
-                    setDraft((d) => ({
-                      ...d,
-                      performanceMetrics: [
-                        ...(d.performanceMetrics ?? []),
-                        {
-                          id: `m-${Date.now()}`,
-                          label: "",
-                          value: "",
-                          sportKeys: [],
-                        },
-                      ],
-                    }))
-                  }
-                >
-                  <Plus className="size-4 mr-1" /> Add
-                </Button>
-              </div>
-              <p className="text-xs text-slate-500">
-                Optional numbers (vertical jump, mile time, etc.). Shown on your profile when set.
-              </p>
-              {(draft.performanceMetrics ?? []).map((m, idx) => (
-                <div
-                  key={m.id}
-                  className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-3 sm:flex-row sm:items-end"
-                >
-                  <div className="flex-1 space-y-1">
-                    <Label className="text-xs text-slate-500">Label</Label>
-                    <Input
-                      value={m.label}
-                      onChange={(e) => {
-                        const next = [...(draft.performanceMetrics ?? [])];
-                        next[idx] = { ...m, label: e.target.value };
-                        setDraft((d) => ({ ...d, performanceMetrics: next }));
-                      }}
-                      placeholder="Vertical jump"
-                      className="h-9 bg-white/5 border-white/10"
-                    />
-                  </div>
-                  <div className="flex-1 space-y-1">
-                    <Label className="text-xs text-slate-500">Value</Label>
-                    <Input
-                      value={m.value}
-                      onChange={(e) => {
-                        const next = [...(draft.performanceMetrics ?? [])];
-                        next[idx] = { ...m, value: e.target.value };
-                        setDraft((d) => ({ ...d, performanceMetrics: next }));
-                      }}
-                      placeholder='32"'
-                      className="h-9 bg-white/5 border-white/10"
-                    />
-                  </div>
-                  <div className="flex-[2] space-y-1">
-                    <Label className="text-xs text-slate-500">Sports (slugs, comma)</Label>
-                    <Input
-                      value={(m.sportKeys ?? []).join(", ")}
-                      onChange={(e) => {
-                        const next = [...(draft.performanceMetrics ?? [])];
-                        next[idx] = {
-                          ...m,
-                          sportKeys: e.target.value
-                            .split(",")
-                            .map((x) => x.trim().toLowerCase())
-                            .filter(Boolean),
-                        };
-                        setDraft((d) => ({ ...d, performanceMetrics: next }));
-                      }}
-                      placeholder="empty = all sports"
-                      className="h-9 bg-white/5 border-white/10 font-mono text-xs"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-slate-500">
-                      <input
-                        type="checkbox"
-                        checked={!!m.verified}
-                        onChange={(e) => {
-                          const next = [...(draft.performanceMetrics ?? [])];
-                          next[idx] = { ...m, verified: e.target.checked };
-                          setDraft((d) => ({ ...d, performanceMetrics: next }));
-                        }}
-                        className="rounded border-white/20"
-                      />
-                      Verified
-                    </label>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 text-slate-500"
-                      onClick={() =>
-                        setDraft((d) => ({
-                          ...d,
-                          performanceMetrics: (d.performanceMetrics ?? []).filter((_, i) => i !== idx),
-                        }))
-                      }
-                      aria-label="Remove metric"
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </section>
-
-            <section className={cn("space-y-4", sectionCard())}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold tracking-wide text-slate-200">Top strengths</h3>
-                <span className="text-[10px] font-medium tabular-nums text-slate-500">
-                  {ratings.length}/{MAX_STRENGTHS}
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">
-                Up to four custom stats (rename freely). They power the bars on your profile and in this preview.
-              </p>
-              {ratings.map((row, idx) => (
-                <div
-                  key={`${row.key}-${idx}`}
-                  className="space-y-3 rounded-xl border border-white/10 bg-white/[0.02] p-3"
-                >
-                  <div className="flex flex-wrap items-end gap-2">
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <Label className="text-xs text-slate-500">Stat name</Label>
-                      <Input
-                        value={row.label}
-                        onChange={(e) => {
-                          const label = e.target.value;
-                          setDraft((d) => {
-                            const list = [...seedStrengths(d.skillRatings)];
-                            if (!list[idx]) return d;
-                            list[idx] = { ...list[idx], label };
-                            return { ...d, skillRatings: list };
-                          });
-                        }}
-                        placeholder="e.g. Speed, Vertical"
-                        className="h-9 bg-white/5 border-white/10"
-                      />
-                    </div>
-                    {ratings.length > 1 ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="shrink-0 text-slate-500 hover:text-red-300"
-                        aria-label="Remove stat"
-                        onClick={() =>
-                          setDraft((d) => {
-                            const list = seedStrengths(d.skillRatings).filter((_, i) => i !== idx);
-                            return {
-                              ...d,
-                              skillRatings: list.length ? list : SKILL_DEFAULTS.map((s) => ({ ...s, value: 0 })),
-                            };
-                          })
-                        }
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    ) : null}
-                  </div>
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span className="tabular-nums font-medium text-emerald-200/90">{row.value}</span>
-                  </div>
-                  <Slider
-                    value={[row.value]}
-                    max={100}
-                    step={1}
-                    variant="game"
-                    onValueChange={([n]) =>
-                      setDraft((d) => {
-                        const list = [...seedStrengths(d.skillRatings)];
-                        if (!list[idx]) return d;
-                        list[idx] = { ...list[idx], value: n };
-                        return { ...d, skillRatings: list };
-                      })
-                    }
-                  />
-                </div>
-              ))}
-              {ratings.length < MAX_STRENGTHS ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full cursor-pointer border-dashed border-white/20 text-slate-300 hover:bg-white/5"
-                  onClick={() =>
-                    setDraft((d) => {
-                      const list = seedStrengths(d.skillRatings);
-                      if (list.length >= MAX_STRENGTHS) return d;
-                      return {
-                        ...d,
-                        skillRatings: [
-                          ...list,
-                          { key: `stat-${Date.now()}`, label: "New stat", value: 50 },
-                        ],
-                      };
-                    })
-                  }
-                >
-                  <Plus className="mr-1 size-4" /> Add stat ({ratings.length}/{MAX_STRENGTHS})
-                </Button>
-              ) : null}
-              {synergy ? (
-                <p className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-xs text-cyan-100/90">
-                  {synergy}
-                </p>
-              ) : null}
-            </section>
-            </>
-            )}
-
-
-            {editTab === "trust" && (
-            <section className={cn("space-y-4", sectionCard())}>
-              <div className="flex items-center gap-2">
-                <Shield className="size-4 text-emerald-400/90" />
-                <h3 className="text-sm font-semibold tracking-wide text-slate-200">Trust & reputation</h3>
-              </div>
-              <p className="text-xs text-slate-500">
-                Long-term these should come from games. Tune the preview to see how it reads on your profile.
-              </p>
-              <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-emerald-500/10 to-transparent p-4">
-                <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="font-medium text-slate-200">{trustMeter.label}</span>
-                  <span className="tabular-nums text-emerald-300/90">{trustMeter.pct}%</span>
-                </div>
-                <Progress
-                  value={trustMeter.pct}
-                  className="h-2.5 bg-white/10 [&>[data-slot=progress-indicator]]:bg-gradient-to-r [&>[data-slot=progress-indicator]]:from-emerald-500 [&>[data-slot=progress-indicator]]:to-cyan-400 motion-reduce:[&>[data-slot=progress-indicator]]:transition-none"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs text-slate-500">Sportsmanship /5</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    value={draft.trust?.sportsmanship ?? ""}
-                    onChange={(e) =>
-                      setDraft((d) => ({
-                        ...d,
-                        trust: {
-                          ...d.trust,
-                          sportsmanship: e.target.value === "" ? null : Number(e.target.value),
-                        },
-                      }))
-                    }
-                    className="h-9 bg-white/5 border-white/10"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-slate-500">Show-up %</Label>
-                  <Input
-                    type="number"
-                    value={draft.trust?.showUpRate ?? ""}
-                    onChange={(e) =>
-                      setDraft((d) => ({
-                        ...d,
-                        trust: {
-                          ...d.trust,
-                          showUpRate: e.target.value === "" ? null : Number(e.target.value),
-                        },
-                      }))
-                    }
-                    className="h-9 bg-white/5 border-white/10"
-                  />
-                </div>
-                <div className="col-span-2 space-y-1">
-                  <Label className="text-xs text-slate-500">Reliability label</Label>
-                  <Input
-                    value={draft.trust?.reliabilityLabel ?? ""}
-                    onChange={(e) =>
-                      setDraft((d) => ({
-                        ...d,
-                        trust: { ...d.trust, reliabilityLabel: e.target.value || null },
-                      }))
-                    }
-                    placeholder="High"
-                    className="h-9 bg-white/5 border-white/10"
-                  />
-                </div>
-              </div>
-              <Collapsible className="rounded-xl border border-white/10 bg-black/20">
-                <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between px-3 py-2.5 text-left text-xs font-medium text-slate-300 hover:bg-white/[0.04] data-[state=open]:[&>svg]:rotate-180">
-                  Advanced preview data
-                  <ChevronDown className="size-4 shrink-0 text-slate-500 transition-transform duration-200" />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="space-y-3 border-t border-white/10 px-3 pb-3 pt-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-slate-500">Played-with count (preview)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={draft.playedWithCount ?? ""}
-                      onChange={(e) =>
-                        setDraft((d) => ({
-                          ...d,
-                          playedWithCount: e.target.value === "" ? null : Number(e.target.value),
-                        }))
-                      }
-                      className="h-9 bg-white/5 border-white/10"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-slate-500">Teammate avatar URLs (comma)</Label>
-                    <Input
-                      value={(draft.playedWithAvatarUrls ?? []).join(", ")}
-                      onChange={(e) =>
-                        setDraft((d) => ({
-                          ...d,
-                          playedWithAvatarUrls: e.target.value
-                            .split(",")
-                            .map((x) => x.trim())
-                            .filter(Boolean),
-                        }))
-                      }
-                      className="h-9 bg-white/5 border-white/10 font-mono text-xs"
-                      placeholder="https://…"
-                    />
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            </section>
-            )}
-            <div className="border-t border-white/[0.08] pt-8 mt-8 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-              <div
-                className={cn(
-                  "mx-auto flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:justify-center sm:gap-3",
-                  editTab === "home" ? "max-w-full" : "max-w-lg xl:max-w-xl 2xl:max-w-2xl",
-                )}
-              >
-                <Button
-                  type="button"
-                  className="h-11 w-full bg-emerald-600 text-sm text-white hover:bg-emerald-700 sm:w-auto sm:min-w-[11rem]"
-                  disabled={saving}
-                  onClick={() => void handleSave()}
-                >
-                  {saving ? "Saving…" : "Done"}
-                </Button>
               </div>
             </div>
           </div>
-        </div>
-        </div>
-        </div>
         </div>
       </SheetContent>
     </Sheet>
