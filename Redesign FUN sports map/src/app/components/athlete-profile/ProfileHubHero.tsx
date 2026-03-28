@@ -72,59 +72,52 @@ export function ProfileHubHero({
 
   return (
     <div className={cn("relative", className)}>
-      {/* Visual Background / Cover Area */}
-      <div className="absolute inset-x-0 -top-24 h-64 overflow-hidden rounded-b-[48px] md:h-80">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/20 via-primary/5 to-[#0D1117]" />
-        <div className="absolute inset-0 opacity-30 mix-blend-overlay bg-[url('https://images.unsplash.com/photo-1541252260730-0412e8e2108e?q=80&w=2000')] bg-cover bg-center" />
-        <div className="absolute inset-0 bg-[#0D1117]/20 backdrop-blur-[2px]" />
-      </div>
-
-      <section className="relative pt-12 md:pt-24">
+      <section className="relative pt-2 md:pt-8">
         {/* Profile Card Main */}
-        <div className="rounded-[40px] border border-white/[0.08] bg-card/40 backdrop-blur-xl p-6 md:p-10 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.5)]">
-          <div className="flex flex-col items-center text-center md:flex-row md:text-left md:items-start gap-6 md:gap-10">
+        <div className="rounded-[28px] sm:rounded-[40px] border border-white/[0.08] bg-card/40 backdrop-blur-xl p-4 sm:p-6 md:p-10 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.5)]">
+          <div className="flex flex-row items-center text-left md:flex-row md:text-left md:items-start gap-4 md:gap-10">
             {/* Avatar Section */}
             <div className="relative shrink-0 group">
               <div className="absolute inset-0 rounded-full bg-primary/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <Avatar className="size-28 md:size-40 rounded-full border-[6px] border-[#0D1117] shadow-2xl ring-2 ring-white/10 transition-transform duration-500 group-hover:scale-[1.02]">
+              <Avatar className="size-20 sm:size-28 md:size-40 rounded-full border-[4px] sm:border-[6px] border-[#0D1117] shadow-2xl ring-2 ring-white/10 transition-transform duration-500 group-hover:scale-[1.02]">
                 <AvatarImage src={avatarUrl ?? undefined} className="object-cover" />
-                <AvatarFallback className="bg-slate-800 text-4xl font-black text-slate-200 italic tracking-tighter">
+                <AvatarFallback className="bg-slate-800 text-2xl sm:text-4xl font-black text-slate-200 italic tracking-tighter">
                   {fallbackInitial}
                 </AvatarFallback>
               </Avatar>
-              
+
               {verified && (
-                <div className="absolute bottom-2 right-2 flex size-8 md:size-10 items-center justify-center rounded-full bg-primary text-white shadow-[0_4px_12px_rgba(225,29,72,0.4)] ring-4 ring-[#0D1117]">
-                  <BadgeCheck className="size-5 md:size-6" />
+                <div className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 flex size-6 sm:size-8 md:size-10 items-center justify-center rounded-full bg-primary text-white shadow-[0_4px_12px_rgba(225,29,72,0.4)] ring-2 sm:ring-4 ring-[#0D1117]">
+                  <BadgeCheck className="size-3.5 sm:size-5 md:size-6" />
                 </div>
               )}
             </div>
 
             {/* Identity & Bio */}
-            <div className="flex-1 min-w-0 space-y-4">
-              <div className="space-y-1">
-                <h1 className="text-3xl md:text-5xl font-black italic tracking-tighter uppercase text-white leading-tight">
+            <div className="flex-1 min-w-0 space-y-2 sm:space-y-4">
+              <div className="space-y-0.5 sm:space-y-1">
+                <h1 className="text-xl sm:text-3xl md:text-5xl font-black italic tracking-tighter uppercase text-white leading-tight">
                   {displayName}
                 </h1>
-                <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-3">
                   {handleClean ? (
-                    <span className="text-lg font-bold text-primary tracking-tight">@{handleClean}</span>
+                    <span className="text-sm sm:text-lg font-bold text-primary tracking-tight">@{handleClean}</span>
                   ) : (
-                    <span className="text-sm font-medium text-slate-500 italic">No handle set</span>
+                    <span className="text-xs sm:text-sm font-medium text-slate-500 italic">No handle set</span>
                   )}
-                  
+
                   {/* Rating Pill + Home Base */}
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
-                      <span className="text-xs font-black text-amber-400">{ratingValue?.toFixed(1) || "0.0"}</span>
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <div className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
+                      <span className="text-[10px] sm:text-xs font-black text-amber-400">{ratingValue?.toFixed(1) || "0.0"}</span>
                       <StarRating value={ratingValue ?? 0} size={10} className="text-amber-400" />
-                      <span className="text-[10px] font-bold text-amber-500/60 tabular-nums">({ratingN})</span>
+                      <span className="text-[9px] sm:text-[10px] font-bold text-amber-500/60 tabular-nums">({ratingN})</span>
                     </div>
-                    
+
                     {homeBase && (
-                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20">
+                      <div className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full bg-blue-500/10 border border-blue-500/20">
                         <MapPin className="size-3 text-blue-400" />
-                        <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">{homeBase}</span>
+                        <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-blue-400">{homeBase}</span>
                       </div>
                     )}
                   </div>
@@ -132,33 +125,33 @@ export function ProfileHubHero({
               </div>
 
               {bioText ? (
-                <p className="max-w-2xl text-base md:text-lg font-medium text-slate-300 leading-relaxed italic">
+                <p className="max-w-2xl text-xs sm:text-base md:text-lg font-medium text-slate-300 leading-relaxed italic line-clamp-2 sm:line-clamp-none">
                   "{bioText}"
                 </p>
               ) : (
-                <p className="text-sm font-medium text-slate-500 italic uppercase tracking-widest opacity-60">Athlete at Large</p>
+                <p className="text-xs sm:text-sm font-medium text-slate-500 italic uppercase tracking-widest opacity-60">Athlete at Large</p>
               )}
 
               {/* Action Buttons */}
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-2">
-                <Button 
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-1 sm:pt-2">
+                <Button
                   onClick={onAbout}
-                  className="rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[10px] h-10 px-6"
+                  className="rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6"
                 >
-                  <Info className="mr-2 size-3.5" /> About
+                  <Info className="mr-1.5 sm:mr-2 size-3 sm:size-3.5" /> About
                 </Button>
-                <Button 
+                <Button
                   onClick={onShare}
-                  className="rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[10px] h-10 px-6"
+                  className="rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6"
                 >
-                  <Share2 className="mr-2 size-3.5" /> Share
+                  <Share2 className="mr-1.5 sm:mr-2 size-3 sm:size-3.5" /> Share
                 </Button>
                 {!isOwnProfile && (
-                  <Button 
+                  <Button
                     variant="ghost"
-                    className="rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all font-black uppercase tracking-widest text-[10px] h-10 px-6 group"
+                    className="rounded-xl sm:rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all font-black uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6 group"
                   >
-                    Follow <ChevronRight className="ml-1 size-3.5 group-hover:translate-x-1 transition-transform" />
+                    Follow <ChevronRight className="ml-1 size-3 sm:size-3.5 group-hover:translate-x-1 transition-transform" />
                   </Button>
                 )}
               </div>
@@ -166,76 +159,76 @@ export function ProfileHubHero({
           </div>
 
           {/* Metrics Strip */}
-          <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="rounded-3xl border border-white/[0.05] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04]">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="size-7 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                  <Play className="size-3.5 text-blue-500 fill-current" />
+          <div className="mt-4 sm:mt-6 md:mt-10 grid grid-cols-4 gap-2 sm:gap-3 md:gap-4">
+            <div className="rounded-2xl sm:rounded-3xl border border-white/[0.05] bg-white/[0.02] p-2.5 sm:p-4 md:p-5 transition-all hover:bg-white/[0.04]">
+              <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-3">
+                <div className="size-5 sm:size-7 rounded-lg sm:rounded-xl bg-blue-500/10 flex items-center justify-center">
+                  <Play className="size-2.5 sm:size-3.5 text-blue-500 fill-current" />
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Games</span>
+                <span className="text-[8px] sm:text-[10px] font-black uppercase tracking-widest text-slate-500 hidden sm:inline">Games</span>
               </div>
               <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-black italic tracking-tighter text-white uppercase">{games}</span>
-                <span className="text-[10px] font-bold text-blue-500/60 uppercase">Played</span>
+                <span className="text-lg sm:text-3xl font-black italic tracking-tighter text-white uppercase">{games}</span>
+                <span className="text-[8px] sm:text-[10px] font-bold text-blue-500/60 uppercase">Played</span>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-white/[0.05] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04]">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="size-7 rounded-xl bg-rose-500/10 flex items-center justify-center">
-                  <Users className="size-3.5 text-rose-500" />
+            <div className="rounded-2xl sm:rounded-3xl border border-white/[0.05] bg-white/[0.02] p-2.5 sm:p-4 md:p-5 transition-all hover:bg-white/[0.04]">
+              <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-3">
+                <div className="size-5 sm:size-7 rounded-lg sm:rounded-xl bg-rose-500/10 flex items-center justify-center">
+                  <Users className="size-2.5 sm:size-3.5 text-rose-500" />
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Network</span>
+                <span className="text-[8px] sm:text-[10px] font-black uppercase tracking-widest text-slate-500 hidden sm:inline">Network</span>
               </div>
-              <div className="flex items-baseline gap-3">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-black italic tracking-tighter text-white uppercase">{followers}</span>
-                  <span className="text-[9px] font-bold text-rose-500/60 uppercase tracking-tighter">Followers</span>
+              <div className="flex items-baseline gap-1.5 sm:gap-3">
+                <div className="flex items-baseline gap-0.5 sm:gap-1">
+                  <span className="text-lg sm:text-3xl font-black italic tracking-tighter text-white uppercase">{followers}</span>
+                  <span className="text-[7px] sm:text-[9px] font-bold text-rose-500/60 uppercase tracking-tighter hidden xs:inline">Followers</span>
                 </div>
-                <div className="w-px h-4 bg-white/10 self-center" />
-                <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-black italic tracking-tighter text-white uppercase">{following}</span>
-                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">Following</span>
+                <div className="w-px h-3 sm:h-4 bg-white/10 self-center" />
+                <div className="flex items-baseline gap-0.5 sm:gap-1">
+                  <span className="text-lg sm:text-3xl font-black italic tracking-tighter text-white uppercase">{following}</span>
+                  <span className="text-[7px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-tighter hidden xs:inline">Following</span>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-white/[0.05] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04]">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="size-7 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Award className="size-3.5 text-primary" />
+            <div className="rounded-2xl sm:rounded-3xl border border-white/[0.05] bg-white/[0.02] p-2.5 sm:p-4 md:p-5 transition-all hover:bg-white/[0.04]">
+              <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-3">
+                <div className="size-5 sm:size-7 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Award className="size-2.5 sm:size-3.5 text-primary" />
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Reputation</span>
+                <span className="text-[8px] sm:text-[10px] font-black uppercase tracking-widest text-slate-500 hidden sm:inline">Reputation</span>
               </div>
               <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-black italic tracking-tighter text-white uppercase">
+                <span className="text-lg sm:text-3xl font-black italic tracking-tighter text-white uppercase">
                   {formatReputation(ratingValue)}
                 </span>
-                <span className="text-[10px] font-bold text-primary/60 uppercase">Rating</span>
+                <span className="text-[8px] sm:text-[10px] font-bold text-primary/60 uppercase">Rating</span>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-white/[0.05] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04]">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="size-7 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                  <Zap className="size-3.5 text-emerald-500" />
+            <div className="rounded-2xl sm:rounded-3xl border border-white/[0.05] bg-white/[0.02] p-2.5 sm:p-4 md:p-5 transition-all hover:bg-white/[0.04]">
+              <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-3">
+                <div className="size-5 sm:size-7 rounded-lg sm:rounded-xl bg-emerald-500/10 flex items-center justify-center">
+                  <Zap className="size-2.5 sm:size-3.5 text-emerald-500" />
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Power</span>
+                <span className="text-[8px] sm:text-[10px] font-black uppercase tracking-widest text-slate-500 hidden sm:inline">Power</span>
               </div>
               <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-black italic tracking-tighter text-white uppercase">LVL 1</span>
+                <span className="text-lg sm:text-3xl font-black italic tracking-tighter text-white uppercase">LVL 1</span>
               </div>
             </div>
           </div>
 
           {/* Performance Highlights (Mini Badges) */}
           {visibleMetricList.length > 0 && (
-            <div className="mt-6 flex flex-wrap gap-2 justify-center md:justify-start">
+            <div className="mt-3 sm:mt-6 flex flex-wrap gap-1.5 sm:gap-2 justify-start md:justify-start">
               {visibleMetricList.map((m) => (
-                <div key={m.id} className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-white/[0.03] border border-white/5">
-                  <Zap className="size-3 text-primary fill-current" />
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{m.label}</span>
-                  <span className="text-xs font-black text-white">{m.value}</span>
+                <div key={m.id} className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/5">
+                  <Zap className="size-2.5 sm:size-3 text-primary fill-current" />
+                  <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{m.label}</span>
+                  <span className="text-[10px] sm:text-xs font-black text-white">{m.value}</span>
                 </div>
               ))}
             </div>

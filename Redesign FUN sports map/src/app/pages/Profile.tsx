@@ -242,7 +242,7 @@ export default function Profile() {
         onMarkRead={markRead}
       />
 
-      <main className="relative mx-auto w-full max-w-6xl px-4 md:px-8 pb-32 pt-20">
+      <main className="relative mx-auto w-full max-w-6xl px-4 md:px-8 pb-32 pt-16">
         {loading ? (
           <div className="space-y-8 animate-pulse">
             <div className="h-80 rounded-[48px] bg-white/[0.03]" />
