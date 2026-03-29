@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { ChevronUp } from "lucide-react";
 import { fetchDiscoveredAthletes } from "../../../lib/api";
 import type { ProfileSearchRow } from "../../../lib/supabase";
 import { sportEmoji } from "../../../lib/sportVisuals";
@@ -97,20 +96,7 @@ export function DiscoveredPeopleCarousel({ expanded, onClose, excludeUserId, pri
             expanded ? "opacity-100" : "opacity-0 pointer-events-none",
           )}
         >
-          <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-2 pb-2 pt-2 sm:px-3">
-            <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Discover</span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-8 shrink-0 text-slate-400 hover:bg-white/10 hover:text-white"
-              aria-label="Close discover"
-              onClick={onClose}
-            >
-              <ChevronUp className="size-4" />
-            </Button>
-          </div>
-          <div className="relative px-2 pb-3 pt-2 sm:px-3">
+          <div className="relative px-2 py-3 sm:px-3">
             {loading ? (
               <div className="flex h-36 items-center justify-center text-sm text-slate-500">Loading…</div>
             ) : rows.length === 0 ? (

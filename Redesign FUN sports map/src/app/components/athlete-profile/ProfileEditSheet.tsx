@@ -315,7 +315,11 @@ export function ProfileEditSheet({
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain sm:grid sm:grid-cols-4 sm:px-6 sm:pb-6 gap-6">
             
             {/* Left Column: Profile Preview Visuals (Shrunken for Mobile) */}
-            <div className="sm:col-span-2 overflow-y-auto pr-2 space-y-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className={cn(
+              "sm:col-span-2 sm:overflow-y-auto sm:pr-2 space-y-4 px-4 sm:px-0 pt-4 sm:pt-0",
+              "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+              editTab !== "home" && "hidden sm:block",
+            )}>
               <section className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-xl p-6 sm:p-8 shadow-2xl relative overflow-hidden group shrink-0">
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                   <TrendingUp className="size-24 sm:size-32 -rotate-12" />
@@ -400,9 +404,9 @@ export function ProfileEditSheet({
             </div>
 
             {/* Right Column: Edit Controls */}
-            <div className="sm:col-span-2 flex flex-col min-h-0">
+            <div className="sm:col-span-2 flex flex-col sm:min-h-0">
               <div className={cn(
-                "flex-1 overflow-y-auto px-1 pb-32",
+                "sm:flex-1 sm:overflow-y-auto px-4 sm:px-1 pb-32",
                 editTab === "home" ? "space-y-3 sm:space-y-4" : "space-y-4 sm:space-y-6"
               )}>
                 {err && (

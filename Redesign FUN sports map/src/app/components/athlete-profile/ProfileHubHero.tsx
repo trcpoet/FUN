@@ -1,11 +1,10 @@
 // Vercel sync test commit
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
-import { BadgeCheck, Info, Share2, MapPin, Award, Zap, Users, Play, Settings, ChevronRight } from "lucide-react";
+import { BadgeCheck, Info, Share2, MapPin, Award, Zap, Users, Play, ChevronRight, Plus } from "lucide-react";
 import { Button } from "../ui/button";
 import { cn } from "../ui/utils";
 import { StarRating } from "../ui/StarRating";
 import type { PerformanceMetricEntry } from "../../../lib/athleteProfile";
-import { visibleMetrics } from "../../../lib/athleteProfile";
 import { Badge } from "../ui/badge";
 
 type Props = {
@@ -26,6 +25,8 @@ type Props = {
   homeBaseLabel?: string | null;
   onAbout?: () => void;
   onShare?: () => void;
+  discoverExpanded?: boolean;
+  onDiscoverPeople?: () => void;
   isOwnProfile?: boolean;
   className?: string;
 };
@@ -58,12 +59,13 @@ export function ProfileHubHero({
   homeBaseLabel,
   onAbout,
   onShare,
+  discoverExpanded,
+  onDiscoverPeople,
   isOwnProfile,
   className,
 }: Props) {
   const bioText = bio?.trim() ?? "";
   const handleClean = handle?.trim() ? cleanHandle(handle) : "";
-  const visibleMetricList = visibleMetrics(performanceMetrics, primarySports);
   const homeBase = homeBaseLabel?.trim() ?? "";
   const followers = followersCount ?? 0;
   const following = followingCount ?? 0;
@@ -134,26 +136,44 @@ export function ProfileHubHero({
               )}
 
               {/* Action Buttons */}
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-1 sm:pt-2">
-                <Button
-                  onClick={onAbout}
-                  className="rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6"
-                >
-                  <Info className="mr-1.5 sm:mr-2 size-3 sm:size-3.5" /> About
-                </Button>
-                <Button
-                  onClick={onShare}
-                  className="rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6"
-                >
-                  <Share2 className="mr-1.5 sm:mr-2 size-3 sm:size-3.5" /> Share
-                </Button>
-                {!isOwnProfile && (
+              <div className="flex items-center justify-between pt-1 sm:pt-2">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <Button
-                    variant="ghost"
-                    className="rounded-xl sm:rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all font-black uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6 group"
+                    onClick={onAbout}
+                    className="rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6"
                   >
-                    Follow <ChevronRight className="ml-1 size-3 sm:size-3.5 group-hover:translate-x-1 transition-transform" />
+                    <Info className="mr-1.5 sm:mr-2 size-3 sm:size-3.5" /> About
                   </Button>
+                  <Button
+                    onClick={onShare}
+                    className="rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6"
+                  >
+                    <Share2 className="mr-1.5 sm:mr-2 size-3 sm:size-3.5" /> Share
+                  </Button>
+                  {!isOwnProfile && (
+                    <Button
+                      variant="ghost"
+                      className="rounded-xl sm:rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all font-black uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6 group"
+                    >
+                      Follow <ChevronRight className="ml-1 size-3 sm:size-3.5 group-hover:translate-x-1 transition-transform" />
+                    </Button>
+                  )}
+                </div>
+                {onDiscoverPeople && (
+                  <button
+                    type="button"
+                    aria-pressed={discoverExpanded}
+                    aria-label={discoverExpanded ? "Hide discover people" : "Discover people near you"}
+                    onClick={onDiscoverPeople}
+                    className={cn(
+                      "size-8 sm:size-9 shrink-0 rounded-xl sm:rounded-2xl border flex items-center justify-center transition-[box-shadow,background-color,border-color] duration-200",
+                      discoverExpanded
+                        ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-100 shadow-[0_0_0_1px_rgba(16,185,129,0.35)]"
+                        : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.08]"
+                    )}
+                  >
+                    <Plus className={cn("size-3.5 sm:size-4 transition-transform duration-200", discoverExpanded && "rotate-45")} />
+                  </button>
                 )}
               </div>
             </div>
@@ -222,18 +242,6 @@ export function ProfileHubHero({
             </div>
           </div>
 
-          {/* Performance Highlights (Mini Badges) */}
-          {visibleMetricList.length > 0 && (
-            <div className="mt-3 sm:mt-6 flex flex-wrap gap-1.5 sm:gap-2 justify-start md:justify-start">
-              {visibleMetricList.map((m) => (
-                <div key={m.id} className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/5">
-                  <Zap className="size-2.5 sm:size-3 text-primary fill-current" />
-                  <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{m.label}</span>
-                  <span className="text-[10px] sm:text-xs font-black text-white">{m.value}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </section>
     </div>

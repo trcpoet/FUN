@@ -19,8 +19,8 @@ import {
   PerformanceStatsStrip,
   ProfileComposerCard,
   QuickStatusPostDialog,
-  ProfileActionRow,
   DiscoveredPeopleCarousel,
+  StoriesRail,
 } from "../components/athlete-profile";
 import { mergeAthleteProfile } from "../../lib/athleteProfile";
 import { readFollowedIds } from "../../lib/localFollows";
@@ -271,6 +271,8 @@ export default function Profile() {
               homeBaseLabel={homeBaseLabel}
               onShare={() => void handleShare()}
               onAbout={() => setAboutOpen(true)}
+              discoverExpanded={discoverOpen}
+              onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
               isOwnProfile={true}
               className="animate-in fade-in slide-in-from-top-4 duration-700"
             />
@@ -283,29 +285,23 @@ export default function Profile() {
               </div>
             )}
 
-            {/* Discover Section */}
-            <section className="space-y-4">
-              <div className="flex items-center justify-between px-2">
-                <div className="space-y-1">
-                  <h2 className="text-xl font-bold text-white tracking-tight uppercase italic flex items-center gap-2">
-                    Global Network
-                    <span className="inline-block size-1.5 rounded-full bg-blue-500 animate-pulse" />
-                  </h2>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">Discover Athletes</p>
-                </div>
-                <ProfileActionRow
-                  isOwnProfile
-                  discoverExpanded={discoverOpen}
-                  onDiscoverPeople={() => setDiscoverOpen((v) => !v)}
-                />
-              </div>
-              
+            {/* Carousel + Stories grouped so collapsed carousel takes 0 height */}
+            <div className="animate-in fade-in slide-in-from-top-2 duration-700">
               {user?.id && (
                 <div className={cn(
                   "overflow-hidden transition-all duration-500",
-                  discoverOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+                  discoverOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"
                 )}>
                   <div className="rounded-[40px] border border-white/[0.05] bg-white/[0.02] p-6 backdrop-blur-xl">
+                    {discoverOpen && (
+                      <div className="mb-4 px-1 space-y-0.5">
+                        <h2 className="text-xl font-bold text-white tracking-tight uppercase italic flex items-center gap-2">
+                          Global Network
+                          <span className="inline-block size-1.5 rounded-full bg-blue-500 animate-pulse" />
+                        </h2>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">Discover Athletes</p>
+                      </div>
+                    )}
                     <DiscoveredPeopleCarousel
                       expanded={discoverOpen}
                       onClose={() => setDiscoverOpen(false)}
@@ -315,7 +311,24 @@ export default function Profile() {
                   </div>
                 </div>
               )}
-            </section>
+
+              {/* Stories Rail — sits immediately after collapsed (0-height) carousel */}
+              <div className={cn("px-1", discoverOpen ? "mt-4" : "mt-0")}>
+                <StoriesRail
+                  stories={athleteProfile.stories ?? []}
+                  allowCreate={true}
+                  onCreateStory={async (story) => {
+                    const err = await updateProfile({
+                      athlete_profile: mergeAthleteProfile(athleteProfile, {
+                        stories: [...(athleteProfile.stories ?? []), story],
+                      }),
+                    });
+                    if (err) throw new Error(err.message);
+                    await refetch();
+                  }}
+                />
+              </div>
+            </div>
 
             {/* Composer */}
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
@@ -361,6 +374,8 @@ export default function Profile() {
           onOpenChange={setAboutOpen}
           side={isMobile ? "bottom" : "right"}
           wide={!isMobile}
+          performanceMetrics={athleteProfile.performanceMetrics ?? []}
+          primarySports={primarySports}
         >
           <div className="p-6 md:p-8 space-y-10">
             <header className="space-y-2">
