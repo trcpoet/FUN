@@ -1,3 +1,4 @@
+// Vercel sync test commit
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { BadgeCheck, Info, Share2, MapPin, Award, Zap, Users, Play, Settings, ChevronRight } from "lucide-react";
 import { Button } from "../ui/button";
