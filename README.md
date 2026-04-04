@@ -90,8 +90,12 @@ RPCs are how we keep the app snappy and consistent:
 - **Fewer round-trips** for “inbox-style” views (game inbox / DM inbox)
 - **Stable response shapes** for the UI
 - **Controlled permissions** (execute grants) + predictable access rules
+- **Atomic operations** like `join_game()` prevent race conditions when multiple users act simultaneously
 
 If an RPC is missing (or PostgREST schema cache is cold), the client has fallbacks for some flows, but the goal is: **deploy migrations, reload schema, stay fast**.
+
+**Example: atomic game booking**
+The `join_game()` RPC uses row-level locking (`FOR UPDATE`) to ensure that when multiple users try to join a game with 1 spot left, exactly 1 succeeds. Others see “Game is full” instantly. This prevents overbooking and keeps consistency even under high concurrency.
 
 ### Database architecture (how data is organized)
 At a glance:
