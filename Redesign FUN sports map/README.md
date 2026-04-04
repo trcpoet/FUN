@@ -91,6 +91,39 @@ Edit `src/lib/supabase.ts` when the database schema changes.
 **3. Check RLS policies**
 When queries mysteriously fail, 99% of the time it's Row-Level Security on the database side.
 
+## Game Joining & Concurrent Bookings
+
+Game joins use **atomic database transactions** to prevent overbooking when multiple users click Join simultaneously.
+
+### How it works
+
+When a user joins a game, the `join_game()` RPC:
+1. Locks the game row (prevents other users from modifying it)
+2. Counts current participants
+3. Checks if there's room (current < spots_needed)
+4. Inserts the participant (all in one indivisible transaction)
+
+This means only one user can claim each spot, even if 10 people click Join at the exact same millisecond.
+
+### What users see
+
+- ✅ "Joined successfully" — booking confirmed
+- ❌ "Game is full" — someone else claimed the last spot
+- ❌ "Already joined this game" — user tried to join twice
+- ❌ "Game not found" — game was deleted
+
+### Testing the fix
+
+To verify this works locally:
+
+1. Create a game with `spots_needed: 2`
+2. Open the app in two browser windows (same account, side by side)
+3. User A joins in Window 1
+4. User B clicks Join in Window 2 at the exact same time as User A clicking Join again
+5. **Expected**: Only one succeeds, the other sees "Already joined" or similar
+
+For detailed testing steps, see [`../TESTING_ATOMIC_BOOKING.md`](../TESTING_ATOMIC_BOOKING.md).
+
 ## Deploying to Vercel
 
 ### Build & run
@@ -118,6 +151,9 @@ Add these in Vercel → Project Settings → Environment Variables:
 ### Database migrations
 Before deploying, make sure Supabase has all migrations applied. See `../supabase/MIGRATION_ORDER.md` for the checklist.
 
+Key recent migrations:
+- `20260404000000_atomic_join_game.sql` — Atomic game booking RPC (prevents race conditions)
+
 After running migrations, reload the schema cache in Supabase SQL Editor:
 ```sql
 NOTIFY pgrst, 'reload schema';
@@ -136,6 +172,28 @@ If that doesn't work, run the migrations:
 - `../supabase/migrations/20260322000000_create_game_grants.sql`
 
 Or just paste the whole `../supabase/snippets/fix_create_game_rpc_404.sql` file in Supabase SQL Editor.
+
+### "Join game returns 404" or "function join_game does not exist"
+
+The `join_game` RPC is missing from your Supabase project. Run the migration:
+
+In Supabase → SQL Editor, run:
+```
+../supabase/migrations/20260404000000_atomic_join_game.sql
+```
+
+Then reload:
+```sql
+NOTIFY pgrst, 'reload schema';
+```
+
+### Users getting "Already joined" when they haven't
+
+Check if old participant data exists in `game_participants` from before the fix. Delete the test game and create a fresh one, or clear the table and re-test.
+
+### Join button stuck or users seeing success when game is full
+
+Old RLS policies might be blocking the new RPC. Check that the `game_participants` table RLS allows authenticated users to insert. See `supabase/schema.sql` for the correct policy.
 
 ### "No venues showing up"
 Check these in order:
