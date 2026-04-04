@@ -1,72 +1,219 @@
+# FUN — The Web App
 
-  # Redesign FUN sports map
+This is the frontend for FUN. It's a React + Mapbox app that shows you games, players, and venues near you in real time. 
 
-  This is a code bundle for Redesign FUN sports map. The original project is available at https://www.figma.com/design/9XldnDN5ao4uDuUcIwv8Ur/Redesign-FUN-sports-map.
+If you're wondering what FUN actually is, check the [main README](../README.md) for the whole story.
 
-  ## Running the code
+## Getting Started
 
-  Run `npm i` to install the dependencies.
+You need:
+- Node 16+
+- Supabase project set up
+- Mapbox API token
 
-  Run `npm run dev` to start the development server.
+Run this:
+```bash
+npm install
+npm run dev
+```
 
-  ## Deploying to Vercel
+App fires up at http://localhost:5173. Changes auto-reload.
 
-  - **Output directory:** The repo’s `vercel.json` sets `"outputDirectory": "dist"` (Vite’s default). If your project was set to use `build`, either rely on this file or set **Output Directory** to `dist` in Vercel → Project Settings → General.
-  - **Mapbox token:** In Vercel → Project Settings → Environment Variables, add `VITE_MAPBOX_ACCESS_TOKEN` (and optionally `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`). Without the Mapbox token, the map will show a message asking for it.
-  - **Mapbox style:** The app uses the Studio style `mapbox://styles/trcpoet/cmn1l2br1003e01s52y4q9uzt` by default. Override with `VITE_MAPBOX_STYLE_URL` if needed. The same **public** access token (`pk.…`) must belong to an account that can load that style (your token already does for `trcpoet` styles).
-  - **Athlete profile:** Run `supabase/migrations/20250320000000_athlete_profile_jsonb.sql` so `profiles.athlete_profile` exists. If SQL shows the column but the app still errors, run **`NOTIFY pgrst, 'reload schema';`** in the SQL Editor (PostgREST schema cache). Then call `clearAthleteProfileColumnCache()` or remove `fun_profiles_athlete_column` from localStorage.
-  - **Profile uploads:** Post/reel uploads use the public `avatars` bucket under `feed/posts/{user_id}/` and `feed/reels/{user_id}/` (same bucket as avatars and story media). If uploads return **400**, run `../supabase/migrations/20250322000000_storage_avatars_bucket.sql` in **Supabase → SQL Editor** (creates the bucket and RLS for `{user_id}/`, `stories/…`, and `feed/…` paths).
+## What's where
 
-  ## Create game: `POST …/rpc/create_game` 404
+```
+src/
+├── main.tsx                 # Entry point
+├── app/
+│   ├── App.tsx              # Map + state management lives here
+│   ├── components/          # UI bits
+│   ├── pages/               # Route pages (profiles, settings, etc.)
+│   ├── contexts/            # Auth, user state
+│   ├── map/
+│   │   ├── MapboxMap.tsx    # The actual Mapbox renderer
+│   │   └── mapConfig.ts     # Zoom thresholds, icon sizes, etc.
+│   └── lib/
+│       └── sportsVenues.ts  # Fetches venues from Supabase or Overpass
+├── lib/
+│   ├── api.ts               # ALL Supabase calls go through here
+│   ├── supabase.ts          # Client init + types
+│   └── [utils]
+├── hooks/                   # Custom React hooks
+└── styles/                  # CSS + Tailwind
 
-  PostgREST returns **404** when the `create_game` function is missing, has the **wrong argument list** (the app expects `p_description`, `p_requirements`, etc.), or **anon/authenticated** cannot execute it.
+api/
+├── overpass.ts              # Proxy to OpenStreetMap Overpass API
+└── osm-venues-import.ts     # Server function: imports venues into Supabase
+```
 
-  **Fastest fix (one paste):** In Supabase → **SQL Editor**, run the whole file **`../supabase/snippets/fix_create_game_rpc_404.sql`**. It drops old overloads, ensures `games` columns, recreates `create_game` + `get_games_nearby`, grants execute, and reloads the API schema.
+## How it works
 
-  **Or run migrations in order:** `../supabase/migrations/20260321000000_games_requirements.sql` then `../supabase/migrations/20260322000000_create_game_grants.sql`. See `../supabase/SCHEMA_CHANGELOG.md` and `../supabase/MIGRATION_ORDER.md` if you are bootstrapping from scratch.
+**When you open the app:**
+1. Gets your location
+2. Fetches games, players, venues all at once
+3. Game pins render (emoji + countdown/live status)
+4. Player avatars show up when you're zoomed in
+5. Venue dots so you can pick a place fast
 
-  ## No sports venues on the map?
+**Chat & messaging:**
+- Game chat uses Supabase Realtime (updates live)
+- DMs cache on login so the inbox opens instantly
 
-  Venues come from **OpenStreetMap** (Overpass) or **`osm_sports_venues`** in Supabase — **not** from the `create_game` SQL. If pins disappeared after a DB change, check:
+**Venues:**
+- First checks our Supabase cache (`osm_sports_venues`) for speed
+- Falls back to Overpass API if cache is empty
+- Loads "nearby" venues first so map updates quick on slow networks
+- Clusters venues in a Web Worker to not freeze the UI
 
-  1. **Location** — the map needs a center: **allow location** or **search a place** so `venuesCenter` is set. With no coords, the app does not fetch venues.
-  2. **Zoom** — venue dots/footprints only show at **zoom ≥ ~8–9** (`VENUE_LAYER_MIN_ZOOM` / `VENUE_DOT_MIN_ZOOM` in `src/app/map/mapConfig.ts`). Zoom in.
-  3. **Filters** — in **Filters**, if **Sports** is non-empty, OSM venues must match `sport=*` (or `leisure=sports_centre` without a sport tag is shown). Clear sports to see everything.
-  4. **Supabase cache** — if `osm_sports_venues` has no rows **in your current map area**, the app falls back to Overpass. Import a bbox that covers where you’re looking, or rely on Overpass (check Network → `/api/overpass` for errors).
-  5. **Session** — if you previously hit a missing `osm_sports_venues` table, remove `sessionStorage` key `fun.sportsVenues.skipOsmDb` so the client tries the table again.
+## .env setup
 
-  ## OSM sports venues (fast Supabase cache)
+Create `.env` in this directory:
 
-  The map loads venue points from **`public.osm_sports_venues`** when the bbox has rows; otherwise it falls back to **Overpass** (same as before).
+```
+VITE_MAPBOX_ACCESS_TOKEN=pk_...
+VITE_SUPABASE_URL=https://....supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGc...
+```
 
-  1. Apply migration **`../supabase/migrations/20260321000001_osm_sports_venues.sql`** in Supabase SQL Editor (then run **`NOTIFY pgrst, 'reload schema';`** if PostgREST still 404s). Until this table exists, the app falls back to Overpass and **stops repeating** failed REST calls after the first missing-table error. After you add the table, clear the client skip flag: remove `sessionStorage` key `fun.sportsVenues.skipOsmDb` or call `clearSportsVenuesDbSkip()` from `src/app/lib/sportsVenues.ts` in dev.
-  2. In **Vercel** (or your host), set server env vars (never expose `SUPABASE_SERVICE_ROLE_KEY` to the browser):
-     - `SUPABASE_URL` — project URL
-     - `SUPABASE_SERVICE_ROLE_KEY` — service role key
-     - `OSM_IMPORT_SECRET` — long random string (shared secret for the import API)
-  3. **Import** OSM venues into the table for a geographic **rectangle** (`minLat`, `minLng`, `maxLat`, `maxLng`). Pick numbers that cover your city or region (e.g. from [bboxfinder](http://bboxfinder.com) or approximate from the map).
+Optional:
+```
+VITE_MAPBOX_STYLE_URL=mapbox://styles/...
+```
 
-     **A — Script (easiest)** — from the `Redesign FUN sports map` folder, with the same secret you set in Vercel:
+## Important rules
 
-     ```bash
-     cd "Redesign FUN sports map"
-     export OSM_IMPORT_SECRET="paste-the-same-secret-as-vercel"
-     export IMPORT_URL="https://YOUR-PROJECT.vercel.app/api/osm-venues-import"
-     node scripts/import-osm-venues.mjs 40.7 -74.05 40.78 -73.92
-     ```
+**1. Use `src/lib/api.ts` for everything**
+Don't call Supabase directly from components. All data fetching goes through `api.ts`. Keeps permissions in one place, makes caching possible, easier to test.
 
-     You should see `200` and JSON like `{"ok":true,"upserted":…}`. `IMPORT_URL` must be a **deployed** URL (`vite` dev does not run Vercel `api/` routes unless you use `vercel dev`).
+**2. Keep types in sync**
+Edit `src/lib/supabase.ts` when the database schema changes.
 
-     **B — `curl`** (same thing as the script):
+**3. Check RLS policies**
+When queries mysteriously fail, 99% of the time it's Row-Level Security on the database side.
 
-     ```bash
-     curl -sS -X POST "https://YOUR-PROJECT.vercel.app/api/osm-venues-import" \
-       -H "Content-Type: application/json" \
-       -H "Authorization: Bearer YOUR_OSM_IMPORT_SECRET" \
-       -d '{"minLat":40.7,"minLng":-74.05,"maxLat":40.78,"maxLng":-73.92}'
-     ```
+## Deploying to Vercel
 
-     Repeat for other regions as needed, or schedule a cron job that POSTs different bboxes.
+### Build & run
+```bash
+npm run build     # outputs to dist/
+```
 
-  **Performance notes:** Venue search location is **debounced** (~420ms). With sports filters selected, **Overpass** queries add a tighter `sport~` regex on `leisure=pitch` (sports centres are still unfiltered). Venue **clustering** runs in a **Web Worker** when supported. When loading from Overpass with a **large** search radius, the app requests a **small ring first** (nearby venues), then the **full** radius so the map can update sooner.
-  
+Vercel will auto-detect this. Output directory is `dist/`.
+
+### Environment variables
+Add these in Vercel → Project Settings → Environment Variables:
+
+**Client (required):**
+- `VITE_MAPBOX_ACCESS_TOKEN` — your Mapbox public token
+- `VITE_SUPABASE_URL` — Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` — Supabase public key
+
+**Optional:**
+- `VITE_MAPBOX_STYLE_URL` — custom map style (defaults to our studio style)
+
+**Server-only (for `/api/` routes):**
+- `SUPABASE_SERVICE_ROLE_KEY` — admin key for the importer (never expose to browser)
+- `OSM_IMPORT_SECRET` — random secret shared between import script and API
+
+### Database migrations
+Before deploying, make sure Supabase has all migrations applied. See `../supabase/MIGRATION_ORDER.md` for the checklist.
+
+After running migrations, reload the schema cache in Supabase SQL Editor:
+```sql
+NOTIFY pgrst, 'reload schema';
+```
+
+## Stuck? Here's what usually happens
+
+### "Create game returns 404"
+The RPC function is missing or PostgREST hasn't reloaded. Try:
+```sql
+NOTIFY pgrst, 'reload schema';
+```
+
+If that doesn't work, run the migrations:
+- `../supabase/migrations/20260321000000_games_requirements.sql`
+- `../supabase/migrations/20260322000000_create_game_grants.sql`
+
+Or just paste the whole `../supabase/snippets/fix_create_game_rpc_404.sql` file in Supabase SQL Editor.
+
+### "No venues showing up"
+Check these in order:
+1. **Location set?** Allow location or search a place. Map needs coordinates.
+2. **Zoom level?** Venues show at zoom 8+. Zoom in. (Config: `VENUE_LAYER_MIN_ZOOM` in `mapConfig.ts`)
+3. **Sports filter?** If you filtered sports, venues must have matching `sport=` tags. Clear the filter.
+4. **Supabase cache empty?** If your area has no rows in `osm_sports_venues`, we fall back to Overpass. See "Import venues" below.
+5. **Stale session flag?** Remove the sessionStorage key `fun.sportsVenues.skipOsmDb` to retry.
+
+### "Athlete profile column missing"
+Run this in Supabase SQL Editor:
+```sql
+-- From ../supabase/migrations/20250320000000_athlete_profile_jsonb.sql
+-- (just paste the whole file)
+
+NOTIFY pgrst, 'reload schema';
+```
+
+If the column exists but the app errors anyway, clear the client cache:
+```javascript
+// Dev console
+localStorage.removeItem('fun_profiles_athlete_column');
+```
+
+### "Profile uploads return 400"
+Run this in Supabase SQL Editor:
+```sql
+-- From ../supabase/migrations/20250322000000_storage_avatars_bucket.sql
+-- (paste the whole file)
+
+NOTIFY pgrst, 'reload schema';
+```
+
+## Speed: import venues into Supabase
+
+By default, venues come from Overpass on-demand. If you want it faster, cache them in Supabase.
+
+**Step 1: Create the table**
+In Supabase SQL Editor, run:
+```
+../supabase/migrations/20260321000001_osm_sports_venues.sql
+```
+
+Then:
+```sql
+NOTIFY pgrst, 'reload schema';
+```
+
+**Step 2: Set up environment vars in Vercel**
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `OSM_IMPORT_SECRET` — any long random string
+
+**Step 3: Import a region**
+Find a bounding box for your city on [bboxfinder.com](http://bboxfinder.com), then run:
+
+```bash
+cd "Redesign FUN sports map"
+export OSM_IMPORT_SECRET="whatever-you-set-in-vercel"
+export IMPORT_URL="https://YOUR-PROJECT.vercel.app/api/osm-venues-import"
+node scripts/import-osm-venues.mjs 40.7 -74.05 40.78 -73.92
+```
+
+Should see `200 {"ok":true,"upserted":…}`.
+
+Or use curl:
+```bash
+curl -sS -X POST "https://YOUR-PROJECT.vercel.app/api/osm-venues-import" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_OSM_IMPORT_SECRET" \
+  -d '{"minLat":40.7,"minLng":-74.05,"maxLat":40.78,"maxLng":-73.92}'
+```
+
+**Note:** The import URL has to be deployed on Vercel. `npm run dev` doesn't run `/api/` routes (use `vercel dev` if testing locally).
+
+## Performance stuff you should know
+
+- Venue searches are **debounced** (~420ms) so panning the map doesn't spam the API
+- **Overpass queries** with sports filters get tighter regex, but sports centres without explicit tags still show
+- **Venue clustering** runs in a Web Worker so it doesn't freeze the UI
+- **Large radius** Overpass queries load "near ring" first (nearby venues), then expand — map updates sooner

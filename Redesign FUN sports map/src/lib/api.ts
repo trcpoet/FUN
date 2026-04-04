@@ -219,16 +219,34 @@ export async function createGame(params: {
   return { gameId: data as string | null, error: error ? new Error(error.message) : null };
 }
 
-export async function joinGame(gameId: string): Promise<Error | null> {
-  if (!supabase) return new Error("Supabase not configured");
+export async function joinGame(gameId: string): Promise<{ error: Error | null; spotsInfo?: { spotsNeeded: number; currentParticipants: number } }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return new Error("Not signed in");
-  const { error } = await supabase.from("game_participants").insert({
-    game_id: gameId,
-    user_id: user.id,
-    role: "player",
+  if (!user) return { error: new Error("Not signed in") };
+
+  // Call atomic RPC that locks the game row and checks capacity
+  const { data, error } = await supabase.rpc("join_game", {
+    p_game_id: gameId,
   });
-  return error ? new Error(error.message) : null;
+
+  if (error) {
+    return { error: new Error(error.message) };
+  }
+
+  // Handle RPC response (returns jsonb)
+  const result = data as { success?: boolean; error?: string; spots_needed?: number; current_participants?: number } | null;
+
+  if (!result?.success) {
+    return {
+      error: new Error(result?.error ?? "Failed to join game"),
+      spotsInfo: result?.spots_needed && result?.current_participants ? {
+        spotsNeeded: result.spots_needed,
+        currentParticipants: result.current_participants,
+      } : undefined,
+    };
+  }
+
+  return { error: null };
 }
 
 export async function leaveGame(gameId: string): Promise<Error | null> {

@@ -244,11 +244,13 @@ export default function App() {
   const handleJoinGame = async (gameId: string) => {
     const ok = await ensureSession();
     if (!ok) return;
-    const err = await joinGame(gameId);
-    if (!err) {
-      await reloadJoinedGameIds();
-      refetchGames();
+    const result = await joinGame(gameId);
+    if (result.error) {
+      alert(`Could not join game: ${result.error.message}`);
+      return;
     }
+    await reloadJoinedGameIds();
+    refetchGames();
   };
 
   const handleLeaveGame = async (gameId: string) => {
