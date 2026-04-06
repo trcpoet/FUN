@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
+import { createClient } from "@supabase/supabase-js";
 
 /** Same order as `api/overpass.ts` — Vite's http-proxy often 504s on slow upstreams. */
 const UPSTREAMS = [
@@ -89,19 +90,22 @@ export function overpassDevProxy(): Plugin {
             const { minLat, minLng, maxLat, maxLng } = bbox;
             const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
             let features: unknown[] = [];
+            let rows: Record<string, unknown>[] = [];
             try {
               const text = await fetchOverpassText(bboxQuery(bboxStr));
               const json = JSON.parse(text) as { elements?: unknown[] };
+              const now = new Date().toISOString();
               for (const raw of json.elements ?? []) {
                 const el = raw as OsmEl;
                 const lat = el.lat ?? el.center?.lat;
                 const lon = el.lon ?? el.center?.lon;
                 if (lat == null || lon == null || el.type == null || el.id == null) continue;
+                const id = `${el.type}/${el.id}`;
                 features.push({
                   type: "Feature",
                   geometry: { type: "Point", coordinates: [lon, lat] },
                   properties: {
-                    id: `${el.type}/${el.id}`,
+                    id,
                     name: el.tags?.name,
                     sport: el.tags?.sport,
                     leisure: el.tags?.leisure,
@@ -109,8 +113,20 @@ export function overpassDevProxy(): Plugin {
                     osm_id: el.id,
                   },
                 });
+                rows.push({ id, lat, lng: lon, name: el.tags?.name ?? null, sport: el.tags?.sport ?? null, leisure: el.tags?.leisure ?? null, osm_type: el.type, osm_id: el.id, imported_at: now });
               }
             } catch { /* fall through */ }
+            // Save to DB in background so subsequent fetches are instant
+            const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            if (supabaseUrl && serviceKey && rows.length > 0) {
+              const supabase = createClient(supabaseUrl, serviceKey);
+              const CHUNK = 400;
+              for (let i = 0; i < rows.length; i += CHUNK) {
+                supabase.from("osm_sports_venues").upsert(rows.slice(i, i + CHUNK), { onConflict: "id" }).then(() => {});
+              }
+            }
+
             res.setHeader("Content-Type", "application/json; charset=utf-8");
             res.statusCode = 200;
             res.end(JSON.stringify({ type: "FeatureCollection", features }));

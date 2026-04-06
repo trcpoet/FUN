@@ -184,10 +184,11 @@ async function fetchOverpassNetwork(
 
 /**
  * Read pre-synced venues from Supabase (fast). Returns null if unavailable or empty.
+ * sportFilter mirrors Overpass behavior: sports_centres always pass; pitches filtered by sport.
  */
 export async function fetchSportsVenuesFromDb(
   bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number },
-  _signal?: AbortSignal
+  options?: { signal?: AbortSignal; sportFilter?: string[] }
 ): Promise<SportsVenueGeoJSON | null> {
   if (!supabase || venuesDbReadDisabled) return null;
   const { minLat, minLng, maxLat, maxLng } = bbox;
@@ -209,20 +210,34 @@ export async function fetchSportsVenuesFromDb(
   }
   if (!data?.length) return null;
 
-  const features: SportsVenueFeature[] = data.map((row) => ({
-    type: "Feature",
-    geometry: { type: "Point", coordinates: [row.lng as number, row.lat as number] },
-    properties: {
-      id: row.id as string,
-      name: (row.name as string | null) ?? undefined,
-      sport: (row.sport as string | null) ?? undefined,
-      leisure: (row.leisure as string | null) ?? undefined,
-      osm_type: row.osm_type as string,
-      osm_id: Number(row.osm_id),
-    },
-  }));
+  const sportTokens = options?.sportFilter?.length
+    ? [...expectedOsmTokensForDisplaySports(options.sportFilter)].map((t) => t.toLowerCase())
+    : null;
 
-  return { type: "FeatureCollection", features };
+  const features: SportsVenueFeature[] = [];
+  for (const row of data) {
+    const leisure = (row.leisure as string | null) ?? "";
+    const sport = (row.sport as string | null) ?? "";
+    // Apply sport filter only to pitches; sports_centres always pass through
+    if (sportTokens && leisure === "pitch") {
+      const rowSports = sport.toLowerCase().split(";").map((s) => s.trim());
+      if (!sportTokens.some((t) => rowSports.includes(t))) continue;
+    }
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [row.lng as number, row.lat as number] },
+      properties: {
+        id: row.id as string,
+        name: (row.name as string | null) ?? undefined,
+        sport: sport || undefined,
+        leisure: leisure || undefined,
+        osm_type: row.osm_type as string,
+        osm_id: Number(row.osm_id),
+      },
+    });
+  }
+
+  return features.length ? { type: "FeatureCollection", features } : null;
 }
 
 /**
@@ -285,7 +300,7 @@ export async function fetchSportsVenues(
   bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number },
   options?: { signal?: AbortSignal; sportFilter?: string[] }
 ): Promise<SportsVenueGeoJSON> {
-  const fromDb = await fetchSportsVenuesFromDb(bbox, options?.signal);
+  const fromDb = await fetchSportsVenuesFromDb(bbox, options);
   if (fromDb && fromDb.features.length > 0) {
     return fromDb;
   }
@@ -313,7 +328,7 @@ export async function fetchSportsVenuesWithProgress(
   }
 ): Promise<SportsVenueGeoJSON> {
   const fullBbox = bboxFromCenterRadius(centerLat, centerLng, radiusKm);
-  const fromDb = await fetchSportsVenuesFromDb(fullBbox, options?.signal);
+  const fromDb = await fetchSportsVenuesFromDb(fullBbox, options);
   if (fromDb && fromDb.features.length > 0) {
     return fromDb;
   }

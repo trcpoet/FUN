@@ -237,6 +237,9 @@ export function MapboxMap(props: MapboxMapProps) {
     return () => clearTimeout(tid);
   }, [venuesFetchCenter?.lat, venuesFetchCenter?.lng]);
   const venueClustersRef = useRef<VenueClusterPoint[]>([]);
+  /** Caches the last fully-fetched (unfiltered) venue GeoJSON for instant re-renders on sport-filter changes. */
+  const lastRawVenueGeoJsonRef = useRef<SportsVenueGeoJSON | null>(null);
+  const lastVenueDataKeyRef = useRef<string | null>(null);
   const onVenuesFetchLoadingChangeRef = useRef(onVenuesFetchLoadingChange);
   onVenuesFetchLoadingChangeRef.current = onVenuesFetchLoadingChange;
 
@@ -1604,9 +1607,12 @@ export function MapboxMap(props: MapboxMapProps) {
 
   // —— Sports venues: subtle GL polygons + small center dots (no DOM flag markers) ———
   const venueSportSig = venueSportsFilter.slice().sort().join("|");
-  const venueFetchKey = debouncedVenueFetchCenter
-    ? `${debouncedVenueFetchCenter.lat.toFixed(4)},${debouncedVenueFetchCenter.lng.toFixed(4)},${venueSearchRadiusKm},${venueSportSig}`
+  // Data key: only location + radius — drives the network fetch.
+  const venueFetchDataKey = debouncedVenueFetchCenter
+    ? `${debouncedVenueFetchCenter.lat.toFixed(4)},${debouncedVenueFetchCenter.lng.toFixed(4)},${venueSearchRadiusKm}`
     : null;
+  // Render key: includes sport sig — drives the effect to re-run on filter changes.
+  const venueFetchKey = venueFetchDataKey ? `${venueFetchDataKey},${venueSportSig}` : null;
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1920,13 +1926,23 @@ export function MapboxMap(props: MapboxMapProps) {
         }
       };
 
+      // Fast path: only the sport filter changed — re-cluster cached raw data, no network request.
+      if (venueFetchDataKey && lastVenueDataKeyRef.current === venueFetchDataKey && lastRawVenueGeoJsonRef.current) {
+        addVenueMarkers(lastRawVenueGeoJsonRef.current, () => {
+          if (cancelled) return;
+          finishLoading();
+        });
+        return;
+      }
+
+      // Slow path: location or radius changed — fetch all sports so the cache works for any filter.
       fetchSportsVenuesWithProgress(
         debouncedVenueFetchCenter.lat,
         debouncedVenueFetchCenter.lng,
         venueSearchRadiusKm,
         {
           signal: venueFetchAbort.signal,
-          sportFilter: venueSportsFilter,
+          sportFilter: [], // fetch all sports; clustering applies the active filter client-side
           onNearRing: (geojson) =>
             new Promise<void>((resolve) => {
               if (cancelled) {
@@ -1946,6 +1962,9 @@ export function MapboxMap(props: MapboxMapProps) {
       )
         .then((geojson) => {
           if (cancelled) return;
+          // Cache the full unfiltered result so sport-filter changes are instant.
+          lastRawVenueGeoJsonRef.current = geojson;
+          lastVenueDataKeyRef.current = venueFetchDataKey;
           addVenueMarkers(geojson, () => {
             if (cancelled) return;
             finishLoading();
@@ -1959,9 +1978,15 @@ export function MapboxMap(props: MapboxMapProps) {
         });
     };
 
-    // Defer Overpass until tiles are idle (or 2.5s) so the base map can render first.
-    map.on("idle", kickoffVenueFetch);
-    idleFallbackId = window.setTimeout(kickoffVenueFetch, 2500);
+    // For sport-filter-only changes, kick off immediately (cached data — no need to wait for idle).
+    // For location/radius changes, defer until tiles are idle (or 2.5s) so the base map renders first.
+    const hasCachedData = venueFetchDataKey && lastVenueDataKeyRef.current === venueFetchDataKey && lastRawVenueGeoJsonRef.current;
+    if (hasCachedData) {
+      kickoffVenueFetch();
+    } else {
+      map.on("idle", kickoffVenueFetch);
+      idleFallbackId = window.setTimeout(kickoffVenueFetch, 2500);
+    }
 
     return () => {
       cancelled = true;
@@ -1984,6 +2009,7 @@ export function MapboxMap(props: MapboxMapProps) {
   }, [
     mapLoaded,
     venueFetchKey,
+    venueFetchDataKey,
     debouncedVenueFetchCenter,
     venueSearchRadiusKm,
     venueSportsFilter,

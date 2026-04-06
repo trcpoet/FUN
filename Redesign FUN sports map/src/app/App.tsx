@@ -490,7 +490,7 @@ export default function App() {
           }}
           onVenuesFetchLoadingChange={handleVenuesFetchLoading}
           venueSportsFilter={appliedFilters.sports}
-          venueSearchRadiusKm={gamesRadiusKm}
+          venueSearchRadiusKm={appliedFilters.venueRadiusKm}
           mapMinuteEpoch={mapMinuteEpoch}
           pauseVenueFetch={messagesOpen}
           mapStyleUrl={satelliteOn ? "mapbox://styles/mapbox/satellite-streets-v12" : null}
