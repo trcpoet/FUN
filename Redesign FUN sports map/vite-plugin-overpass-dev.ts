@@ -16,6 +16,47 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+type OsmEl = {
+  type?: string;
+  id?: number;
+  lat?: number;
+  lon?: number;
+  center?: { lat?: number; lon?: number };
+  tags?: { name?: string; sport?: string; leisure?: string };
+};
+
+function bboxQuery(bboxStr: string): string {
+  return `
+    [out:json][timeout:60];
+    (
+      node["leisure"="pitch"](${bboxStr});
+      way["leisure"="pitch"](${bboxStr});
+      node["leisure"="sports_centre"](${bboxStr});
+      way["leisure"="sports_centre"](${bboxStr});
+    );
+    out center;
+  `.replace(/\n\s+/g, " ");
+}
+
+async function fetchOverpassText(body: string): Promise<string> {
+  const controllers = UPSTREAMS.map(() => new AbortController());
+  return Promise.any(
+    UPSTREAMS.map((url, i) =>
+      fetch(url, {
+        method: "POST",
+        body,
+        headers: { "Content-Type": "text/plain" },
+        signal: controllers[i].signal,
+      }).then(async (r) => {
+        if (r.status === 429 || !r.ok) throw new Error(`upstream ${r.status}`);
+        const t = await r.text();
+        controllers.forEach((c, j) => { if (j !== i) c.abort(); });
+        return t;
+      })
+    )
+  );
+}
+
 export function overpassDevProxy(): Plugin {
   return {
     name: "overpass-dev-proxy",
@@ -23,53 +64,60 @@ export function overpassDevProxy(): Plugin {
     configureServer(server) {
       server.middlewares.use(
         async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
-          const path = req.url?.split("?")[0] ?? "";
-          if (path !== "/api/overpass") {
-            next();
-            return;
-          }
-          if (req.method === "OPTIONS") {
-            res.statusCode = 204;
-            res.end();
-            return;
-          }
-          if (req.method !== "POST") {
-            res.statusCode = 405;
-            res.end();
-            return;
-          }
-          const body = await readBody(req);
-          const controllers = UPSTREAMS.map(() => new AbortController());
-          try {
-            const text = await Promise.any(
-              UPSTREAMS.map((url, i) =>
-                fetch(url, {
-                  method: "POST",
-                  body,
-                  headers: { "Content-Type": "text/plain" },
-                  signal: controllers[i].signal,
-                }).then(async (r) => {
-                  if (r.status === 429 || !r.ok) {
-                    throw new Error(`upstream ${r.status}`);
-                  }
-                  const t = await r.text();
-                  controllers.forEach((c, j) => {
-                    if (j !== i) c.abort();
-                  });
-                  return t;
-                })
-              )
-            );
+          const urlPath = req.url?.split("?")[0] ?? "";
+
+          // Legacy direct Overpass proxy (kept for any other callers)
+          if (urlPath === "/api/overpass") {
+            if (req.method === "OPTIONS") { res.statusCode = 204; res.end(); return; }
+            if (req.method !== "POST") { res.statusCode = 405; res.end(); return; }
+            const body = await readBody(req);
+            let text = JSON.stringify({ elements: [] });
+            try { text = await fetchOverpassText(body); } catch { /* fall through */ }
             res.setHeader("Content-Type", "application/json; charset=utf-8");
             res.statusCode = 200;
             res.end(text);
             return;
-          } catch {
-            /* fall through */
           }
-          res.setHeader("Content-Type", "application/json; charset=utf-8");
-          res.statusCode = 200;
-          res.end(JSON.stringify({ elements: [] }));
+
+          // Auto-cache endpoint: fetch Overpass, return GeoJSON (no DB save in dev)
+          if (urlPath === "/api/auto-cache-venues") {
+            if (req.method === "OPTIONS") { res.statusCode = 204; res.end(); return; }
+            if (req.method !== "POST") { res.statusCode = 405; res.end(); return; }
+            const raw = await readBody(req);
+            let bbox: { minLat?: number; minLng?: number; maxLat?: number; maxLng?: number } = {};
+            try { bbox = JSON.parse(raw); } catch { /* ignore */ }
+            const { minLat, minLng, maxLat, maxLng } = bbox;
+            const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
+            let features: unknown[] = [];
+            try {
+              const text = await fetchOverpassText(bboxQuery(bboxStr));
+              const json = JSON.parse(text) as { elements?: unknown[] };
+              for (const raw of json.elements ?? []) {
+                const el = raw as OsmEl;
+                const lat = el.lat ?? el.center?.lat;
+                const lon = el.lon ?? el.center?.lon;
+                if (lat == null || lon == null || el.type == null || el.id == null) continue;
+                features.push({
+                  type: "Feature",
+                  geometry: { type: "Point", coordinates: [lon, lat] },
+                  properties: {
+                    id: `${el.type}/${el.id}`,
+                    name: el.tags?.name,
+                    sport: el.tags?.sport,
+                    leisure: el.tags?.leisure,
+                    osm_type: el.type,
+                    osm_id: el.id,
+                  },
+                });
+              }
+            } catch { /* fall through */ }
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.statusCode = 200;
+            res.end(JSON.stringify({ type: "FeatureCollection", features }));
+            return;
+          }
+
+          next();
         }
       );
     },
