@@ -17,8 +17,10 @@ export type GameRow = {
   title: string;
   sport: string;
   spots_needed: number;
-  /** Headcount including host (from `get_games_nearby` after roster migration). */
+  /** Real headcount — host + confirmed players. Excludes substitutes. */
   participant_count?: number;
+  /** People on the waitlist (role = 'substitute'). */
+  substitute_count?: number;
   /** `spots_needed - participant_count`, floored at 0. */
   spots_remaining?: number;
   starts_at: string | null;

@@ -219,22 +219,26 @@ export async function createGame(params: {
   return { gameId: data as string | null, error: error ? new Error(error.message) : null };
 }
 
-export async function joinGame(gameId: string): Promise<{ error: Error | null; spotsInfo?: { spotsNeeded: number; currentParticipants: number } }> {
+export async function joinGame(gameId: string): Promise<{
+  error: Error | null;
+  role?: "player" | "substitute";
+  spotsInfo?: { spotsNeeded: number; currentParticipants: number };
+}> {
   if (!supabase) return { error: new Error("Supabase not configured") };
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: new Error("Not signed in") };
 
-  // Call atomic RPC that locks the game row and checks capacity
-  const { data, error } = await supabase.rpc("join_game", {
-    p_game_id: gameId,
-  });
+  const { data, error } = await supabase.rpc("join_game", { p_game_id: gameId });
 
-  if (error) {
-    return { error: new Error(error.message) };
-  }
+  if (error) return { error: new Error(error.message) };
 
-  // Handle RPC response (returns jsonb)
-  const result = data as { success?: boolean; error?: string; spots_needed?: number; current_participants?: number } | null;
+  const result = data as {
+    success?: boolean;
+    role?: "player" | "substitute";
+    error?: string;
+    spots_needed?: number;
+    current_participants?: number;
+  } | null;
 
   if (!result?.success) {
     return {
@@ -246,7 +250,7 @@ export async function joinGame(gameId: string): Promise<{ error: Error | null; s
     };
   }
 
-  return { error: null };
+  return { error: null, role: result.role };
 }
 
 export async function leaveGame(gameId: string): Promise<Error | null> {
@@ -254,13 +258,12 @@ export async function leaveGame(gameId: string): Promise<Error | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Error("Not signed in");
 
-  const { error } = await supabase
-    .from("game_participants")
-    .delete()
-    .eq("game_id", gameId)
-    .eq("user_id", user.id);
+  // Atomic RPC: if a substitute is waiting, promotes them automatically
+  const { data, error } = await supabase.rpc("leave_game", { p_game_id: gameId });
+  if (error) return new Error(error.message);
 
-  return error ? new Error(error.message) : null;
+  const result = data as { success?: boolean; error?: string } | null;
+  return result?.success ? null : new Error(result?.error ?? "Failed to leave game");
 }
 
 /** Remove a game you created (`created_by`). Cascades participants, messages, etc. Requires RLS policy `Hosts can delete own games`. */

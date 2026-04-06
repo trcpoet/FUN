@@ -140,6 +140,7 @@ export default function App() {
   const [createGameLocationLabel, setCreateGameLocationLabel] = useState<string | null>(null);
   const [joinedGameIds, setJoinedGameIds] = useState<Set<string>>(new Set());
   const [hostGameIds, setHostGameIds] = useState<Set<string>>(new Set());
+  const [substituteGameIds, setSubstituteGameIds] = useState<Set<string>>(new Set());
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [messengerFocus, setMessengerFocus] = useState<MessengerThreadFocus | null>(null);
   /** Idle prefetch so opening Messages isn't blocked by cold RPCs. */
@@ -194,6 +195,7 @@ export default function App() {
     if (data) {
       setJoinedGameIds(new Set(data.map((r) => r.game_id)));
       setHostGameIds(new Set(data.filter((r) => r.role === "host").map((r) => r.game_id)));
+      setSubstituteGameIds(new Set(data.filter((r) => r.role === "substitute").map((r) => r.game_id)));
     }
   }, [currentUserId]);
 
@@ -479,6 +481,7 @@ export default function App() {
           currentUserId={currentUserId}
           joinedGameIds={joinedGameIds}
           hostGameIds={hostGameIds}
+          substituteGameIds={substituteGameIds}
           onJoinGame={(game) => handleJoinGame(game.id)}
           onLeaveGame={(game) => handleLeaveGame(game.id)}
           onDeleteHostedGame={handleDeleteHostedGame}

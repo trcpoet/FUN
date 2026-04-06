@@ -56,6 +56,8 @@ type GameEventPopupProps = {
   joined?: boolean;
   /** You created this game (host row in game_participants). Hide misleading "Unjoin" — you're organizing, not a guest who joined. */
   isHost?: boolean;
+  /** Current user is on the waitlist as a substitute (joined when full). */
+  isSubstitute?: boolean;
   /** Host-only: delete game for everyone. Return true when the row was removed. */
   onDeleteHostedGame?: (game: GameRow) => Promise<boolean>;
   /** Host-only: start the game (sets status=live). */
@@ -74,6 +76,7 @@ export function GameEventPopup({
   onOpenMessages,
   joined,
   isHost,
+  isSubstitute = false,
   onDeleteHostedGame,
   onStartHostedGame,
   onEndHostedGame,
@@ -165,7 +168,9 @@ export function GameEventPopup({
           >
             {game.sport} ·{" "}
             {game.spots_remaining != null
-              ? `${game.spots_remaining} spots left`
+              ? game.spots_remaining === 0
+                ? `Full${game.substitute_count ? ` · ${game.substitute_count} on waitlist` : ""}`
+                : `${game.spots_remaining} spots left`
               : `${game.spots_needed} max`}
           </p>
           <div className="flex flex-col gap-0.5 mt-1.5 text-slate-500 text-xs">
@@ -233,11 +238,16 @@ export function GameEventPopup({
             <button
               type="button"
               onClick={() => onJoin(game)}
-              className="col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold transition-colors hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+              className={cn(
+                "col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-lg text-white text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2",
+                isFull
+                  ? "bg-amber-600/80 hover:bg-amber-500 focus-visible:ring-amber-500/40"
+                  : "bg-emerald-600 hover:bg-emerald-500 focus-visible:ring-emerald-500/40"
+              )}
             >
               <span className="inline-flex items-center gap-2">
                 <Play className="w-4 h-4 opacity-90" aria-hidden />
-                {isFull ? "Join as sub" : "Join"}
+                {isFull ? "Join Waitlist" : "Join"}
               </span>
             </button>
           ) : null}
@@ -297,11 +307,11 @@ export function GameEventPopup({
                 onClick={() => onLeave(game)}
                 className="inline-flex h-10 items-center justify-center rounded-lg border border-rose-500/40 bg-rose-950/35 text-rose-100 text-sm font-semibold transition-colors hover:bg-rose-950/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/30"
               >
-                {isFull ? "Can't make it (sub)" : "Can't make it"}
+                {isSubstitute ? "Leave Waitlist" : "Can't make it"}
               </button>
             ) : (
               <span className="inline-flex h-10 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm font-semibold">
-                {isFull ? "You're going (Sub)" : "You're going"}
+                {isSubstitute ? "On Waitlist" : "You're going"}
               </span>
             )
           ) : null}

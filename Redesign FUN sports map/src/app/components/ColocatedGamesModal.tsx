@@ -56,7 +56,7 @@ export function ColocatedGamesModal({
   const sportKeys = useMemo(() => [...bySport.keys()].sort((a, b) => a.localeCompare(b)), [bySport]);
 
   const activeCount = (list: GameRow[]) =>
-    list.filter((g) => g.status === "open" || !g.status).length;
+    list.filter((g) => g.status === "open" || g.status === "full" || g.status === "live" || !g.status).length;
 
   const handleShare = async () => {
     const titleLine = title || "Games at this spot";

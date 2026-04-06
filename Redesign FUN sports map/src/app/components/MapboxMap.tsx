@@ -128,6 +128,8 @@ type MapboxMapProps = {
   joinedGameIds?: Set<string>;
   /** Set of game ids where the current user is the host (to show "You're hosting"). */
   hostGameIds?: Set<string>;
+  /** Set of game ids where the current user is on the waitlist as a substitute. */
+  substituteGameIds?: Set<string>;
   nearbyProfiles?: ProfileNearbyRow[];
   /** Your rating out of 5 (shown under your 2D map avatar). */
   userSportsmanship?: number | null;
@@ -194,6 +196,7 @@ export function MapboxMap(props: MapboxMapProps) {
   const currentUserId = props.currentUserId ?? null;
   const joinedSet = joinedGameIds ?? new Set<string>();
   const hostSet = props.hostGameIds ?? new Set<string>();
+  const substituteSet = props.substituteGameIds ?? new Set<string>();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("mapbox-gl").Map | null>(null);
@@ -2082,6 +2085,7 @@ export function MapboxMap(props: MapboxMapProps) {
                 (hostSet.has(eventPopup.game.id) ||
                   eventPopup.game.created_by === currentUserId)
               }
+              isSubstitute={substituteSet.has(eventPopup.game.id)}
               onDeleteHostedGame={onDeleteHostedGame}
               onStartHostedGame={onStartHostedGame}
               onEndHostedGame={onEndHostedGame}
