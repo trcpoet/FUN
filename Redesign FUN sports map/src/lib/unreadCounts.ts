@@ -18,14 +18,27 @@ function readStore(): UnreadStore {
   return safeParse(localStorage.getItem(STORAGE_KEY));
 }
 
+const UNREAD_UPDATED_EVENT = "fun_unread_counts_updated";
+
 function writeStore(next: UnreadStore) {
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    window.dispatchEvent(new CustomEvent(UNREAD_UPDATED_EVENT));
   } catch {
     /* ignore */
   }
 }
+
+export function getTotalUnreadCount(): number {
+  const store = readStore();
+  return Object.values(store).reduce(
+    (sum, entry) => sum + (entry && Number.isFinite(entry.count) ? Math.max(0, Math.floor(entry.count)) : 0),
+    0
+  );
+}
+
+export { UNREAD_UPDATED_EVENT };
 
 export function threadKey(kind: "game" | "dm", id: string): string {
   return `${kind}:${id}`;

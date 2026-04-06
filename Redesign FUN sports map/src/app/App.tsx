@@ -24,6 +24,7 @@ import type { DmInboxRow, GameInboxRow, ProfileSearchRow } from "../lib/supabase
 import { useMyProfile } from "../hooks/useMyProfile";
 import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
+import { useTotalUnreadMessages } from "../hooks/useTotalUnreadMessages";
 import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame } from "../lib/api";
 import { fetchMyDmInbox, getOrCreateDmThread } from "../lib/dmChat";
@@ -128,6 +129,7 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
   const { notifications, markRead } = useNotifications({ limit: 10 });
+  const messagesUnreadCount = useTotalUnreadMessages();
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [locationVisibility, setLocationVisibility] = useState<LocationVisibilityMode>(() => readLocationVisibility());
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
@@ -537,6 +539,7 @@ export default function App() {
         onToggleSatellite={() => setSatelliteOn((v) => !v)}
         notifications={notifications}
         notificationsUnreadCount={notifications.filter((n) => !n.is_read).length}
+        messagesUnreadCount={messagesUnreadCount}
         onMarkNotificationRead={(id) => void markRead(id)}
         onOpenNotifications={() => navigate("/feed?tab=notifications")}
         locationVisibility={locationVisibility}

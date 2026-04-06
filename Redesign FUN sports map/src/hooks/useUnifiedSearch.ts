@@ -96,7 +96,16 @@ export function useUnifiedSearch(opts: {
       signal: ac.signal,
     }).then((rows) => {
       if (geoAbortRef.current !== ac) return;
-      setPlaces(rows);
+      // Sort by straight-line distance to anchor so the closest result is always first
+      const sorted =
+        opts.anchorLat != null && opts.anchorLng != null
+          ? [...rows].sort((a, b) => {
+              const da = Math.hypot(a.center[1] - opts.anchorLat!, a.center[0] - opts.anchorLng!);
+              const db = Math.hypot(b.center[1] - opts.anchorLat!, b.center[0] - opts.anchorLng!);
+              return da - db;
+            })
+          : rows;
+      setPlaces(sorted);
       setPlacesLoading(false);
     });
 

@@ -87,6 +87,8 @@ export type TopNavigationProps = {
   onOpenProfile?: () => void;
   userAvatarUrl?: string | null;
   favoriteSport?: string | null;
+  /** Total unread count across all game chats and DMs. Shows red dot when > 0. */
+  messagesUnreadCount?: number;
 };
 
 function placeSubtitle(placeName: string): string | undefined {
@@ -134,6 +136,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
     onOpenProfile,
     userAvatarUrl,
     favoriteSport,
+    messagesUnreadCount = 0,
   } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [feedToolbarHintOpen, setFeedToolbarHintOpen] = useState(false);
@@ -575,6 +578,11 @@ export const TopNavigation = (props: TopNavigationProps) => {
                     title="Messages"
                   >
                     <MessageCircle className="w-5 h-5" />
+                    {messagesUnreadCount > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
+                        {messagesUnreadCount > 9 ? "9+" : messagesUnreadCount}
+                      </span>
+                    )}
                   </button>
                 </div>
               ) : null}
