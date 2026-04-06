@@ -490,7 +490,16 @@ export default function App() {
           onStartHostedGame={handleStartHostedGame}
           onEndHostedGame={handleEndHostedGame}
           onOpenMessagesForGame={(game) => {
-            setMessengerFocus({ kind: "game", gameId: game.id });
+            setMessengerFocus({
+              kind: "game",
+              gameId: game.id,
+              title: game.title,
+              sport: game.sport,
+              startsAt: game.starts_at,
+              createdAt: game.created_at,
+              participantCount: game.participant_count,
+              spotsRemaining: game.spots_remaining,
+            });
             setMessagesOpen(true);
           }}
           venuesCenter={mapSearchLocation}
