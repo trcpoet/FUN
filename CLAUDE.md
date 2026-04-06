@@ -15,7 +15,8 @@ npm run dev         # Start Vite dev server on http://localhost:5173
 npm run build       # Outputs to dist/
 
 # Database utilities
-npm run import-osm  # Imports OpenStreetMap venue data into Supabase
+npm run import-
+ # Imports OpenStreetMap venue data into Supabase
 ```
 
 ## Environment Setup

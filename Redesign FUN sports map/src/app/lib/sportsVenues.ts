@@ -9,8 +9,8 @@ import type { SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes"
 
 export type { SportsVenueProperties, SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 
-/** Same-origin proxy (Vercel Edge `api/overpass.ts` or Vite dev proxy) — public Overpass APIs block browser CORS. */
-const OVERPASS_PROXY_PATH = "/api/overpass";
+/** Auto-cache endpoint: fetches from Overpass server-side and persists to DB. Returns GeoJSON directly. */
+const AUTO_CACHE_PATH = "/api/auto-cache-venues";
 
 /** How long a bbox result stays valid (memory + sessionStorage). */
 const CACHE_TTL_MS = 12 * 60 * 1000;
@@ -161,80 +161,25 @@ export function bboxFromCenterRadius(
   };
 }
 
-function overpassQueryBody(bboxStr: string, sportRegex: string | null): string {
-  const pitchBlock =
-    sportRegex != null && sportRegex.length > 0
-      ? `
-      node["leisure"="pitch"]["sport"~"${sportRegex}",i](${bboxStr});
-      way["leisure"="pitch"]["sport"~"${sportRegex}",i](${bboxStr});
-    `
-      : `
-      node["leisure"="pitch"](${bboxStr});
-      way["leisure"="pitch"](${bboxStr});
-    `;
-  const q = `
-    [out:json][timeout:15];
-    (
-      ${pitchBlock}
-      node["leisure"="sports_centre"](${bboxStr});
-      way["leisure"="sports_centre"](${bboxStr});
-    );
-    out center;
-  `.replace(/\n\s+/g, " ");
-  return q;
-}
 
 async function fetchOverpassNetwork(
   bboxStr: string,
-  sportRegex: string | null,
+  _sportRegex: string | null,
   signal?: AbortSignal
 ): Promise<SportsVenueGeoJSON> {
-  const query = overpassQueryBody(bboxStr, sportRegex);
-
-  const res = await fetch(OVERPASS_PROXY_PATH, {
+  const [minLat, minLng, maxLat, maxLng] = bboxStr.split(",").map(Number);
+  const res = await fetch(AUTO_CACHE_PATH, {
     method: "POST",
-    body: query,
-    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({ minLat, minLng, maxLat, maxLng }),
+    headers: { "Content-Type": "application/json" },
     signal,
   });
   if (!res.ok) return { type: "FeatureCollection", features: [] };
-  const text = await res.text();
-  let json: { elements?: unknown[] };
   try {
-    json = JSON.parse(text) as { elements?: unknown[] };
+    return (await res.json()) as SportsVenueGeoJSON;
   } catch {
     return { type: "FeatureCollection", features: [] };
   }
-
-  type OsmEl = {
-    type?: string;
-    id?: number;
-    lat?: number;
-    lon?: number;
-    center?: { lat?: number; lon?: number };
-    tags?: { name?: string; sport?: string; leisure?: string };
-  };
-  const features: SportsVenueFeature[] = [];
-  for (const raw of json.elements || []) {
-    const el = raw as OsmEl;
-    const lat = el.lat ?? el.center?.lat;
-    const lon = el.lon ?? el.center?.lon;
-    if (lat == null || lon == null) continue;
-    if (el.type == null || el.id == null) continue;
-    features.push({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [lon, lat] },
-      properties: {
-        id: `${el.type}/${el.id}`,
-        name: el.tags?.name,
-        sport: el.tags?.sport,
-        leisure: el.tags?.leisure,
-        osm_type: el.type,
-        osm_id: el.id,
-      },
-    });
-  }
-  return { type: "FeatureCollection", features };
 }
 
 /**
