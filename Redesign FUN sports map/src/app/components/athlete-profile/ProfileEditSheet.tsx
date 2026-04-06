@@ -755,7 +755,7 @@ export function ProfileEditSheet({
                 <div className="mx-auto max-w-lg flex flex-col gap-3 pointer-events-auto">
                   <Button
                     type="button"
-                    className="h-14 w-full bg-primary text-white shadow-[0_20px_40px_-10px_rgba(225,29,72,0.4)] rounded-[32px] font-black uppercase tracking-[0.2em] italic tracking-tighter hover:scale-[1.02] active:scale-[0.98] transition-all"
+                    className="h-14 w-full bg-primary text-white shadow-[0_20px_40px_-10px_rgba(225,29,72,0.4)] rounded-[32px] font-black uppercase tracking-[0.2em] italic hover:scale-[1.02] active:scale-[0.98] transition-all"
                     disabled={saving}
                     onClick={() => void handleSave()}
                   >

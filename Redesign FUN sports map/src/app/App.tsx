@@ -493,6 +493,7 @@ export default function App() {
             setMessengerFocus({ kind: "game", gameId: game.id });
             setMessagesOpen(true);
           }}
+          venuesCenter={mapSearchLocation}
           onVenuesFetchLoadingChange={handleVenuesFetchLoading}
           venueSportsFilter={appliedFilters.sports}
           venueSearchRadiusKm={appliedFilters.venueRadiusKm}
