@@ -241,6 +241,8 @@ export default function App() {
 
   const handleCenterOnUser = () => {
     if (userCoords) {
+      // Reset venue fetch center to the user's GPS location (clears any map-search override).
+      setMapSearchLocation(null);
       setCenterOnUserTrigger((n) => n + 1);
     }
   };
@@ -612,10 +614,21 @@ export default function App() {
         onLeaveThread={handleLeaveGame}
         inboxBootstrap={gameInboxBootstrap}
         dmInboxBootstrap={dmInboxBootstrap}
-        onSelectGameOnMap={(gameId) => {
+        onSelectGameOnMap={async (gameId) => {
+          let lat: number, lng: number;
           const game = games.find((g) => g.id === gameId);
-          if (game) handleCenterOnCoords({ lat: game.lat, lng: game.lng });
+          if (game) {
+            lat = game.lat;
+            lng = game.lng;
+          } else {
+            const coords = await getGameLatLng(gameId);
+            if (!coords) return;
+            lat = coords.lat;
+            lng = coords.lng;
+          }
+          handleCenterOnCoords({ lat, lng });
         }}
+
       />
 
       <FiltersModal

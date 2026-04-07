@@ -96,13 +96,18 @@ export function useUnifiedSearch(opts: {
       signal: ac.signal,
     }).then((rows) => {
       if (geoAbortRef.current !== ac) return;
-      // Sort by straight-line distance to anchor so the closest result is always first
+      // Blended rank: relevance (Mapbox quality signal) outweighs distance.
+      // RELEVANCE_WEIGHT=2 means a 0.1 relevance gap beats ~4.5° (~500km) of distance,
+      // so a major world city wins over a small nearby village with the same name.
+      // When relevance is equal, the closer result wins as a tiebreaker.
       const sorted =
         opts.anchorLat != null && opts.anchorLng != null
           ? [...rows].sort((a, b) => {
               const da = Math.hypot(a.center[1] - opts.anchorLat!, a.center[0] - opts.anchorLng!);
               const db = Math.hypot(b.center[1] - opts.anchorLat!, b.center[0] - opts.anchorLng!);
-              return da - db;
+              const scoreA = a.relevance * 2 - da / 45;
+              const scoreB = b.relevance * 2 - db / 45;
+              return scoreB - scoreA;
             })
           : rows;
       setPlaces(sorted);

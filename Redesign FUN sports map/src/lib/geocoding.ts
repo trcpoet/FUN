@@ -7,6 +7,10 @@ export type ForwardGeocodeFeature = {
   place_name: string;
   /** [lng, lat] */
   center: [number, number];
+  /** Mapbox relevance score 0–1. Higher = better match for the query text. */
+  relevance: number;
+  /** e.g. ["place"], ["poi"], ["region"], ["address"] */
+  place_type: string[];
 };
 
 type CacheEntry = { at: number; rows: ForwardGeocodeFeature[] };
@@ -70,12 +74,16 @@ export async function forwardGeocodeSearch(
       id: string;
       place_name: string;
       center: [number, number];
+      relevance: number;
+      place_type: string[];
     }>;
     if (!Array.isArray(features)) return [];
     const rows = features.map((f) => ({
       id: f.id,
       place_name: f.place_name,
       center: f.center,
+      relevance: typeof f.relevance === "number" ? f.relevance : 0,
+      place_type: Array.isArray(f.place_type) ? f.place_type : [],
     }));
     writePlaceCache(key, rows);
     return rows;
