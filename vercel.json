@@ -1,0 +1,6 @@
+{
+  "buildCommand": "cd \"Redesign FUN sports map\" && npm run build",
+  "outputDirectory": "Redesign FUN sports map/dist",
+  "installCommand": "cd \"Redesign FUN sports map\" && npm install",
+  "framework": "vite"
+}
