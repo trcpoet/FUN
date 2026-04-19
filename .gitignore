@@ -34,3 +34,13 @@ npm-debug.log*
 # Python (Cursor skills / local scripts)
 __pycache__/
 *.py[cod]
+
+# Local agent/editor aliases
+.agent/
+.claude/
+.junie/
+
+# Nested app local state
+Redesign FUN sports map/.env
+Redesign FUN sports map/.claude/
+Redesign FUN sports map/supabase/.temp/

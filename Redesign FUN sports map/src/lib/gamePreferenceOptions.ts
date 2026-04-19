@@ -2,16 +2,14 @@
 
 export const LEVEL_OPTIONS = ["Any", "Beginner", "Intermediate", "Advanced", "Competitive"] as const;
 export const AGE_RANGE_OPTIONS = ["Any", "13–17", "18–24", "25–34", "35–44", "45+"] as const;
-export const AVAILABILITY_OPTIONS = ["Now", "Today", "This week"] as const;
-export const TIME_OF_DAY_OPTIONS = ["Morning", "Afternoon", "Evening", "Late night"] as const;
-export const GAME_TYPE_OPTIONS = ["Casual", "Training", "Competitive", "Tournament", "1‑on‑1"] as const;
+export const MATCH_TYPE_OPTIONS = ["Co-ed", "Men's", "Women's"] as const;
+export const VISIBILITY_OPTIONS = ["Public (Map)", "Friends Only", "Invite Only"] as const;
 
 export type GameRequirementsPayload = {
   skillLevel: string;
   ageRange: string;
-  availability: string[];
-  timeOfDay: string[];
-  gameTypes: string[];
+  matchType: string;
+  visibility: string;
   school: string;
 };
 
@@ -19,9 +17,8 @@ export function emptyGameRequirements(): GameRequirementsPayload {
   return {
     skillLevel: "Any",
     ageRange: "Any",
-    availability: [],
-    timeOfDay: [],
-    gameTypes: [],
+    matchType: "Co-ed",
+    visibility: "Public (Map)",
     school: "",
   };
 }

@@ -248,8 +248,9 @@ export function subscribeGameMessages(
 ): () => void {
   if (!supabase) return () => {};
 
+  const randomSuffix = Math.random().toString(36).substring(2, 10);
   const channel: RealtimeChannel = supabase
-    .channel(`game-messages:${gameId}`)
+    .channel(`game-messages:${gameId}-${randomSuffix}`)
     .on(
       "postgres_changes",
       {

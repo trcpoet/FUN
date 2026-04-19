@@ -58,6 +58,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebouncedValue(searchQuery, SEARCH_DEBOUNCE_MS);
   const [mapSearchLocation, setMapSearchLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [mapSearchLocationName, setMapSearchLocationName] = useState<string | null>(null);
   const [sportFocus, setSportFocus] = useState<{ sport: string } | null>(null);
   const [gamesRadiusKm, setGamesRadiusKm] = useState(DEFAULT_FILTERS.gamesRadiusKm);
   const [mapCameraRequest, setMapCameraRequest] = useState<MapCameraRequest | null>(null);
@@ -207,6 +208,7 @@ export default function App() {
 
   const handlePickGeocode = (f: ForwardGeocodeFeature) => {
     setMapSearchLocation({ lat: f.center[1], lng: f.center[0] });
+    setMapSearchLocationName(f.place_name?.split(',')[0]?.trim() ?? null);
     setSearchQuery("");
     setSportFocus(null);
     mapCameraIdRef.current += 1;
@@ -223,11 +225,13 @@ export default function App() {
     setSportFocus({ sport });
     setSearchQuery("");
     setMapSearchLocation(null);
+    setMapSearchLocationName(null);
   };
 
   const handlePickPerson = (p: ProfileSearchRow) => {
     setSearchQuery("");
     setMapSearchLocation(null);
+    setMapSearchLocationName(null);
     setSportFocus(null);
     navigate(`/athlete/${p.profile_id}`);
   };
@@ -235,14 +239,15 @@ export default function App() {
   const clearMapSearch = () => {
     setSearchQuery("");
     setMapSearchLocation(null);
+    setMapSearchLocationName(null);
     setSportFocus(null);
     setGamesRadiusKm(DEFAULT_FILTERS.gamesRadiusKm);
   };
 
   const handleCenterOnUser = () => {
     if (userCoords) {
-      // Reset venue fetch center to the user's GPS location (clears any map-search override).
       setMapSearchLocation(null);
+      setMapSearchLocationName(null);
       setCenterOnUserTrigger((n) => n + 1);
     }
   };
@@ -581,6 +586,9 @@ export default function App() {
           onPickSport: handlePickSport,
           onPickPerson: handlePickPerson,
         }}
+        liveGamesCount={games.filter(g => g.status === 'live').length}
+        mapSearchLocationName={mapSearchLocationName}
+        onClearMapSearch={clearMapSearch}
       />
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">

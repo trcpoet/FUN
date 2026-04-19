@@ -2,7 +2,25 @@ import React, { useMemo, useState } from "react";
 import type { GameRow } from "../../lib/supabase";
 import { cn } from "./MapCanvas";
 import { format } from "date-fns";
-import { MapPin, Clock, Trash2, Navigation, Share2, Play, Square, MessageCircle } from "lucide-react";
+import { Clock, Trash2, Navigation, Share2, Play, Square, MessageCircle, X, Users } from "lucide-react";
+import { sportEmojiFor } from "../../lib/sportDisplay";
+
+const SPORT_GRADIENT: Record<string, string> = {
+  soccer:     'from-emerald-600 to-green-800',
+  football:   'from-amber-600 to-orange-800',
+  basketball: 'from-orange-500 to-red-700',
+  tennis:     'from-yellow-500 to-lime-700',
+  volleyball: 'from-blue-500 to-indigo-700',
+  baseball:   'from-red-500 to-rose-800',
+  hockey:     'from-sky-500 to-blue-800',
+  cricket:    'from-teal-500 to-cyan-800',
+  rugby:      'from-purple-600 to-violet-800',
+  golf:       'from-lime-600 to-green-700',
+};
+
+function sportGradient(sport: string): string {
+  return SPORT_GRADIENT[sport.toLowerCase()] ?? 'from-slate-600 to-slate-800';
+}
 
 function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371;
@@ -142,98 +160,132 @@ export function GameEventPopup({
     }
   };
 
+  const participantCount = game.participant_count ?? 0;
+  const shownAvatars = Math.min(participantCount, 4);
+  const overflowCount = participantCount - shownAvatars;
+  const gradient = sportGradient(game.sport);
+
   return (
     <div
-      className="absolute z-[1000] w-[min(18rem,calc(100vw-2rem))] max-w-[18rem] rounded-xl border border-slate-600 bg-slate-900/95 shadow-xl backdrop-blur-sm"
-      style={{
-        transform: "translate(-50%, calc(-100% - 12px))",
-      }}
+      className="absolute z-[1000] w-[min(20rem,calc(100vw-2rem))] max-w-[20rem] rounded-2xl border border-slate-700/60 bg-slate-900 shadow-2xl overflow-hidden"
+      style={{ transform: "translate(-50%, calc(-100% - 14px))" }}
     >
-      <div className="p-3">
+      {/* Gradient header */}
+      <div className={cn("relative bg-gradient-to-br px-4 pt-4 pb-3", gradient)}>
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-          <p className="font-semibold text-white truncate">
-            {game.title || "Pickup game"}
-          </p>
-          {game.description?.trim() ? (
-            <p className="text-slate-500 text-xs mt-1 leading-snug line-clamp-3">
-              {game.description.trim()}
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-white/70 uppercase tracking-wider mb-0.5">
+              {sportEmojiFor(game.sport)} {game.sport}
+              {liveNow && (
+                <span className="ml-2 inline-flex items-center gap-1 text-orange-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+                  Live
+                </span>
+              )}
             </p>
-          ) : null}
-          <p
-            className={cn(
-              "text-slate-400 text-sm",
-              game.description?.trim() ? "mt-1.5" : "mt-0.5"
-            )}
-          >
-            {game.sport} ·{" "}
-            {game.spots_remaining != null
-              ? game.spots_remaining === 0
-                ? `Full${game.substitute_count ? ` · ${game.substitute_count} on waitlist` : ""}`
-                : `${game.spots_remaining} spots left`
-              : `${game.spots_needed} max`}
-          </p>
-          <div className="flex flex-col gap-0.5 mt-1.5 text-slate-500 text-xs">
-            <span className="flex items-center gap-1.5">
-              <Clock className="w-3 h-3 shrink-0 text-slate-500" />
-              {game.starts_at
-                ? format(new Date(game.starts_at), "MMM d, h:mm a")
-                : "—"}
-            </span>
-            {hasCoords && (
-              <span className="flex items-center gap-1.5">
-                <MapPin className="w-3 h-3 shrink-0 text-slate-500" />
-                {formatCoords(game.lat, game.lng)}
-              </span>
-            )}
+            <p className="font-bold text-white text-base leading-snug truncate">
+              {game.title || "Pickup game"}
+            </p>
           </div>
-          </div>
-          <div className="shrink-0 flex items-start gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => void handleShare()}
-              className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-600/80 bg-slate-800/90 text-slate-200 transition-colors hover:border-slate-400/70 hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+              className="inline-flex size-7 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors"
               aria-label="Share game"
-              title="Share"
             >
-              <Share2 className="h-4 w-4" aria-hidden />
+              <Share2 className="h-3.5 w-3.5" aria-hidden />
             </button>
-            {routeMeta && (
-              <a
-                href={routeMeta.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={cn(
-                  "shrink-0 flex flex-col items-end gap-0.5 rounded-lg border border-slate-600/80 bg-slate-800/90 px-2 py-1.5 text-right transition-colors",
-                  "hover:border-emerald-500/50 hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
-                )}
-                aria-label={
-                  routeMeta.hasOrigin
-                    ? `Open Google Maps directions, ${formatDistanceShort(routeMeta.km!)} about ${routeMeta.minutes} minutes drive estimated`
-                    : "Open this location in Google Maps"
-                }
-              >
-                <Navigation className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
-                {routeMeta.hasOrigin && routeMeta.km != null ? (
-                  <>
-                    <span className="text-[11px] font-semibold tabular-nums text-white leading-tight">
-                      {formatDistanceShort(routeMeta.km)}
-                    </span>
-                    <span className="text-[10px] text-slate-400 leading-tight">
-                      ~{routeMeta.minutes} min drive
-                    </span>
-                    <span className="text-[9px] text-slate-500 leading-tight">est.</span>
-                  </>
-                ) : (
-                  <span className="text-[10px] font-medium text-slate-300 leading-tight max-w-[4.5rem]">
-                    Maps
-                  </span>
-                )}
-              </a>
-            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex size-7 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </button>
           </div>
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-2">
+
+        {/* Distance / ETA row — prominent */}
+        {routeMeta && (
+          <a
+            href={routeMeta.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 flex items-center gap-3 rounded-xl bg-black/20 px-3 py-2 hover:bg-black/30 transition-colors"
+            aria-label={routeMeta.hasOrigin ? `Directions — ${formatDistanceShort(routeMeta.km!)} away` : "Open in Maps"}
+          >
+            <Navigation className="h-4 w-4 text-white/80 shrink-0" aria-hidden />
+            {routeMeta.hasOrigin && routeMeta.km != null ? (
+              <div className="flex items-baseline gap-2">
+                <span className="text-sm font-bold text-white tabular-nums">
+                  {formatDistanceShort(routeMeta.km)}
+                </span>
+                <span className="text-xs text-white/65">·</span>
+                <span className="text-xs text-white/70">~{routeMeta.minutes} min drive</span>
+              </div>
+            ) : (
+              <span className="text-sm text-white/80">Open in Maps</span>
+            )}
+          </a>
+        )}
+      </div>
+
+      <div className="px-4 py-3 space-y-3">
+        {/* Time + spots row */}
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <span className="flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 shrink-0" />
+            {game.starts_at ? format(new Date(game.starts_at), "MMM d, h:mm a") : "—"}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Users className="w-3.5 h-3.5 shrink-0" />
+            {game.spots_remaining != null
+              ? game.spots_remaining === 0
+                ? `Full${game.substitute_count ? ` +${game.substitute_count}` : ""}`
+                : `${participantCount} / ${game.spots_needed}`
+              : `${game.spots_needed} max`}
+          </span>
+        </div>
+
+        {/* Avatar stack */}
+        {participantCount > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center">
+              {Array.from({ length: shownAvatars }).map((_, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "w-7 h-7 rounded-full border-2 border-slate-900 bg-gradient-to-br flex items-center justify-center",
+                    i > 0 && "-ml-2",
+                    ["from-emerald-500 to-teal-700","from-sky-500 to-blue-700","from-violet-500 to-purple-700","from-orange-500 to-amber-700"][i % 4]
+                  )}
+                >
+                  <Users className="w-3 h-3 text-white/80" />
+                </div>
+              ))}
+              {overflowCount > 0 && (
+                <div className="-ml-2 w-7 h-7 rounded-full border-2 border-slate-900 bg-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300">
+                  +{overflowCount}
+                </div>
+              )}
+            </div>
+            <span className="text-xs text-slate-500">
+              {participantCount === 1 ? "1 player in" : `${participantCount} players in`}
+            </span>
+          </div>
+        )}
+
+        {/* Description */}
+        {game.description?.trim() ? (
+          <p className="text-slate-400 text-xs leading-snug line-clamp-2">
+            {game.description.trim()}
+          </p>
+        ) : null}
+
+        {/* Action buttons */}
+        <div className="grid grid-cols-2 gap-2">
           {onJoin && !joined ? (
             <button
               type="button"
@@ -247,7 +299,7 @@ export function GameEventPopup({
             >
               <span className="inline-flex items-center gap-2">
                 <Play className="w-4 h-4 opacity-90" aria-hidden />
-                {isFull ? "Join Waitlist" : "Join"}
+                {isFull ? "Join Waitlist" : "I'm In"}
               </span>
             </button>
           ) : null}
@@ -307,11 +359,11 @@ export function GameEventPopup({
                 onClick={() => onLeave(game)}
                 className="inline-flex h-10 items-center justify-center rounded-lg border border-rose-500/40 bg-rose-950/35 text-rose-100 text-sm font-semibold transition-colors hover:bg-rose-950/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/30"
               >
-                {isSubstitute ? "Leave Waitlist" : "Can't make it"}
+                {isSubstitute ? "Leave Waitlist" : "I'm Out"}
               </button>
             ) : (
               <span className="inline-flex h-10 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm font-semibold">
-                {isSubstitute ? "On Waitlist" : "You're going"}
+                {isSubstitute ? "On Waitlist" : "You're In"}
               </span>
             )
           ) : null}

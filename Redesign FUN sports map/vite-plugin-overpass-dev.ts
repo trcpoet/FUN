@@ -1,7 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
-import { createClient } from "@supabase/supabase-js";
-
 /** Same order as `api/overpass.ts` — Vite's http-proxy often 504s on slow upstreams. */
 const UPSTREAMS = [
   "https://overpass-api.de/api/interpreter",
@@ -46,7 +44,10 @@ async function fetchOverpassText(body: string): Promise<string> {
       fetch(url, {
         method: "POST",
         body,
-        headers: { "Content-Type": "text/plain" },
+        headers: { 
+          "Content-Type": "text/plain",
+          "User-Agent": "FUN-Sports-App/1.0 (local dev)"
+        },
         signal: controllers[i].signal,
       }).then(async (r) => {
         if (r.status === 429 || !r.ok) throw new Error(`upstream ${r.status}`);
@@ -115,11 +116,14 @@ export function overpassDevProxy(): Plugin {
                 });
                 rows.push({ id, lat, lng: lon, name: el.tags?.name ?? null, sport: el.tags?.sport ?? null, leisure: el.tags?.leisure ?? null, osm_type: el.type, osm_id: el.id, imported_at: now });
               }
-            } catch { /* fall through */ }
+            } catch (err) {
+              console.error("[Overpass proxy] failed:", err);
+            }
             // Save to DB in background so subsequent fetches are instant
             const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
             const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
             if (supabaseUrl && serviceKey && rows.length > 0) {
+              const { createClient } = await import("@supabase/supabase-js");
               const supabase = createClient(supabaseUrl, serviceKey);
               const CHUNK = 400;
               for (let i = 0; i < rows.length; i += CHUNK) {

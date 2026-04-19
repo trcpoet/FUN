@@ -23,9 +23,8 @@ import { getSportsForPicker, filterSportsByQuery, sportEmojiFor } from "../../li
 import {
   LEVEL_OPTIONS,
   AGE_RANGE_OPTIONS,
-  AVAILABILITY_OPTIONS,
-  TIME_OF_DAY_OPTIONS,
-  GAME_TYPE_OPTIONS,
+  MATCH_TYPE_OPTIONS,
+  VISIBILITY_OPTIONS,
   emptyGameRequirements,
   type GameRequirementsPayload,
 } from "../../lib/gamePreferenceOptions";
@@ -296,9 +295,8 @@ export function CreateGameModal({
         ? {
             skillLevel: req.skillLevel,
             ageRange: req.ageRange,
-            availability: req.availability,
-            timeOfDay: req.timeOfDay,
-            gameTypes: req.gameTypes,
+            matchType: req.matchType,
+            visibility: req.visibility,
             school: req.school.trim() ? req.school.trim() : null,
           }
         : null,
@@ -694,16 +692,16 @@ export function CreateGameModal({
               </div>
 
               <div className="space-y-2">
-                <Label className="text-[11px] uppercase tracking-wide text-slate-500">Availability</Label>
+                <Label className="text-[11px] uppercase tracking-wide text-slate-500">Match Type</Label>
                 <div className="flex flex-wrap gap-1.5">
-                  {AVAILABILITY_OPTIONS.map((opt) => (
+                  {MATCH_TYPE_OPTIONS.map((opt) => (
                     <button
                       key={opt}
                       type="button"
-                      onClick={() => setReq((r) => ({ ...r, availability: toggleStr(r.availability, opt) }))}
+                      onClick={() => setReq((r) => ({ ...r, matchType: opt }))}
                       className={cn(
                         "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                        req.availability.includes(opt)
+                        req.matchType === opt
                           ? "border-violet-400 bg-violet-500/20 text-violet-100"
                           : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
                       )}
@@ -715,37 +713,16 @@ export function CreateGameModal({
               </div>
 
               <div className="space-y-2">
-                <Label className="text-[11px] uppercase tracking-wide text-slate-500">Time of day</Label>
+                <Label className="text-[11px] uppercase tracking-wide text-slate-500">Visibility</Label>
                 <div className="flex flex-wrap gap-1.5">
-                  {TIME_OF_DAY_OPTIONS.map((opt) => (
+                  {VISIBILITY_OPTIONS.map((opt) => (
                     <button
                       key={opt}
                       type="button"
-                      onClick={() => setReq((r) => ({ ...r, timeOfDay: toggleStr(r.timeOfDay, opt) }))}
+                      onClick={() => setReq((r) => ({ ...r, visibility: opt }))}
                       className={cn(
                         "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                        req.timeOfDay.includes(opt)
-                          ? "border-violet-400 bg-violet-500/20 text-violet-100"
-                          : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
-                      )}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-[11px] uppercase tracking-wide text-slate-500">Game type</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {GAME_TYPE_OPTIONS.map((opt) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => setReq((r) => ({ ...r, gameTypes: toggleStr(r.gameTypes, opt) }))}
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                        req.gameTypes.includes(opt)
+                        req.visibility === opt
                           ? "border-violet-400 bg-violet-500/20 text-violet-100"
                           : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
                       )}

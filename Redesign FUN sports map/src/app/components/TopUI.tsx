@@ -89,6 +89,12 @@ export type TopNavigationProps = {
   favoriteSport?: string | null;
   /** Total unread count across all game chats and DMs. Shows red dot when > 0. */
   messagesUnreadCount?: number;
+  /** Count of live games in current fetch area — shown as badge on Live button. */
+  liveGamesCount?: number;
+  /** Name of the searched place when map is anchored to a search result. */
+  mapSearchLocationName?: string | null;
+  /** Clears the map search anchor and resets to user GPS. */
+  onClearMapSearch?: () => void;
 };
 
 function placeSubtitle(placeName: string): string | undefined {
@@ -137,6 +143,9 @@ export const TopNavigation = (props: TopNavigationProps) => {
     userAvatarUrl,
     favoriteSport,
     messagesUnreadCount = 0,
+    liveGamesCount = 0,
+    mapSearchLocationName = null,
+    onClearMapSearch,
   } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [feedToolbarHintOpen, setFeedToolbarHintOpen] = useState(false);
@@ -406,7 +415,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
         {/* Row: Feed + Live (one cluster) → Visibility. Below: map tools column with labels. */}
         <div className="flex flex-col items-end gap-2 w-full">
           {/* Order: Feed (hero) → Live Now → Visibility (tertiary) */}
-          <div className="relative flex flex-wrap items-center justify-end gap-2">
+          <div className="relative flex flex-col items-end gap-2">
             {feedToolbarHintOpen ? (
               <div
                 className="absolute right-0 top-full z-[60] mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-primary/35 bg-[#0A0F1C]/95 px-3 py-2.5 text-left shadow-[var(--shadow-control)] backdrop-blur-xl pointer-events-auto"
@@ -450,22 +459,29 @@ export const TopNavigation = (props: TopNavigationProps) => {
                 Feed
               </button>
               <div className="mx-1 h-7 w-px shrink-0 bg-white/12" aria-hidden />
-              <button
-                type="button"
-                onClick={onLiveNowToggle}
-                className={cn(
-                  "inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold border transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
-                  "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
-                  liveNowOpen
-                    ? "border-orange-400/55 bg-orange-500/15 text-orange-200 shadow-[inset_0_0_0_1px_rgba(251,146,60,0.25)] hover:bg-orange-500/20"
-                    : "border-orange-500/35 bg-transparent text-orange-300/95 hover:border-orange-400/50 hover:bg-orange-500/10",
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={onLiveNowToggle}
+                  className={cn(
+                    "inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold border transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
+                    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                    liveNowOpen
+                      ? "border-orange-400/55 bg-orange-500/15 text-orange-200 shadow-[inset_0_0_0_1px_rgba(251,146,60,0.25)] hover:bg-orange-500/20"
+                      : "border-orange-500/35 bg-transparent text-orange-300/95 hover:border-orange-400/50 hover:bg-orange-500/10",
+                  )}
+                  aria-label="Live Now — highlight games happening on the map"
+                  title="Live Now"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse shrink-0" />
+                  Live
+                </button>
+                {liveGamesCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center px-1 shadow-[0_0_8px_rgba(249,115,22,0.7)] pointer-events-none">
+                    {liveGamesCount}
+                  </span>
                 )}
-                aria-label="Live Now — highlight games happening on the map"
-                title="Live Now"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse shrink-0" />
-                Live
-              </button>
+              </div>
             </div>
 
             <button
@@ -630,6 +646,31 @@ export const TopNavigation = (props: TopNavigationProps) => {
             </div>
           ) : null}
         </div>
+
+        {/* Location context pill — shown when map is anchored to a searched place */}
+        <AnimatePresence>
+          {mapSearchLocationName && (
+            <motion.div
+              key="location-pill"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
+              className="flex items-center gap-2 self-start px-3 py-1.5 rounded-full bg-black/45 backdrop-blur-xl border border-white/15 text-slate-200 text-xs pointer-events-auto"
+            >
+              <MapPinned className="w-3 h-3 text-sky-400 shrink-0" />
+              <span>Showing near <span className="font-semibold text-white">{mapSearchLocationName}</span></span>
+              <button
+                type="button"
+                onClick={onClearMapSearch}
+                className="ml-1 text-slate-400 hover:text-white transition-colors"
+                aria-label="Clear location search"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* FIXED BOTTOM-LEFT: Profile Avatar with Sport Overlay */}

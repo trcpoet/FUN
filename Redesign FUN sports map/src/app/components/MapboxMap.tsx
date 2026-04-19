@@ -262,6 +262,10 @@ export function MapboxMap(props: MapboxMapProps) {
   const bumpAnimationRef = useRef<{ gameId: string; startMs: number } | null>(null);
   /** performance.now() for dt-based exponential smoothing (frame-rate independent). */
   const gameIconHoverLastTsRef = useRef<number | null>(null);
+  /** Venue dot hover: rAF-driven smooth zoom-out (feature-state changes don't trigger GL transitions). */
+  const venueHoverIdRef = useRef<string | null>(null);
+  const venueHoverTRef = useRef(0);
+  const venueHoverTargetRef = useRef(0);
   /** Phase-integrated pulse + smoothed hz (idle ↔ slow when venue selected) */
   const venuePulsePhaseRef = useRef(0);
   const venuePulseHzRef = useRef(MapCfg.VENUE_DOT_PULSE_HZ_IDLE);
@@ -731,8 +735,6 @@ export function MapboxMap(props: MapboxMapProps) {
         "case",
         ["==", ["get", "id"], sel],
         MapCfg.VENUE_DOT_RADIUS_SELECTED_PX,
-        ["boolean", ["feature-state", "hover"], false],
-        ["*", MapCfg.VENUE_DOT_RADIUS_PX, MapCfg.VENUE_DOT_HOVER_SCALE],
         MapCfg.VENUE_DOT_RADIUS_PX,
       ]);
       map.setPaintProperty(L_VENUE_DOTS, "circle-color", [
@@ -849,6 +851,35 @@ export function MapboxMap(props: MapboxMapProps) {
             map.setPaintProperty(L_VENUE_DOTS_PULSE_INNER, "circle-opacity", opInner);
             map.setPaintProperty(L_VENUE_DOTS_PULSE_INNER, "circle-blur", blInner);
             map.setPaintProperty(L_VENUE_DOTS_PULSE_INNER, "circle-color", colInner);
+          } catch (_) {}
+        }
+      }
+
+      // Venue dot hover: smooth zoom-out via exponential decay (feature-state snaps; rAF animates).
+      {
+        const target = venueHoverTargetRef.current;
+        const current = venueHoverTRef.current;
+        const newT = current + (target - current) * Math.min(1, dt * 10);
+        venueHoverTRef.current = Math.abs(target - newT) < 0.002 ? target : newT;
+        if (venueHoverTargetRef.current === 0 && venueHoverTRef.current === 0) {
+          venueHoverIdRef.current = null;
+        }
+        const hid = venueHoverIdRef.current ?? "";
+        if (hid && map?.getLayer(L_VENUE_DOTS)) {
+          const x = venueHoverTRef.current;
+          const ease = x * x * (3 - 2 * x); // smoothstep
+          const normalR = MapCfg.VENUE_DOT_RADIUS_PX;
+          const hoverR = normalR * MapCfg.VENUE_DOT_HOVER_SCALE;
+          const selR = MapCfg.VENUE_DOT_RADIUS_SELECTED_PX;
+          const interpR = normalR + (hoverR - normalR) * ease;
+          const sel = selectedVenuePulseRef.current?.id ?? "";
+          try {
+            map.setPaintProperty(L_VENUE_DOTS, "circle-radius", [
+              "case",
+              ["==", ["get", "id"], sel], selR,
+              ["==", ["get", "id"], hid], interpR,
+              normalR,
+            ]);
           } catch (_) {}
         }
       }
@@ -1766,10 +1797,7 @@ export function MapboxMap(props: MapboxMapProps) {
               duration: MapCfg.MAP_MARKER_HOVER_TRANSITION_MS,
               delay: 0,
             });
-            mapInstance.setPaintProperty(L_VENUE_DOTS, "circle-radius-transition", {
-              duration: MapCfg.MAP_MARKER_HOVER_TRANSITION_MS,
-              delay: 0,
-            });
+            // circle-radius is animated via rAF (feature-state changes bypass GL transitions)
             mapInstance.setPaintProperty(L_VENUE_DOTS, "circle-opacity-transition", {
               duration: MapCfg.MAP_MARKER_HOVER_TRANSITION_MS,
               delay: 0,
@@ -1789,13 +1817,13 @@ export function MapboxMap(props: MapboxMapProps) {
             if (venueHoverPointerId && venueHoverPointerId !== id) {
               try {
                 mapInstance.setFeatureState({ source: sourceId, id: venueHoverPointerId }, { hover: false });
-                mapInstance.setFeatureState({ source: SRC_VENUE_DOTS, id: venueHoverPointerId }, { hover: false });
               } catch (_) {}
             }
             venueHoverPointerId = id;
+            venueHoverIdRef.current = id;
+            venueHoverTargetRef.current = 1;
             try {
               mapInstance.setFeatureState({ source: sourceId, id }, { hover: true });
-              mapInstance.setFeatureState({ source: SRC_VENUE_DOTS, id }, { hover: true });
             } catch (_) {}
           };
 
@@ -1805,9 +1833,9 @@ export function MapboxMap(props: MapboxMapProps) {
               if (!venueHoverPointerId) return;
               const hid = venueHoverPointerId;
               venueHoverPointerId = null;
+              venueHoverTargetRef.current = 0;
               try {
                 mapInstance.setFeatureState({ source: sourceId, id: hid }, { hover: false });
-                mapInstance.setFeatureState({ source: SRC_VENUE_DOTS, id: hid }, { hover: false });
               } catch (_) {}
             }, MapCfg.VENUE_HOVER_LEAVE_DEBOUNCE_MS);
           };
