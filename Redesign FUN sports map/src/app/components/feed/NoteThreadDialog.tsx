@@ -6,6 +6,7 @@ import { cn } from "../ui/utils";
 import type { MapNoteCommentRow, MapNoteRow } from "../../../lib/supabase";
 import { addNoteComment, fetchNoteComments } from "../../../lib/api";
 import { glassMessengerPanel } from "../../styles/glass";
+import { NoteCommentLikeButton } from "./NoteCommentLikeButton";
 
 type Props = {
   open: boolean;
@@ -114,9 +115,12 @@ export function NoteThreadDialog({ open, onOpenChange, note }: Props) {
                   className="rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2"
                 >
                   <p className="text-sm text-slate-200 whitespace-pre-wrap break-words">{c.body}</p>
-                  <p className="text-[10px] mt-1 text-slate-500">
-                    {formatDistanceToNow(new Date(c.created_at), { addSuffix: true })}
-                  </p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="text-[10px] text-slate-500">
+                      {formatDistanceToNow(new Date(c.created_at), { addSuffix: true })}
+                    </p>
+                    <NoteCommentLikeButton comment={c} />
+                  </div>
                 </div>
               ))
             )}

@@ -119,6 +119,10 @@ export type MapNoteCommentRow = {
   note_id: string;
   user_id: string;
   body: string;
+  /** Returned by `get_note_comments_with_likes` RPC; absent on legacy fallback. */
+  like_count?: number;
+  /** Returned by `get_note_comments_with_likes` RPC; absent on legacy fallback. */
+  liked_by_me?: boolean;
 };
 
 export type StatusCommentRow = {

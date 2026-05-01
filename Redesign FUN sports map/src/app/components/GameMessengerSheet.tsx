@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { format, formatDistanceToNow } from "date-fns";
 import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Send, Share2, StickyNote, Users } from "lucide-react";
 import { useNavigate } from "react-router";
@@ -55,6 +56,7 @@ import {
 } from "../../lib/api";
 import { InviteAdminPanel } from "./chat/InviteAdminPanel";
 import { useChatTrust, type ChatTrust, trustBadgeLabel } from "../../hooks/useChatTrust";
+import { NoteCommentLikeButton } from "./feed/NoteCommentLikeButton";
 
 export type GameThreadFocus = {
   kind: "game";
@@ -410,6 +412,8 @@ export function GameMessengerSheet({
   // Map-notes Inbox + per-note thread state.
   const [noteInbox, setNoteInbox] = useState<NoteInboxRow[]>([]);
   const [noteInboxLoading, setNoteInboxLoading] = useState(false);
+  /** Segmented Notes inbox: my own notes vs notes I've commented in. */
+  const [notesView, setNotesView] = useState<"mine" | "commented">("mine");
   const [noteComments, setNoteComments] = useState<MapNoteCommentRow[]>([]);
   const [noteCommentsLoading, setNoteCommentsLoading] = useState(false);
   /** Hydrated note details for the currently focused note thread. */
@@ -1502,13 +1506,11 @@ export function GameMessengerSheet({
                 <div className="flex justify-center py-12 text-slate-500">
                   <Loader2 className="w-8 h-8 animate-spin opacity-60" />
                 </div>
-              ) : noteInbox.length === 0 ? (
-                <p className="text-sm text-slate-500 text-center px-4 py-10 leading-relaxed">
-                  Drop a note on the map and your conversation will land here.
-                </p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {noteInbox.map((row) => {
+              ) : (() => {
+                const myNotes = noteInbox.filter((r) => r.is_author);
+                const commentedNotes = noteInbox.filter((r) => !r.is_author);
+                const filtered = notesView === "mine" ? myNotes : commentedNotes;
+                const renderNoteRow = (row: NoteInboxRow) => {
                     void unreadTick;
                     const unread = getUnreadCount(threadKey("note", row.id));
                     const badge = badgeText(unread);
@@ -1604,9 +1606,74 @@ export function GameMessengerSheet({
                         </div>
                       </li>
                     );
-                  })}
-                </ul>
-              )
+                  };
+                  return (
+                    <div className="space-y-3">
+                      <div
+                        className="relative inline-flex w-full items-center rounded-full border border-white/10 bg-white/[0.03] p-0.5 text-[11px] font-semibold"
+                        role="tablist"
+                        aria-label="Notes view"
+                      >
+                        {(["mine", "commented"] as const).map((key) => {
+                          const active = notesView === key;
+                          const label = key === "mine" ? "My notes" : "Commented in";
+                          const count = key === "mine" ? myNotes.length : commentedNotes.length;
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              role="tab"
+                              aria-selected={active}
+                              onClick={() => setNotesView(key)}
+                              className={cn(
+                                "relative flex-1 rounded-full px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40",
+                                active ? "text-white" : "text-slate-400 hover:text-slate-200",
+                              )}
+                            >
+                              {active ? (
+                                <motion.span
+                                  layoutId="notes-segment-indicator"
+                                  className="absolute inset-0 rounded-full border border-cyan-300/25 bg-cyan-500/15 shadow-[0_0_18px_rgba(34,211,238,0.18)]"
+                                  transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                                />
+                              ) : null}
+                              <span className="relative z-10 inline-flex items-center gap-1.5">
+                                {label}
+                                <span
+                                  className={cn(
+                                    "rounded-full px-1.5 text-[10px] tabular-nums",
+                                    active ? "bg-white/20 text-white" : "bg-white/[0.06] text-slate-400",
+                                  )}
+                                >
+                                  {count}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <AnimatePresence mode="wait" initial={false}>
+                        <motion.div
+                          key={notesView}
+                          initial={{ opacity: 0, x: notesView === "mine" ? -16 : 16 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: notesView === "mine" ? 16 : -16 }}
+                          transition={{ duration: 0.18, ease: "easeOut" }}
+                        >
+                          {filtered.length === 0 ? (
+                            <p className="text-sm text-slate-500 text-center px-4 py-10 leading-relaxed">
+                              {notesView === "mine"
+                                ? "Drop a note on the map and your conversation will land here."
+                                : "Notes you've commented on will show up here."}
+                            </p>
+                          ) : (
+                            <ul className="space-y-1.5">{filtered.map(renderNoteRow)}</ul>
+                          )}
+                        </motion.div>
+                      </AnimatePresence>
+                    </div>
+                  );
+                })()
             ) : dmInboxLoading ? (
               <div className="flex justify-center py-12 text-slate-500">
                 <Loader2 className="w-8 h-8 animate-spin opacity-60" />
@@ -1784,14 +1851,29 @@ export function GameMessengerSheet({
                               )}
                             >
                               <p className="whitespace-pre-wrap break-words">{c.body}</p>
-                              <p
+                              <div
                                 className={cn(
-                                  "text-[10px] mt-1 opacity-70",
-                                  mine ? "text-violet-50/90" : "text-slate-400/80",
+                                  "mt-1 flex items-center justify-between gap-2 opacity-90",
                                 )}
                               >
-                                {format(new Date(c.created_at), "h:mm a")}
-                              </p>
+                                <p
+                                  className={cn(
+                                    "text-[10px] opacity-80",
+                                    mine ? "text-violet-50/90" : "text-slate-400/80",
+                                  )}
+                                >
+                                  {format(new Date(c.created_at), "h:mm a")}
+                                </p>
+                                <NoteCommentLikeButton
+                                  comment={c}
+                                  className={cn(
+                                    "px-1.5 py-0",
+                                    mine
+                                      ? "text-violet-50/90 hover:text-rose-200"
+                                      : "text-slate-400 hover:text-rose-300",
+                                  )}
+                                />
+                              </div>
                             </div>
                           </div>
                         );

@@ -19,7 +19,7 @@ import { useGeolocation } from "../../hooks/useGeolocation";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import { fetchLiveNearby, fetchUnifiedFeed, type LiveFeedItem, type UnifiedFeedItem } from "../../lib/api";
-import { GameFeedCard, LiveNearbyStripCard, NoteFeedCard, StatusFeedCard } from "../components/feed/UnifiedFeedCards";
+import { GameFeedCard, NoteFeedCard, StatusFeedCard } from "../components/feed/UnifiedFeedCards";
 import LightRays from "../components/feed/LightRays";
 import { glassMessengerPage } from "../styles/glass";
 import { useAuth } from "../contexts/AuthContext";
@@ -35,6 +35,7 @@ function notificationLabel(n: { type: string; payload?: unknown }): string {
   if (n.type === "map_note_nearby") return "New map note near you.";
   if (n.type === "game_invite") return "You were invited to a game.";
   if (n.type === "note_new_activity") return "New replies on a note you follow.";
+  if (n.type === "note_comment_liked") return "Someone liked your comment.";
   return "New notification";
 }
 
@@ -62,7 +63,11 @@ function handleNotificationNavigate(
     if (gid) navigate(`/?focusGameId=${encodeURIComponent(gid)}`);
     return;
   }
-  if (n.type === "map_note_nearby" || n.type === "note_new_activity") {
+  if (
+    n.type === "map_note_nearby" ||
+    n.type === "note_new_activity" ||
+    n.type === "note_comment_liked"
+  ) {
     const nid = typeof p.note_id === "string" ? p.note_id : null;
     if (nid) navigate(`/?focusNoteId=${encodeURIComponent(nid)}`);
     return;
@@ -152,26 +157,28 @@ export default function Feed() {
         <div className="absolute top-[20%] -right-[5%] size-[30%] rounded-full bg-blue-500/5 blur-[100px]" />
       </div>
 
-      <header className="sticky top-0 z-[60] relative overflow-hidden border-b border-white/[0.05]">
+      <header className="sticky top-0 z-[60] relative overflow-hidden border-b border-white/[0.05] min-h-[148px]">
         <div className="pointer-events-none absolute inset-0 z-0">
+          {/* Fallback glow if WebGL fails to init */}
+          <div className="absolute inset-0 bg-[radial-gradient(80%_140%_at_50%_0%,rgba(225,29,72,0.18)_0%,rgba(2,6,23,0)_65%)]" />
           <LightRays
             raysOrigin="top-center"
-            raysColor="#ffffff"
-            raysSpeed={1}
-            lightSpread={0.5}
-            rayLength={3}
+            raysColor="#ffe9ef"
+            raysSpeed={1.15}
+            lightSpread={0.6}
+            rayLength={3.2}
             followMouse
             mouseInfluence={0.1}
             noiseAmount={0}
             distortion={0}
-            className="opacity-40"
+            className="opacity-90"
             pulsating={false}
             fadeDistance={1}
-            saturation={1}
+            saturation={1.15}
           />
         </div>
         <div
-          className="pointer-events-none absolute inset-0 z-[1] bg-black/60 backdrop-blur-2xl"
+          className="pointer-events-none absolute inset-0 z-[1] bg-black/35 backdrop-blur-2xl"
           aria-hidden
         />
         <div className="relative z-10 mx-auto max-w-3xl w-full px-4 pt-6 pb-4">
@@ -285,22 +292,29 @@ export default function Feed() {
                 ) : liveItems.length === 0 ? (
                   <p className="text-xs text-slate-500 px-1">No games or notes in range yet — check the map or widen your search from Feed.</p>
                 ) : (
-                  <ScrollArea className="w-full">
-                    <div className="flex space-x-4 pb-4">
-                      {liveItems.map((it) => (
-                        <LiveNearbyStripCard
-                          key={`${it.kind}:${it.id}`}
-                          item={it}
-                          onOpen={() =>
-                            it.kind === "game"
-                              ? navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)
-                              : navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)
-                          }
-                        />
-                      ))}
-                    </div>
-                    <ScrollBar orientation="horizontal" className="hidden" />
-                  </ScrollArea>
+                  <ul className="grid gap-6">
+                    {liveItems.map((it) =>
+                      it.kind === "note" ? (
+                        <li key={`note:${it.id}`}>
+                          <NoteFeedCard
+                            item={it}
+                            currentUserId={user?.id ?? null}
+                            onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
+                            onInvalidate={refreshFeeds}
+                          />
+                        </li>
+                      ) : (
+                        <li key={`game:${it.id}`}>
+                          <GameFeedCard
+                            item={it}
+                            currentUserId={user?.id ?? null}
+                            onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
+                            onInvalidate={refreshFeeds}
+                          />
+                        </li>
+                      )
+                    )}
+                  </ul>
                 )}
               </section>
             ) : null}

@@ -120,6 +120,15 @@ export async function fetchNotesNearby(params: {
 
 export async function fetchNoteComments(noteId: string): Promise<{ data: MapNoteCommentRow[]; error: Error | null }> {
   if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  // Prefer the richer RPC (per-comment like_count + liked_by_me). Fall back to
+  // the legacy `get_note_comments` if the new function isn't deployed yet.
+  const withLikes = await supabase.rpc("get_note_comments_with_likes", { p_note_id: noteId });
+  if (!withLikes.error) {
+    return { data: (withLikes.data as MapNoteCommentRow[]) ?? [], error: null };
+  }
+  if (!isMissingMapNotesRpc(withLikes.error)) {
+    return { data: [], error: new Error(withLikes.error.message) };
+  }
   const { data, error } = await supabase.rpc("get_note_comments", { p_note_id: noteId });
   if (error && isMissingMapNotesRpc(error)) {
     return { data: [], error: null };
@@ -273,6 +282,26 @@ export async function toggleMapNoteLike(noteId: string): Promise<{ liked: boolea
   if (delErr) return { liked: false, error: new Error(delErr.message) };
   if (removed && removed.length > 0) return { liked: false, error: null };
   const { error: insErr } = await supabase.from("map_note_likes").insert({ note_id: noteId, user_id: uid });
+  if (insErr) return { liked: false, error: new Error(insErr.message) };
+  return { liked: true, error: null };
+}
+
+export async function toggleNoteCommentLike(commentId: string): Promise<{ liked: boolean; error: Error | null }> {
+  if (!supabase) return { liked: false, error: new Error("Supabase not configured") };
+  const { data: userRes } = await supabase.auth.getUser();
+  const uid = userRes.user?.id;
+  if (!uid) return { liked: false, error: new Error("Sign in to like comments.") };
+  const { data: removed, error: delErr } = await supabase
+    .from("map_note_comment_likes")
+    .delete()
+    .eq("comment_id", commentId)
+    .eq("user_id", uid)
+    .select("comment_id");
+  if (delErr) return { liked: false, error: new Error(delErr.message) };
+  if (removed && removed.length > 0) return { liked: false, error: null };
+  const { error: insErr } = await supabase
+    .from("map_note_comment_likes")
+    .insert({ comment_id: commentId, user_id: uid });
   if (insErr) return { liked: false, error: new Error(insErr.message) };
   return { liked: true, error: null };
 }

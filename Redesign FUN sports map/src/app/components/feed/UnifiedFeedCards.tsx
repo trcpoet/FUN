@@ -18,6 +18,7 @@ import {
 } from "../../../lib/api";
 import type { MapNoteCommentRow, StatusCommentRow } from "../../../lib/supabase";
 import { glassMessengerPanel } from "../../styles/glass";
+import { NoteCommentLikeButton } from "./NoteCommentLikeButton";
 
 export function visibilityChip(v: string | null | undefined): string {
   if (!v) return "Public";
@@ -226,7 +227,10 @@ export function NoteFeedCard(props: {
           {visibleComments.map((c) => (
             <div key={c.id} className="rounded-xl px-2.5 py-1.5">
               <p className="text-sm text-slate-200 whitespace-pre-wrap break-words">{c.body}</p>
-              <p className="text-[10px] mt-0.5 text-slate-500">{relTime(c.created_at)}</p>
+              <div className="mt-0.5 flex items-center justify-between gap-2">
+                <p className="text-[10px] text-slate-500">{relTime(c.created_at)}</p>
+                <NoteCommentLikeButton comment={c} />
+              </div>
             </div>
           ))}
 
