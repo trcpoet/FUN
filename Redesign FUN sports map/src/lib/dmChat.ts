@@ -15,12 +15,48 @@ function isDmMessagesSchemaCacheMissing(error: { message?: string; code?: string
   return m.includes("schema cache") && (m.includes("dm_messages") || m.includes("public.dm_messages"));
 }
 
+/**
+ * Server-side check: can the current user open a DM with `otherUserId`?
+ *
+ * Returns `true` when:
+ *   - The two users follow each other (or one direction), OR
+ *   - They have at least one shared `game_participants` row.
+ *
+ * Until the migration that defines `can_dm` is applied, this returns `true`
+ * (open by default) so existing flows keep working.
+ */
+export async function canDm(otherUserId: string): Promise<{
+  allowed: boolean;
+  error: Error | null;
+}> {
+  if (!supabase) return { allowed: false, error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("can_dm", { p_other_user_id: otherUserId });
+  if (error) {
+    if (rpcMissing(error, "can_dm")) return { allowed: true, error: null };
+    return { allowed: false, error: new Error(error.message) };
+  }
+  return { allowed: Boolean(data), error: null };
+}
+
 export async function getOrCreateDmThread(otherUserId: string): Promise<{
   threadId: string | null;
   error: Error | null;
 }> {
   if (!supabase) return { threadId: null, error: new Error("Supabase not configured") };
   try {
+    // Stranger DMs are blocked: enforce the same rule the server-side trigger
+    // would, but with a friendlier client-side message before the round-trip.
+    const guard = await canDm(otherUserId);
+    if (guard.error) return { threadId: null, error: guard.error };
+    if (!guard.allowed) {
+      return {
+        threadId: null,
+        error: new Error(
+          "You can DM after you've played a game together or follow each other. Tap Follow on their profile or join a shared game first."
+        ),
+      };
+    }
+
     const { data, error } = await supabase.rpc("get_or_create_dm_thread", { p_other: otherUserId });
     if (!error) return { threadId: (data as string | null) ?? null, error: null };
     if (rpcMissing(error, "get_or_create_dm_thread")) {
@@ -93,7 +129,8 @@ export function subscribeDmMessages(args: {
   onInsert: (m: DmMessageRow) => void;
 }): { channel: RealtimeChannel | null; unsubscribe: () => void } {
   if (!supabase) return { channel: null, unsubscribe: () => {} };
-  const channel = supabase
+  const client = supabase;
+  const channel = client
     .channel(`dm_messages:${args.threadId}`)
     .on(
       "postgres_changes",
@@ -105,6 +142,6 @@ export function subscribeDmMessages(args: {
     )
     .subscribe();
 
-  return { channel, unsubscribe: () => void supabase.removeChannel(channel) };
+  return { channel, unsubscribe: () => void client.removeChannel(channel) };
 }
 

@@ -8,6 +8,10 @@ import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfil
 import { searchPeople } from "./searchPeople";
 import type {
   GameRow,
+  GameVisibility,
+  MapNoteCommentRow,
+  MapNoteRow,
+  MapNoteVisibility,
   ProfileNearbyRow,
   ProfileSearchRow,
   UserStatsRow,
@@ -21,6 +25,9 @@ const DEFAULT_RADIUS_KM = 15;
 const DEFAULT_PROFILES_LIMIT = 50;
 
 const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined)?.trim() || undefined;
+
+const MAP_NOTES_MIGRATION =
+  "supabase/migrations/20260501130000_map_notes_and_unified_feed.sql";
 
 async function reverseGeocodeLocationLabel(lat: number, lng: number): Promise<string | null> {
   if (!MAPBOX_TOKEN) return null;
@@ -44,6 +51,147 @@ async function reverseGeocodeLocationLabel(lat: number, lng: number): Promise<st
   } catch {
     return null;
   }
+}
+
+function isMissingMapNotesRpc(err: { message?: string; code?: string } | null): boolean {
+  if (!err) return false;
+  const m = (err.message ?? "").toLowerCase();
+  return (
+    err.code === "PGRST202" ||
+    /not found|could not find function|404/i.test(m) ||
+    m.includes("schema cache") ||
+    m.includes("map_notes") ||
+    m.includes("map_note_comments") ||
+    m.includes("create_map_note") ||
+    m.includes("get_notes_nearby") ||
+    m.includes("get_unified_feed")
+  );
+}
+
+export async function createMapNote(params: {
+  lat: number;
+  lng: number;
+  body: string;
+  visibility: MapNoteVisibility;
+  placeName?: string | null;
+}): Promise<{ data: MapNoteRow | null; error: Error | null }> {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const trimmed = params.body.trim();
+  if (!trimmed) return { data: null, error: new Error("Note is empty") };
+  const { data, error } = await supabase.rpc("create_map_note", {
+    p_lat: params.lat,
+    p_lng: params.lng,
+    p_body: trimmed.slice(0, 2000),
+    p_visibility: params.visibility,
+    p_place_name: params.placeName?.trim() ? params.placeName.trim() : null,
+  });
+  if (error && isMissingMapNotesRpc(error)) {
+    return {
+      data: null,
+      error: new Error(
+        `Map Notes are not deployed yet. Run ${MAP_NOTES_MIGRATION} in the Supabase SQL Editor, then NOTIFY pgrst, 'reload schema'.`
+      ),
+    };
+  }
+  return { data: (data as MapNoteRow) ?? null, error: error ? new Error(error.message) : null };
+}
+
+export async function fetchNotesNearby(params: {
+  lat: number;
+  lng: number;
+  radiusKm?: number;
+  limit?: number;
+}): Promise<{ data: MapNoteRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_notes_nearby", {
+    p_lat: params.lat,
+    p_lng: params.lng,
+    p_radius_km: params.radiusKm ?? 10,
+    p_limit: params.limit ?? 50,
+  });
+  if (error && isMissingMapNotesRpc(error)) {
+    return { data: [], error: null };
+  }
+  return { data: (data as MapNoteRow[]) ?? [], error: error ? new Error(error.message) : null };
+}
+
+export async function fetchNoteComments(noteId: string): Promise<{ data: MapNoteCommentRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_note_comments", { p_note_id: noteId });
+  if (error && isMissingMapNotesRpc(error)) {
+    return { data: [], error: null };
+  }
+  return { data: (data as MapNoteCommentRow[]) ?? [], error: error ? new Error(error.message) : null };
+}
+
+export async function addNoteComment(params: {
+  noteId: string;
+  body: string;
+}): Promise<{ data: MapNoteCommentRow | null; error: Error | null }> {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const trimmed = params.body.trim();
+  if (!trimmed) return { data: null, error: new Error("Comment is empty") };
+  const { data, error } = await supabase.rpc("add_note_comment", {
+    p_note_id: params.noteId,
+    p_body: trimmed.slice(0, 2000),
+  });
+  if (error && isMissingMapNotesRpc(error)) {
+    return {
+      data: null,
+      error: new Error(
+        `Map Notes comments are not deployed yet. Run ${MAP_NOTES_MIGRATION} in the Supabase SQL Editor, then NOTIFY pgrst, 'reload schema'.`
+      ),
+    };
+  }
+  return { data: (data as MapNoteCommentRow) ?? null, error: error ? new Error(error.message) : null };
+}
+
+export type UnifiedFeedItem =
+  | {
+      kind: "note";
+      id: string;
+      created_at: string;
+      lat: number;
+      lng: number;
+      body: string;
+      visibility: MapNoteVisibility;
+      comment_count: number;
+    }
+  | {
+      kind: "game";
+      id: string;
+      created_at: string;
+      lat: number;
+      lng: number;
+      title: string | null;
+      body: string | null;
+      sport: string | null;
+      visibility: GameVisibility;
+    }
+  | {
+      kind: "status";
+      id: string;
+      created_at: string;
+      body: string;
+    };
+
+export async function fetchUnifiedFeed(params: {
+  lat: number;
+  lng: number;
+  radiusKm?: number;
+  limit?: number;
+}): Promise<{ data: UnifiedFeedItem[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_unified_feed", {
+    p_lat: params.lat,
+    p_lng: params.lng,
+    p_radius_km: params.radiusKm ?? 25,
+    p_limit: params.limit ?? 80,
+  });
+  if (error && isMissingMapNotesRpc(error)) {
+    return { data: [], error: null };
+  }
+  return { data: (data as UnifiedFeedItem[]) ?? [], error: error ? new Error(error.message) : null };
 }
 
 // —— Auth (email/password, OWASP-aligned) ——
@@ -196,15 +344,23 @@ export async function createGame(params: {
   description?: string | null;
   /** Structured preferences shown to players (optional). */
   requirements?: Record<string, unknown> | null;
+  /** How long the game stays Live on the map (minutes, 15–480). Default 90. */
+  durationMinutes?: number;
+  /** Chat membership / map visibility rule. Default 'public'. */
+  visibility?: GameVisibility;
+  /** Optional override (e.g. selected venue name) — skips reverse-geocode. */
+  locationLabel?: string | null;
 }): Promise<{ gameId: string | null; error: Error | null }> {
   if (!supabase) return { gameId: null, error: new Error("Supabase not configured") };
-  let locationLabel: string | null = null;
-  try {
-    locationLabel = await reverseGeocodeLocationLabel(params.lat, params.lng);
-  } catch {
-    locationLabel = null;
+  let locationLabel: string | null = params.locationLabel?.trim() || null;
+  if (!locationLabel) {
+    try {
+      locationLabel = await reverseGeocodeLocationLabel(params.lat, params.lng);
+    } catch {
+      locationLabel = null;
+    }
   }
-  const { data, error } = await supabase.rpc("create_game", {
+  const rpcArgs: Record<string, unknown> = {
     p_title: params.title.trim() || "Pickup game",
     p_sport: params.sport,
     p_lat: params.lat,
@@ -215,8 +371,60 @@ export async function createGame(params: {
     p_description: params.description?.trim() ? params.description.trim() : null,
     p_requirements:
       params.requirements && Object.keys(params.requirements).length > 0 ? params.requirements : null,
-  });
+    p_duration_minutes: clampDurationMinutes(params.durationMinutes ?? 90),
+    p_visibility: normalizeVisibility(params.visibility),
+  };
+
+  let { data, error } = await supabase.rpc("create_game", rpcArgs);
+
+  // If the deployed `create_game` predates the duration/visibility migration,
+  // fall back to the legacy signature so creation still works. Surface a
+  // friendly hint so the operator knows to apply the migration.
+  if (error && isMissingDurationVisibilityArg(error)) {
+    const legacy = await supabase.rpc("create_game", {
+      p_title: rpcArgs.p_title,
+      p_sport: rpcArgs.p_sport,
+      p_lat: rpcArgs.p_lat,
+      p_lng: rpcArgs.p_lng,
+      p_spots_needed: rpcArgs.p_spots_needed,
+      p_starts_at: rpcArgs.p_starts_at,
+      p_location_label: rpcArgs.p_location_label,
+      p_description: rpcArgs.p_description,
+      p_requirements: rpcArgs.p_requirements,
+    });
+    data = legacy.data;
+    error = legacy.error;
+    if (!error) {
+      console.warn(
+        "[FUN] create_game: duration_minutes / visibility ignored. Apply supabase/migrations/20260501080000_game_duration_and_visibility.sql, then NOTIFY pgrst, 'reload schema'."
+      );
+    }
+  }
+
   return { gameId: data as string | null, error: error ? new Error(error.message) : null };
+}
+
+const ALLOWED_VISIBILITIES: GameVisibility[] = ["public", "friends_only", "invite_only"];
+
+function normalizeVisibility(v: GameVisibility | undefined): GameVisibility {
+  return v && ALLOWED_VISIBILITIES.includes(v) ? v : "public";
+}
+
+function clampDurationMinutes(n: number): number {
+  if (!Number.isFinite(n)) return 90;
+  return Math.max(15, Math.min(480, Math.round(n)));
+}
+
+function isMissingDurationVisibilityArg(err: { message?: string; code?: string } | null): boolean {
+  if (!err) return false;
+  const m = (err.message ?? "").toLowerCase();
+  return (
+    err.code === "PGRST202" ||
+    m.includes("p_duration_minutes") ||
+    m.includes("p_visibility") ||
+    (m.includes("could not find") && m.includes("function")) ||
+    m.includes("schema cache")
+  );
 }
 
 export async function joinGame(gameId: string): Promise<{

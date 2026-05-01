@@ -16,9 +16,14 @@ import {
   AlignLeft,
   ChevronDown,
   SlidersHorizontal,
+  Timer,
+  Globe,
+  Lock,
+  ShieldCheck,
 } from "lucide-react";
 import { motion, useAnimate } from "motion/react";
 import { supabase } from "../../lib/supabase";
+import { createGame, createMapNote } from "../../lib/api";
 import { getSportsForPicker, filterSportsByQuery, sportEmojiFor } from "../../lib/sportDisplay";
 import {
   LEVEL_OPTIONS,
@@ -26,14 +31,38 @@ import {
   MATCH_TYPE_OPTIONS,
   VISIBILITY_OPTIONS,
   emptyGameRequirements,
+  durationPresetsForSport,
+  defaultDurationForSport,
+  formatDurationLabel,
+  MIN_DURATION_MIN,
+  MAX_DURATION_MIN,
+  visibilityLabelToEnum,
   type GameRequirementsPayload,
+  type VisibilityLabel,
 } from "../../lib/gamePreferenceOptions";
 import { cn } from "./ui/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Label } from "./ui/label";
+import type { MapNoteVisibility } from "../../lib/supabase";
 
 const MIN_SPOTS = 2;
 const MAX_SPOTS = 20;
+
+export type CreateGamePrefill = {
+  /** Sport id used as the initial selection. */
+  sport?: string;
+  /** Recommended title for the new game (e.g. "Rematch — Sunday Hoops"). */
+  title?: string;
+  /** Game roster cap. */
+  spotsNeeded?: number;
+  /** Duration in minutes (clamped to 15–480). */
+  durationMinutes?: number;
+  /** Visibility label as shown in the picker. */
+  visibility?: VisibilityLabel;
+  /** Optional rematch metadata: copied to the new chat as a system message. */
+  rematchOfGameId?: string;
+  rematchOfTitle?: string;
+};
 
 export type CreateGameModalProps = {
   open: boolean;
@@ -44,8 +73,10 @@ export type CreateGameModalProps = {
   locationLabel?: string | null;
   /** Viewport position to anchor the modal next to (e.g. double-tap point). If null, modal is centered. */
   anchorPoint: { x: number; y: number } | null;
-  onSuccess: () => void;
+  onSuccess: (gameId?: string | null) => void;
   ensureSession?: () => Promise<boolean>;
+  /** Pre-fill the form (used by the "Plan rematch" CTA). */
+  prefill?: CreateGamePrefill | null;
 };
 
 const ALL_SPORTS = getSportsForPicker();
@@ -110,6 +141,29 @@ function toggleStr(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
+function clampDuration(n: number): number {
+  if (!Number.isFinite(n)) return 90;
+  return Math.max(MIN_DURATION_MIN, Math.min(MAX_DURATION_MIN, Math.round(n)));
+}
+
+const VISIBILITY_META: Record<
+  VisibilityLabel,
+  { hint: string; icon: typeof Globe }
+> = {
+  "Public (Map)": {
+    hint: "Anyone can see the pin and join the chat.",
+    icon: Globe,
+  },
+  "Friends Only": {
+    hint: "Mutuals join directly. Strangers need host approval.",
+    icon: ShieldCheck,
+  },
+  "Invite Only": {
+    hint: "Hidden from the map. Only people with your invite link can join.",
+    icon: Lock,
+  },
+};
+
 export function CreateGameModal({
   open,
   onOpenChange,
@@ -118,13 +172,18 @@ export function CreateGameModal({
   anchorPoint,
   onSuccess,
   ensureSession,
+  prefill = null,
 }: CreateGameModalProps) {
+  const [createKind, setCreateKind] = useState<"game" | "note">("game");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [sport, setSport] = useState<string>(ALL_SPORTS[0]?.id ?? "Basketball");
   const [sportQuery, setSportQuery] = useState("");
   const [spots, setSpots] = useState<number>(4);
   const [dateTime, setDateTime] = useState("");
+  const [durationMin, setDurationMin] = useState<number>(90);
+  /** Set true after the user (or prefill) explicitly chose a duration so we don't auto-overwrite on sport change. */
+  const [durationDirty, setDurationDirty] = useState(false);
   /** Popover date/time picker (replaces native datetime-local so we can use a "Done" label, not OS "Today"). */
   const [whenPickerOpen, setWhenPickerOpen] = useState(false);
   const [pickDate, setPickDate] = useState<Date | undefined>(undefined);
@@ -135,23 +194,44 @@ export function CreateGameModal({
   const [req, setReq] = useState<GameRequirementsPayload>(emptyGameRequirements());
   const [nearbyGames, setNearbyGames] = useState<any[]>([]);
   const [showWarning, setShowWarning] = useState(false);
+  const [noteBody, setNoteBody] = useState("");
+  const [noteVisibility, setNoteVisibility] = useState<MapNoteVisibility>("public");
 
   useEffect(() => {
     if (open) {
-      setTitle("");
+      setCreateKind("game");
+      const initialSport = prefill?.sport?.trim() || (ALL_SPORTS[0]?.id ?? "Basketball");
+      setTitle(prefill?.title ?? "");
       setDescription("");
-      setSport(ALL_SPORTS[0]?.id ?? "Basketball");
+      setSport(initialSport);
       setSportQuery("");
-      setSpots(4);
+      setSpots(prefill?.spotsNeeded ?? 4);
       const t = new Date(Date.now() + 60 * 60 * 1000);
       setDateTime(format(t, "yyyy-MM-dd'T'HH:mm"));
       setError(null);
-      setPlayerPrefsOpen(false);
-      setReq(emptyGameRequirements());
+      setPlayerPrefsOpen(prefill?.visibility != null);
+      setReq({
+        ...emptyGameRequirements(),
+        ...(prefill?.visibility ? { visibility: prefill.visibility } : {}),
+      });
       setNearbyGames([]);
       setShowWarning(false);
+      const initialDuration =
+        prefill?.durationMinutes ?? defaultDurationForSport(initialSport);
+      setDurationMin(clampDuration(initialDuration));
+      setDurationDirty(prefill?.durationMinutes != null);
+      setNoteBody("");
+      setNoteVisibility("public");
     }
-  }, [open]);
+  }, [open, prefill]);
+
+  // When the host changes sport before touching the duration, snap the
+  // duration to the new sport's recommended default so the chip looks right.
+  useEffect(() => {
+    if (!open) return;
+    if (durationDirty) return;
+    setDurationMin(clampDuration(defaultDurationForSport(sport)));
+  }, [sport, durationDirty, open]);
 
   const clampSpots = (n: number): number => Math.max(MIN_SPOTS, Math.min(MAX_SPOTS, n));
 
@@ -231,6 +311,7 @@ export function CreateGameModal({
   }, [pickDate]);
 
   const handleSubmit = async () => {
+    if (createKind !== "game") return;
     if (!supabase || !userCoords) {
       setError("Location required. Double-tap a spot on the map.");
       return;
@@ -282,23 +363,31 @@ export function CreateGameModal({
       }
     }
 
-    const { error: err } = await supabase.rpc("create_game", {
-      p_title: title.trim() || "Pickup game",
-      p_sport: sport,
-      p_spots_needed: spots,
-      p_lat: userCoords.lat,
-      p_lng: userCoords.lng,
-      p_starts_at: startsAt,
-      p_location_label: locationLabel?.trim() ? locationLabel.trim() : null,
-      p_description: description.trim() ? description.trim() : null,
-      p_requirements: playerPrefsOpen
+    const visibility = visibilityLabelToEnum(req.visibility);
+    const { gameId, error: err } = await createGame({
+      title: title.trim() || "Pickup game",
+      sport,
+      lat: userCoords.lat,
+      lng: userCoords.lng,
+      spotsNeeded: spots,
+      startsAt,
+      locationLabel: locationLabel?.trim() || null,
+      description: description.trim() || null,
+      durationMinutes: clampDuration(durationMin),
+      visibility,
+      requirements: playerPrefsOpen
         ? {
             skillLevel: req.skillLevel,
             ageRange: req.ageRange,
             matchType: req.matchType,
             visibility: req.visibility,
             school: req.school.trim() ? req.school.trim() : null,
+            ...(prefill?.rematchOfGameId
+              ? { rematch_of: prefill.rematchOfGameId, rematch_of_title: prefill.rematchOfTitle ?? null }
+              : {}),
           }
+        : prefill?.rematchOfGameId
+        ? { rematch_of: prefill.rematchOfGameId, rematch_of_title: prefill.rematchOfTitle ?? null }
         : null,
     });
 
@@ -308,7 +397,36 @@ export function CreateGameModal({
       return;
     }
     onOpenChange(false);
-    onSuccess();
+    onSuccess(gameId);
+  };
+
+  const handleSubmitNote = async () => {
+    if (createKind !== "note") return;
+    if (!userCoords) {
+      setError("Location required. Double-tap a spot on the map.");
+      return;
+    }
+    if (ensureSession && !(await ensureSession())) {
+      setError("Sign-in required. In Supabase enable: Authentication → Providers → Anonymous.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    const { error: err } = await createMapNote({
+      lat: userCoords.lat,
+      lng: userCoords.lng,
+      body: noteBody,
+      visibility: noteVisibility,
+      placeName: locationLabel,
+    });
+    setLoading(false);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    onOpenChange(false);
+    onSuccess(null);
   };
 
   if (!open) return null;
@@ -371,10 +489,46 @@ export function CreateGameModal({
               }
         }
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-gradient-to-r from-slate-900/80 to-violet-950/20">
-          <h2 id="create-game-modal-title" className="text-white font-semibold text-sm tracking-tight">
-            New game
-          </h2>
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/5 bg-gradient-to-r from-slate-900/80 to-violet-950/20">
+          <div className="min-w-0 flex-1 space-y-1">
+            <h2 id="create-game-modal-title" className="text-white font-semibold text-sm tracking-tight">
+              {createKind === "game" ? "New game" : "New note"}
+            </h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateKind("game");
+                  setError(null);
+                }}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                  createKind === "game"
+                    ? "border-violet-400/50 bg-violet-500/20 text-violet-100"
+                    : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]",
+                )}
+                aria-label="Create a new game"
+              >
+                New Game
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateKind("note");
+                  setError(null);
+                }}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                  createKind === "note"
+                    ? "border-cyan-400/45 bg-cyan-400/12 text-cyan-100"
+                    : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]",
+                )}
+                aria-label="Create a new note"
+              >
+                Note
+              </button>
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => onOpenChange(false)}
@@ -416,6 +570,50 @@ export function CreateGameModal({
             )}
           </div>
 
+          {createKind === "note" ? (
+            <>
+              <div>
+                <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
+                  <AlignLeft className="w-3.5 h-3.5 text-cyan-400/80" />
+                  Note
+                </div>
+                <Textarea
+                  value={noteBody}
+                  onChange={(e) => setNoteBody(e.target.value)}
+                  placeholder={locationLabel?.trim() ? `Ask about ${locationLabel.trim()}…` : "Ask a question about this location…"}
+                  rows={4}
+                  className="min-h-[110px] text-sm bg-slate-900/60 border-white/10 text-slate-200 placeholder:text-slate-600 rounded-xl focus-visible:ring-cyan-500/30"
+                  aria-label="Note text"
+                />
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  Nearby players will see it in Feed and can reply in comments.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-[11px] uppercase tracking-wide text-slate-500">Visibility</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {(["public", "friends", "private"] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setNoteVisibility(opt)}
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                        noteVisibility === opt
+                          ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-100"
+                          : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
+                      )}
+                      aria-label={`Set note visibility to ${opt}`}
+                    >
+                      {opt === "public" ? "Public" : opt === "friends" ? "Friends" : "Private"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
           {/* Sport + search */}
           <div>
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
@@ -594,6 +792,121 @@ export function CreateGameModal({
             <p className="text-slate-600 text-[10px] mt-1.5">Required — players need a real start time.</p>
           </div>
 
+          {/* Duration */}
+          <div>
+            <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
+              <Timer className="w-3.5 h-3.5 text-violet-400/80" />
+              Duration
+              <span className="ml-1 normal-case tracking-normal text-[10px] font-normal text-slate-600">
+                (when the pin disappears)
+              </span>
+            </div>
+            <div className="rounded-xl border border-white/5 bg-slate-900/40 p-3 space-y-3">
+              <div className="flex flex-wrap gap-1.5">
+                {durationPresetsForSport(sport).map((preset) => {
+                  const selected = durationMin === preset;
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        setDurationMin(preset);
+                        setDurationDirty(true);
+                      }}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-[12px] font-semibold tabular-nums transition-colors",
+                        selected
+                          ? "border-violet-400 bg-violet-500/20 text-violet-100"
+                          : "border-white/10 bg-slate-900/50 text-slate-300 hover:border-white/20",
+                      )}
+                      aria-pressed={selected}
+                    >
+                      {formatDurationLabel(preset)}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDurationDirty(true);
+                  }}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-[12px] font-semibold tabular-nums transition-colors",
+                    !durationPresetsForSport(sport).includes(durationMin)
+                      ? "border-violet-400 bg-violet-500/20 text-violet-100"
+                      : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
+                  )}
+                >
+                  Custom: {formatDurationLabel(durationMin)}
+                </button>
+              </div>
+              <input
+                type="range"
+                min={MIN_DURATION_MIN}
+                max={240}
+                step={5}
+                value={durationMin}
+                onChange={(e) => {
+                  setDurationMin(clampDuration(Number(e.target.value)));
+                  setDurationDirty(true);
+                }}
+                className="w-full accent-violet-500/80"
+                aria-label="Game duration in minutes"
+              />
+              <p className="text-slate-600 text-[10px]">
+                After this much time, the game pin disappears from the map and the chat flips to “Game ended · Plan rematch”.
+              </p>
+            </div>
+          </div>
+
+          {/* Visibility — promoted from prefs because it now drives chat membership rules. */}
+          <div>
+            <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
+              {React.createElement(VISIBILITY_META[req.visibility as VisibilityLabel]?.icon ?? Globe, {
+                className: "w-3.5 h-3.5 text-violet-400/80",
+              })}
+              Who can see &amp; join
+            </div>
+            <div className="rounded-xl border border-white/5 bg-slate-900/40 p-3 space-y-2">
+              <div className="flex flex-wrap gap-1.5">
+                {VISIBILITY_OPTIONS.map((opt) => {
+                  const Icon = VISIBILITY_META[opt].icon;
+                  const selected = req.visibility === opt;
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setReq((r) => ({ ...r, visibility: opt }))}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-semibold transition-colors",
+                        selected
+                          ? "border-violet-400 bg-violet-500/20 text-violet-100"
+                          : "border-white/10 bg-slate-900/50 text-slate-300 hover:border-white/20",
+                      )}
+                      aria-pressed={selected}
+                    >
+                      <Icon className="size-3.5" aria-hidden />
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] leading-relaxed text-slate-500">
+                {VISIBILITY_META[req.visibility as VisibilityLabel]?.hint ??
+                  VISIBILITY_META["Public (Map)"].hint}
+              </p>
+            </div>
+          </div>
+
+          {/* Rematch banner — only shown when CreateGameModal was opened from a "Plan rematch" CTA. */}
+          {prefill?.rematchOfTitle ? (
+            <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-[11px] text-cyan-100">
+              <span className="font-semibold">Rematch</span> of{" "}
+              <span className="text-cyan-50">{prefill.rematchOfTitle}</span>. We'll prefill sport, location,
+              roster size, duration, and who-can-join — tweak anything and create.
+            </div>
+          ) : null}
+
           {/* Name */}
           <div>
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
@@ -713,27 +1026,6 @@ export function CreateGameModal({
               </div>
 
               <div className="space-y-2">
-                <Label className="text-[11px] uppercase tracking-wide text-slate-500">Visibility</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {VISIBILITY_OPTIONS.map((opt) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => setReq((r) => ({ ...r, visibility: opt }))}
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                        req.visibility === opt
-                          ? "border-violet-400 bg-violet-500/20 text-violet-100"
-                          : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
-                      )}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
                 <Label className="text-[11px] uppercase tracking-wide text-slate-500">School / org (optional)</Label>
                 <Input
                   value={req.school}
@@ -762,16 +1054,18 @@ export function CreateGameModal({
               <p className="text-[11px] text-amber-500">Are you sure you want to create a new game?</p>
             </div>
           )}
+            </>
+          )}
         </div>
 
         <div className="p-4 pt-2 border-t border-white/5 bg-slate-950/80">
           <Button
             type="button"
-            onClick={handleSubmit}
-            disabled={!userCoords || loading}
+            onClick={createKind === "note" ? handleSubmitNote : handleSubmit}
+            disabled={!userCoords || loading || (createKind === "note" && !noteBody.trim())}
             className="w-full h-10 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 text-white text-sm font-semibold shadow-lg shadow-violet-900/30 border-0"
           >
-            {loading ? "Creating…" : "Create game"}
+            {loading ? (createKind === "note" ? "Posting…" : "Creating…") : (createKind === "note" ? "Post note" : "Create game")}
           </Button>
         </div>
       </div>

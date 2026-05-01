@@ -10,8 +10,8 @@ const MapboxMap = React.lazy(() =>
 import { TopNavigation } from "./components/TopUI";
 import { BottomCarousel } from "./components/BottomCarousel";
 import { GameMessengerSheet } from "./components/GameMessengerSheet";
-import type { MessengerThreadFocus } from "./components/GameMessengerSheet";
-import { CreateGameModal } from "./components/CreateGameModal";
+import type { MessengerThreadFocus, PlanRematchPayload } from "./components/GameMessengerSheet";
+import { CreateGameModal, type CreateGamePrefill } from "./components/CreateGameModal";
 import { FiltersModal, type FiltersState, DEFAULT_FILTERS } from "./components/FiltersModal";
 import { useGeolocation } from "../hooks/useGeolocation";
 import { useNearbyMapQueries } from "../hooks/useNearbyMapQueries";
@@ -26,14 +26,16 @@ import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
 import { useTotalUnreadMessages } from "../hooks/useTotalUnreadMessages";
 import { supabase } from "../lib/supabase";
-import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame } from "../lib/api";
+import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby } from "../lib/api";
 import { fetchMyDmInbox, getOrCreateDmThread } from "../lib/dmChat";
-import { fetchMyGameInbox } from "../lib/gameChat";
+import { fetchMyGameInbox, sendGameMessage } from "../lib/gameChat";
+import { visibilityEnumToLabel } from "../lib/gamePreferenceOptions";
 import { sportEmoji } from "../lib/sportVisuals";
-import type { GameRow } from "../lib/supabase";
+import type { GameRow, MapNoteRow } from "../lib/supabase";
 import { filterGamesVisibleOnMap, isGameInLiveWindow } from "../lib/mapGameTimer";
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
 import { StarRating } from "./components/ui/StarRating";
+import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
 
 const DEFAULT_AVATAR_IMAGE =
   "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=100";
@@ -74,6 +76,16 @@ export default function App() {
     sportFocus && userCoords
       ? userCoords.lng
       : mapSearchLocation?.lng ?? effectiveUserCoords.lng;
+
+  const refetchNotes = useCallback(async () => {
+    const { data } = await fetchNotesNearby({
+      lat: gamesFetchLat,
+      lng: gamesFetchLng,
+      radiusKm: 10,
+      limit: 120,
+    });
+    setMapNotes(data ?? []);
+  }, [gamesFetchLat, gamesFetchLng]);
 
   const [appliedFilters, setAppliedFilters] = useState<FiltersState>(DEFAULT_FILTERS);
   const [filtersDraft, setFiltersDraft] = useState<FiltersState>(DEFAULT_FILTERS);
@@ -141,17 +153,39 @@ export default function App() {
   const [createGameCoords, setCreateGameCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [createGameAnchorPoint, setCreateGameAnchorPoint] = useState<{ x: number; y: number } | null>(null);
   const [createGameLocationLabel, setCreateGameLocationLabel] = useState<string | null>(null);
+  const [createGamePrefill, setCreateGamePrefill] = useState<CreateGamePrefill | null>(null);
   const [joinedGameIds, setJoinedGameIds] = useState<Set<string>>(new Set());
   const [hostGameIds, setHostGameIds] = useState<Set<string>>(new Set());
   const [substituteGameIds, setSubstituteGameIds] = useState<Set<string>>(new Set());
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [messengerFocus, setMessengerFocus] = useState<MessengerThreadFocus | null>(null);
+  const [mapNotes, setMapNotes] = useState<MapNoteRow[]>([]);
+  const [activeMapNote, setActiveMapNote] = useState<MapNoteRow | null>(null);
   /** Idle prefetch so opening Messages isn't blocked by cold RPCs. */
   const [gameInboxBootstrap, setGameInboxBootstrap] = useState<GameInboxRow[] | null>(null);
   const [dmInboxBootstrap, setDmInboxBootstrap] = useState<DmInboxRow[] | null>(null);
   const [satelliteOn, setSatelliteOn] = useState(false);
   const [liveNowOpen, setLiveNowOpen] = useState(false);
   const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
+
+  // Notes: fetch nearby whenever the map's "games center" changes.
+  useEffect(() => {
+    void refetchNotes();
+  }, [refetchNotes]);
+
+  // Deep link from Feed → map game focus.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const gid = params.get("focusGameId");
+    if (!gid) return;
+    const game = games.find((g) => g.id === gid);
+    if (!game) return;
+    handleCenterOnCoords({ lat: game.lat, lng: game.lng });
+    openGamePopupNonceRef.current += 1;
+    setGamePopupRequest({ nonce: openGamePopupNonceRef.current, gameId: game.id });
+    params.delete("focusGameId");
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
+  }, [games, location.pathname, location.search, navigate]);
 
   // Sync user location to DB so avatar shows up on map
   useEffect(() => {
@@ -449,9 +483,26 @@ export default function App() {
           </div>
         }
       >
+        {activeMapNote ? (
+          <NoteThreadDialog
+            open={true}
+            onOpenChange={(o) => {
+              if (!o) setActiveMapNote(null);
+            }}
+            note={{
+              id: activeMapNote.id,
+              body: activeMapNote.body,
+              created_at: activeMapNote.created_at,
+              visibility: activeMapNote.visibility,
+              place_name: activeMapNote.place_name,
+            }}
+          />
+        ) : null}
         <MapboxMap
           userCoords={effectiveUserCoords}
           games={mapGames}
+          notes={mapNotes}
+          onOpenNoteThread={(note) => setActiveMapNote(note)}
           nearbyProfiles={nearbyProfiles ?? []}
           selectedGameId={selectedGame?.id ?? null}
           selectedVenue={selectedVenue}
@@ -623,6 +674,26 @@ export default function App() {
         onLeaveThread={handleLeaveGame}
         inboxBootstrap={gameInboxBootstrap}
         dmInboxBootstrap={dmInboxBootstrap}
+        onPlanRematch={(payload: PlanRematchPayload) => {
+          if (payload.lat == null || payload.lng == null) {
+            console.warn("[FUN] rematch: missing source coordinates");
+            return;
+          }
+          setCreateGameCoords({ lat: payload.lat, lng: payload.lng });
+          setCreateGameAnchorPoint(null);
+          setCreateGameLocationLabel(payload.locationLabel ?? null);
+          setCreateGamePrefill({
+            sport: payload.sport,
+            title: `Rematch — ${payload.fromTitle}`,
+            spotsNeeded: payload.spotsNeeded,
+            durationMinutes: payload.durationMinutes ?? undefined,
+            visibility: visibilityEnumToLabel(payload.visibility ?? "public"),
+            rematchOfGameId: payload.fromGameId,
+            rematchOfTitle: payload.fromTitle,
+          });
+          setMessagesOpen(false);
+          setCreateGameOpen(true);
+        }}
         onSelectGameOnMap={async (gameId) => {
           let lat: number, lng: number;
           const game = games.find((g) => g.id === gameId);
@@ -655,13 +726,31 @@ export default function App() {
 
       <CreateGameModal
         open={createGameOpen}
-        onOpenChange={setCreateGameOpen}
+        onOpenChange={(next) => {
+          setCreateGameOpen(next);
+          if (!next) setCreateGamePrefill(null);
+        }}
         userCoords={createGameCoords ?? effectiveUserCoords}
         locationLabel={createGameLocationLabel}
         anchorPoint={createGameAnchorPoint}
-        onSuccess={() => {
+        prefill={createGamePrefill}
+        onSuccess={async (gameId) => {
           setCreateGameOpen(false);
+          // Auto-post a "Rematch from <title>" system message in the new game's chat.
+          const rematchSourceTitle = createGamePrefill?.rematchOfTitle;
+          if (gameId && rematchSourceTitle) {
+            try {
+              await sendGameMessage(
+                gameId,
+                `Rematch from “${rematchSourceTitle}”. Same crew? Tap join to lock your spot.`
+              );
+            } catch (err) {
+              console.warn("[FUN] rematch system message failed", err);
+            }
+          }
+          setCreateGamePrefill(null);
           refetchGames();
+          void refetchNotes();
           void reloadJoinedGameIds();
         }}
       />

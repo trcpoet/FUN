@@ -12,6 +12,8 @@ if (!url || !anonKey) {
 /** Trailing spaces / newlines in .env break JWT validation → REST 401. */
 export const supabase = url && anonKey ? createClient(url, anonKey) : null;
 
+export type GameVisibility = "public" | "friends_only" | "invite_only";
+
 export type GameRow = {
   id: string;
   title: string;
@@ -29,6 +31,14 @@ export type GameRow = {
   status?: "open" | "full" | "live" | "completed" | "cancelled";
   live_started_at?: string | null;
   ended_at?: string | null;
+  /** Host-set duration window (minutes). Defaults to 90 server-side. */
+  duration_minutes?: number | null;
+  /** Scheduled end time = `starts_at + duration_minutes`. Null when no start time. */
+  ends_at?: string | null;
+  /** 'public' | 'friends_only' | 'invite_only'. Drives chat membership rules. */
+  visibility?: GameVisibility | null;
+  /** UUID for invite-only sharable links (`/g/<token>`). */
+  invite_token?: string | null;
   location_label?: string | null;
   description?: string | null;
   /** Host preferences from create-game (skill, age, etc.). */
@@ -51,11 +61,22 @@ export type GameInboxRow = {
   title: string;
   sport: string;
   starts_at: string | null;
+  /** Scheduled end of the game window (`starts_at + duration_minutes`). */
+  ends_at?: string | null;
+  duration_minutes?: number | null;
+  visibility?: GameVisibility | null;
+  invite_token?: string | null;
+  /** Game host id — needed to render host-only controls in the chat header. */
+  created_by?: string | null;
+  status?: "open" | "full" | "live" | "completed" | "cancelled";
   location_label: string | null;
   last_message_body: string | null;
   last_message_at: string | null;
   participant_count: number;
   spots_remaining: number;
+  /** Convenience: lat/lng so "Plan rematch" can prefill without an extra round-trip. */
+  lat?: number | null;
+  lng?: number | null;
 };
 
 export type DmInboxRow = {
@@ -73,6 +94,31 @@ export type DmMessageRow = {
   user_id: string;
   body: string;
   created_at: string;
+};
+
+export type MapNoteVisibility = "public" | "friends" | "private";
+
+export type MapNoteRow = {
+  id: string;
+  created_at: string;
+  created_by: string;
+  lat: number;
+  lng: number;
+  body: string;
+  visibility: MapNoteVisibility;
+  place_name: string | null;
+  /** Returned by nearby RPCs only. */
+  distance_km?: number | null;
+  /** Returned by nearby/unified feed RPCs only. */
+  comment_count?: number | null;
+};
+
+export type MapNoteCommentRow = {
+  id: string;
+  created_at: string;
+  note_id: string;
+  user_id: string;
+  body: string;
 };
 
 export type ProfileNearbyRow = {

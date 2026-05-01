@@ -20,9 +20,13 @@ import { ActivityFeed } from "../components/athlete-profile/ActivityFeed";
 import { useNotifications } from "../../hooks/useNotifications";
 import { getRecentStatuses, type StatusRow } from "../../lib/status";
 import { useMyProfile } from "../../hooks/useMyProfile";
+import { useGeolocation } from "../../hooks/useGeolocation";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
+import { fetchUnifiedFeed, type UnifiedFeedItem } from "../../lib/api";
+import { GameFeedCard, NoteFeedCard, StatusFeedCard } from "../components/feed/UnifiedFeedCards";
+import { NoteThreadDialog } from "../components/feed/NoteThreadDialog";
 
 function notificationLabel(n: { type: string; payload?: unknown }): string {
   if (n.type === "badge_earned") {
@@ -71,8 +75,12 @@ export default function Feed() {
   const location = useLocation();
   const { notifications, markRead } = useNotifications({ limit: 12 });
   const { displayName, avatarUrl } = useMyProfile();
+  const { coords } = useGeolocation();
   const unreadCount = notifications.filter((n) => !n.is_read).length;
   const [statuses, setStatuses] = useState<StatusRow[]>([]);
+  const [unified, setUnified] = useState<UnifiedFeedItem[]>([]);
+  const [unifiedLoading, setUnifiedLoading] = useState(false);
+  const [activeNote, setActiveNote] = useState<Extract<UnifiedFeedItem, { kind: "note" }> | null>(null);
 
   useEffect(() => {
     const qs = new URLSearchParams(location.search);
@@ -94,6 +102,20 @@ export default function Feed() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!coords) return;
+    let cancelled = false;
+    setUnifiedLoading(true);
+    void fetchUnifiedFeed({ lat: coords.lat, lng: coords.lng, radiusKm: 25, limit: 80 }).then((r) => {
+      if (cancelled) return;
+      setUnifiedLoading(false);
+      setUnified(r.data ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [coords?.lat, coords?.lng]);
 
   const placeholderPosts = useMemo(
     () => [
@@ -209,6 +231,21 @@ export default function Feed() {
       </header>
 
       <main className="relative mx-auto w-full max-w-3xl px-4 py-8 pb-32">
+        {activeNote ? (
+          <NoteThreadDialog
+            open={true}
+            onOpenChange={(o) => {
+              if (!o) setActiveNote(null);
+            }}
+            note={{
+              id: activeNote.id,
+              body: activeNote.body,
+              created_at: activeNote.created_at,
+              visibility: activeNote.visibility,
+              place_name: null,
+            }}
+          />
+        ) : null}
         {tab === "discovery" && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Statuses Strip */}
@@ -301,17 +338,56 @@ export default function Feed() {
 
         {tab === "activity" && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <ActivityFeed
-              posts={placeholderPosts as any}
-              pinnedFallback={{ 
-                title: "No pinned post yet", 
-                subtitle: "Pin availability, city, or training goals to stand out." 
-              }}
-              userMeta={{
-                displayName: displayName ?? "Athlete",
-                avatarUrl: avatarUrl ?? undefined
-              }}
-            />
+            <section className="space-y-6">
+              <div className="flex items-center justify-between px-2">
+                <div className="space-y-1">
+                  <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                    Feed
+                    <span className="inline-block size-1.5 rounded-full bg-primary animate-pulse" />
+                  </h2>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">
+                    Games + Notes + Statuses near you
+                  </p>
+                </div>
+              </div>
+
+              {!coords ? (
+                <div className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md p-10 text-center">
+                  <p className="text-sm font-bold text-slate-300 uppercase tracking-widest">Location needed</p>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Allow location to see nearby games and notes.
+                  </p>
+                </div>
+              ) : unifiedLoading ? (
+                <div className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md p-10 text-center">
+                  <p className="text-sm text-slate-400">Loading nearby activity…</p>
+                </div>
+              ) : unified.length === 0 ? (
+                <div className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md p-10 text-center">
+                  <p className="text-sm font-bold text-slate-300 uppercase tracking-widest">No activity yet</p>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Create a game or drop a note on the map to start the conversation.
+                  </p>
+                </div>
+              ) : (
+                <ul className="grid gap-6">
+                  {unified.map((it) => (
+                    <li key={`${it.kind}:${it.id}`}>
+                      {it.kind === "note" ? (
+                        <NoteFeedCard item={it} onOpen={() => setActiveNote(it)} />
+                      ) : it.kind === "game" ? (
+                        <GameFeedCard
+                          item={it}
+                          onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
+                        />
+                      ) : (
+                        <StatusFeedCard item={it} />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           </div>
         )}
 

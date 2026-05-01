@@ -44,11 +44,37 @@ async function fetchMyGameInboxFromTables(): Promise<{
   const gameIds = [...new Set((mine ?? []).map((r: { game_id: string }) => r.game_id))];
   if (gameIds.length === 0) return { data: [], error: null };
 
-  const { data: games, error: e2 } = await supabase
-    .from("games")
-    .select("id, title, sport, starts_at, spots_needed, created_at")
-    .in("id", gameIds);
-  if (e2) return { data: null, error: new Error(e2.message) };
+  // Try the rich select first (post-migration: includes visibility / invite_token / ends_at / location).
+  // If those columns don't exist yet (older schema), retry with the minimal set.
+  let games: Array<Record<string, unknown>> | null = null;
+  let e2: { message?: string; code?: string } | null = null;
+  {
+    const richSelect =
+      "id, title, sport, starts_at, spots_needed, created_at, ends_at, duration_minutes, visibility, invite_token, created_by, status, location_label, lat, lng";
+    const res = await supabase.from("games").select(richSelect).in("id", gameIds);
+    if (res.error) {
+      // Probe legacy schemas (missing duration_minutes / visibility / invite_token / lat / lng / etc.).
+      const m = (res.error.message ?? "").toLowerCase();
+      const isLegacyColumnMissing =
+        res.error.code === "42703" || (m.includes("column") && m.includes("does not exist"));
+      if (!isLegacyColumnMissing) {
+        e2 = res.error;
+      } else {
+        const fallback = await supabase
+          .from("games")
+          .select("id, title, sport, starts_at, spots_needed, created_at")
+          .in("id", gameIds);
+        if (fallback.error) {
+          e2 = fallback.error;
+        } else {
+          games = (fallback.data ?? []) as Array<Record<string, unknown>>;
+        }
+      }
+    } else {
+      games = (res.data ?? []) as Array<Record<string, unknown>>;
+    }
+  }
+  if (e2) return { data: null, error: new Error(e2.message ?? "Failed to load games") };
 
   const { data: allParts, error: e3 } = await supabase
     .from("game_participants")
@@ -86,16 +112,24 @@ async function fetchMyGameInboxFromTables(): Promise<{
     }
   }
 
-  type GameRow = {
-    id: string;
-    title: string;
-    sport: string;
-    starts_at: string | null;
-    spots_needed: number;
-    created_at: string;
-  };
-
-  const rows: GameInboxRow[] = (games as GameRow[] ?? []).map((g) => {
+  const rows: GameInboxRow[] = (games ?? []).map((raw) => {
+    const g = raw as {
+      id: string;
+      title: string;
+      sport: string;
+      starts_at: string | null;
+      spots_needed: number;
+      created_at: string;
+      ends_at?: string | null;
+      duration_minutes?: number | null;
+      visibility?: "public" | "friends_only" | "invite_only" | null;
+      invite_token?: string | null;
+      created_by?: string | null;
+      status?: GameInboxRow["status"];
+      location_label?: string | null;
+      lat?: number | null;
+      lng?: number | null;
+    };
     const cnt = countByGame.get(g.id) ?? 0;
     const spots = g.spots_needed ?? 2;
     const lm = lastMsgByGame.get(g.id);
@@ -104,21 +138,38 @@ async function fetchMyGameInboxFromTables(): Promise<{
       title: g.title,
       sport: g.sport,
       starts_at: g.starts_at,
-      location_label: null,
+      ends_at: g.ends_at ?? null,
+      duration_minutes: g.duration_minutes ?? null,
+      visibility: g.visibility ?? null,
+      invite_token: g.invite_token ?? null,
+      created_by: g.created_by ?? null,
+      status: g.status,
+      location_label: g.location_label ?? null,
       last_message_body: lm?.body ?? null,
       last_message_at: lm?.created_at ?? null,
       participant_count: cnt,
       spots_remaining: Math.max(0, spots - cnt),
+      lat: g.lat ?? null,
+      lng: g.lng ?? null,
     };
   });
 
   rows.sort((a, b) => {
-    const ta = Date.parse(a.last_message_at ?? a.starts_at ?? "") || 0;
-    const tb = Date.parse(b.last_message_at ?? b.starts_at ?? "") || 0;
-    if (ta !== tb) return tb - ta;
-    const ga = games as GameRow[] | undefined;
-    const ca = ga?.find((x) => x.id === a.id)?.created_at;
-    const cb = ga?.find((x) => x.id === b.id)?.created_at;
+    // Most-recently-active wins: the larger of last_message_at, ends_at, or starts_at.
+    const aKey =
+      Date.parse(a.last_message_at ?? "") ||
+      Date.parse(a.ends_at ?? "") ||
+      Date.parse(a.starts_at ?? "") ||
+      0;
+    const bKey =
+      Date.parse(b.last_message_at ?? "") ||
+      Date.parse(b.ends_at ?? "") ||
+      Date.parse(b.starts_at ?? "") ||
+      0;
+    if (aKey !== bKey) return bKey - aKey;
+    const ga = games ?? [];
+    const ca = (ga.find((x) => (x as { id: string }).id === a.id) as { created_at?: string } | undefined)?.created_at;
+    const cb = (ga.find((x) => (x as { id: string }).id === b.id) as { created_at?: string } | undefined)?.created_at;
     return (Date.parse(cb ?? "") || 0) - (Date.parse(ca ?? "") || 0);
   });
 

@@ -3,6 +3,9 @@ import type { GameRow } from "./supabase";
 /** Untimed games (no `starts_at`) stay on the map for this long after creation, then are hidden. */
 export const MAP_UNTIMED_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
+/** Default game window when the host doesn't specify (matches DB default). */
+export const DEFAULT_GAME_DURATION_MIN = 90;
+
 /** Games created from a sports venue flow set `location_label`; map-tap games do not. */
 export function isVenueGame(game: GameRow): boolean {
   return Boolean(game.location_label?.trim());
@@ -29,6 +32,36 @@ export function getCountdownUrgency(totalMs: number): CountdownUrgency {
   if (totalMs < 60 * 60 * 1000) return "critical";
   if (totalMs < 24 * 60 * 60 * 1000) return "high";
   return "calm";
+}
+
+/** Resolved end-of-game timestamp (ms epoch). Prefers DB-provided `ends_at`, falls
+ * back to `starts_at + duration_minutes`, and finally to the legacy default window
+ * so existing rows without duration still expire correctly. */
+export function getGameEndsAtMs(game: GameRow): number | null {
+  const dbEnd = game.ends_at?.trim();
+  if (dbEnd) {
+    const t = new Date(dbEnd).getTime();
+    if (!Number.isNaN(t)) return t;
+  }
+  if (!game.starts_at) return null;
+  const startMs = new Date(game.starts_at).getTime();
+  if (Number.isNaN(startMs)) return null;
+  const dur = (game.duration_minutes ?? DEFAULT_GAME_DURATION_MIN) * 60_000;
+  return startMs + dur;
+}
+
+/** True once `starts_at + duration` has passed; map should hide the pin. */
+export function isGameEnded(game: GameRow, nowMs: number): boolean {
+  if (game.status === "completed" || game.status === "cancelled") return true;
+  const ends = getGameEndsAtMs(game);
+  return ends != null && ends <= nowMs;
+}
+
+/** Minutes remaining inside the live window. Negative if game already ended. */
+export function getMinutesUntilGameEnd(game: GameRow, nowMs: number): number | null {
+  const ends = getGameEndsAtMs(game);
+  if (ends == null) return null;
+  return Math.ceil((ends - nowMs) / 60_000);
 }
 
 /**
@@ -66,12 +99,13 @@ export function getCountdownRemainingMs(game: GameRow, nowMs: number): number | 
 
 export function isGameLive(game: GameRow, nowMs: number): boolean {
   if (!game.starts_at) return false;
+  if (isGameEnded(game, nowMs)) return false;
   return new Date(game.starts_at).getTime() <= nowMs;
 }
 
-/** For colocated HTML pins: only non-venue games contribute; pick the tightest upcoming deadline. */
+/** For colocated HTML pins: only non-venue games that haven't ended; pick the tightest upcoming deadline. */
 export function minCountdownAmongRandomGames(games: GameRow[], nowMs: number): { mode: "live" } | { mode: "countdown"; ms: number } | null {
-  const relevant = games.filter((g) => !isVenueGame(g));
+  const relevant = games.filter((g) => !isVenueGame(g) && !isGameEnded(g, nowMs));
   if (relevant.length === 0) return null;
 
   let best: number | null = null;
@@ -91,7 +125,7 @@ export function minCountdownAmongRandomGames(games: GameRow[], nowMs: number): {
   return null;
 }
 
-/** Venue modal copy: scheduled time + countdown, Live, or map TTL for untimed games. */
+/** Venue modal copy: scheduled time + countdown, Live (with end countdown), or map TTL for untimed games. */
 export function formatVenueGameTimerSummary(game: GameRow, nowMs: number): string {
   if (game.starts_at) {
     const d = new Date(game.starts_at);
@@ -102,7 +136,14 @@ export function formatVenueGameTimerSummary(game: GameRow, nowMs: number): strin
       hour: "numeric",
       minute: "2-digit",
     });
-    if (t <= nowMs) return `${dateStr} · Live`;
+    if (isGameEnded(game, nowMs)) return `${dateStr} · Ended`;
+    if (t <= nowMs) {
+      const ends = getGameEndsAtMs(game);
+      if (ends != null) {
+        return `${dateStr} · Live · ${formatUrgentCountdown(ends - nowMs)} left`;
+      }
+      return `${dateStr} · Live`;
+    }
     return `${dateStr} · starts in ${formatUrgentCountdown(t - nowMs)}`;
   }
   const rem = getCountdownRemainingMs(game, nowMs);
@@ -120,6 +161,7 @@ export function isGameInLiveWindow(
   nowMs: number,
   windowMs: number = LIVE_WINDOW_MS
 ): boolean {
+  if (isGameEnded(game, nowMs)) return false;
   if (game.status === "live") return true;
   if (game.starts_at?.trim()) {
     const t = new Date(game.starts_at).getTime();
@@ -147,7 +189,7 @@ export function getLiveStripBadgeTone(game: GameRow, nowMs: number): LiveStripBa
 }
 
 /**
- * Primary line for Live strip cards, e.g. "Starts in 42 min · 2 spots" or "Live now · 1 spot".
+ * Primary line for Live strip cards, e.g. "Starts in 42 min · 2 spots" or "Live · 25m left · 1 spot".
  */
 export function formatLiveStripCardSummary(game: GameRow, nowMs: number): string {
   const spots =
@@ -155,14 +197,21 @@ export function formatLiveStripCardSummary(game: GameRow, nowMs: number): string
       ? `${game.spots_remaining} spot${game.spots_remaining === 1 ? "" : "s"}`
       : `${game.spots_needed} player cap`;
 
-  if (game.status === "live") {
-    return `Live now · ${spots}`;
+  if (isGameEnded(game, nowMs)) {
+    return `Game ended · ${spots}`;
   }
+
   if (game.starts_at?.trim()) {
     const t = new Date(game.starts_at).getTime();
     if (Number.isNaN(t)) return spots;
     if (t <= nowMs) {
-      return `Started · ${spots}`;
+      // In-window: show how much of the duration is left.
+      const ends = getGameEndsAtMs(game);
+      if (ends != null) {
+        const left = Math.max(0, ends - nowMs);
+        return `Live · ${formatUrgentCountdown(left)} left · ${spots}`;
+      }
+      return `Live now · ${spots}`;
     }
     const ms = t - nowMs;
     const mins = Math.max(1, Math.ceil(ms / 60000));
@@ -183,10 +232,11 @@ export function formatLiveStripCardSummary(game: GameRow, nowMs: number): string
   return spots;
 }
 
-/** Map + carousels: scheduled games plus untimed games within their TTL. Completed/cancelled excluded. */
+/** Map + carousels: scheduled games plus untimed games within their TTL. Ended/completed/cancelled excluded. */
 export function filterGamesVisibleOnMap(games: GameRow[], nowMs: number): GameRow[] {
   return games.filter((g) => {
     if (g.status === "completed" || g.status === "cancelled") return false;
+    if (isGameEnded(g, nowMs)) return false;
     if (g.starts_at?.trim()) return true;
     // Untimed pickup games: show for MAP_UNTIMED_TTL_MS after creation
     const created = new Date(g.created_at).getTime();

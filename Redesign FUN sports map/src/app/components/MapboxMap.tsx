@@ -6,6 +6,7 @@ import { useNavigate } from "react-router";
 type ReactRoot = ReturnType<typeof createRoot>;
 import type { GameRow } from "../../lib/supabase";
 import type { ProfileNearbyRow } from "../../lib/supabase";
+import type { MapNoteRow } from "../../lib/supabase";
 import { isVenueGame } from "../../lib/mapGameTimer";
 import { gamesToGeoJSON } from "../types/mapGeoJSON";
 import { fetchSportsVenuesWithProgress } from "../lib/sportsVenues";
@@ -43,6 +44,8 @@ const L_GAME_CLUSTER_LABEL = "fun-games-cluster-label";
 /** Rasterized sport emoji only (`sport_map_icon` → addImage); no separate circle layer. */
 const L_GAME_ICON = "fun-games-sport-icon";
 const L_GAME_COUNT = "fun-games-roster";
+const L_NOTE_SOURCE = "fun-map-notes";
+const L_NOTE_DOTS = "fun-map-notes-dots";
 const L_VENUE_DOTS = "venue-dots-core";
 /** Dark bluish-purple halos (outer + inner gradient) — animated via rAF */
 const L_VENUE_DOTS_PULSE = "venue-dots-pulse";
@@ -91,6 +94,9 @@ export type MapCameraRequest =
 type MapboxMapProps = {
   userCoords: { lat: number; lng: number } | null;
   games: GameRow[];
+  /** Location-anchored notes (public/friends/private). */
+  notes?: MapNoteRow[];
+  onOpenNoteThread?: (note: MapNoteRow) => void;
   selectedGameId: string | null;
   onSelectGame: (game: GameRow | null) => void;
   selectedVenue: VenueSelection | null;
@@ -162,6 +168,8 @@ export function MapboxMap(props: MapboxMapProps) {
   const {
     userCoords,
     games,
+    notes = [],
+    onOpenNoteThread,
     selectedGameId,
     onSelectGame,
     selectedVenue,
@@ -220,6 +228,7 @@ export function MapboxMap(props: MapboxMapProps) {
   const initialUserFlyDoneRef = useRef(false);
   const gameLayersInitedRef = useRef(false);
   const gamesRef = useRef(games);
+  const notesRef = useRef(notes);
   const onSelectGameRef = useRef(onSelectGame);
   const onJoinGameRef = useRef(onJoinGame);
   const selectedGameIdRef = useRef(selectedGameId);
@@ -247,6 +256,7 @@ export function MapboxMap(props: MapboxMapProps) {
   onVenuesFetchLoadingChangeRef.current = onVenuesFetchLoadingChange;
 
   gamesRef.current = games;
+  notesRef.current = notes;
   onSelectGameRef.current = onSelectGame;
   onJoinGameRef.current = onJoinGame;
   selectedGameIdRef.current = selectedGameId;
@@ -1070,6 +1080,25 @@ export function MapboxMap(props: MapboxMapProps) {
       },
     });
 
+    // Notes: lightweight non-clustered dots (cyan glow).
+    map.addSource(L_NOTE_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+
+    map.addLayer({
+      id: L_NOTE_DOTS,
+      type: "circle",
+      source: L_NOTE_SOURCE,
+      paint: {
+        "circle-color": "rgba(34, 211, 238, 0.35)",
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 4, 14, 7, 18, 10],
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": "rgba(34, 211, 238, 0.55)",
+        "circle-blur": 0.2,
+      },
+    });
+
     const openPopupForGame = (game: GameRow, mapPoint: { x: number; y: number }) => {
       gameInteractionTsRef.current = Date.now();
       onSelectGameRef.current(game);
@@ -1104,10 +1133,25 @@ export function MapboxMap(props: MapboxMapProps) {
 
     map.on("click", L_GAME_ICON, openGameFromFeature);
 
+    map.on("click", L_NOTE_DOTS, (e) => {
+      const f = e.features?.[0];
+      const nid = f?.properties?.id as string | undefined;
+      if (!nid) return;
+      const note = notesRef.current.find((n) => n.id === nid);
+      if (note) onOpenNoteThread?.(note);
+    });
+
     map.on("mouseenter", L_GAME_CLUSTERS, () => {
       map.getCanvas().style.cursor = "pointer";
     });
     map.on("mouseleave", L_GAME_CLUSTERS, () => {
+      map.getCanvas().style.cursor = "";
+    });
+
+    map.on("mouseenter", L_NOTE_DOTS, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", L_NOTE_DOTS, () => {
       map.getCanvas().style.cursor = "";
     });
 
@@ -1168,6 +1212,20 @@ export function MapboxMap(props: MapboxMapProps) {
     src.setData(gamesToGeoJSON(capped, selectedGameId));
     applyMapLayerVisibility();
   }, [mapLoaded, games, selectedGameId, mapMinuteEpoch, applyMapLayerVisibility]);
+
+  /** Push note GeoJSON into the notes source. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    const src = map.getSource(L_NOTE_SOURCE) as import("mapbox-gl").GeoJSONSource | undefined;
+    if (!src) return;
+    const features = notes.map((n) => ({
+      type: "Feature" as const,
+      geometry: { type: "Point" as const, coordinates: [n.lng, n.lat] as [number, number] },
+      properties: { id: n.id, visibility: n.visibility, comment_count: n.comment_count ?? null },
+    }));
+    src.setData({ type: "FeatureCollection", features });
+  }, [mapLoaded, notes]);
 
   /** Same-coordinate games: single HTML cluster pin (avoids overlapping GL sport icons). */
   useEffect(() => {

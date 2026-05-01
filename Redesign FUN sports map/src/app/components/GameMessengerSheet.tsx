@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format } from "date-fns";
 import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Send, Share2, Users } from "lucide-react";
 import { useNavigate } from "react-router";
@@ -17,7 +17,14 @@ import {
 } from "./ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { cn } from "./ui/utils";
-import type { DmInboxRow, DmMessageRow, GameInboxRow, GameMessageRow, GameRow } from "../../lib/supabase";
+import type {
+  DmInboxRow,
+  DmMessageRow,
+  GameInboxRow,
+  GameMessageRow,
+  GameRow,
+  GameVisibility,
+} from "../../lib/supabase";
 import {
   fetchGameChatMembers,
   type GameChatMember,
@@ -31,8 +38,12 @@ import { badgeText, clearUnread, getUnreadCount, incrementUnread, threadKey } fr
 import {
   formatUrgentCountdown,
   getCountdownRemainingMs,
+  getGameEndsAtMs,
+  isGameEnded,
 } from "../../lib/mapGameTimer";
 import { getGameLatLng } from "../../lib/api";
+import { InviteAdminPanel } from "./chat/InviteAdminPanel";
+import { useChatTrust, type ChatTrust, trustBadgeLabel } from "../../hooks/useChatTrust";
 
 export type GameThreadFocus = {
   kind: "game";
@@ -41,10 +52,23 @@ export type GameThreadFocus = {
   sport: string;
   /** Scheduled start (ISO). From inbox or map when available. */
   startsAt?: string | null;
+  /** Scheduled end (`starts_at + duration_minutes`, ISO). */
+  endsAt?: string | null;
+  durationMinutes?: number | null;
   /** For untimed games: map TTL countdown (from `games.created_at`). */
   createdAt?: string | null;
   participantCount?: number;
   spotsRemaining?: number;
+  /** Game host id — used to enable invite admin / rematch controls. */
+  createdBy?: string | null;
+  /** Drives chat membership UX (stranger badges, invite panel, etc.). */
+  visibility?: GameVisibility | null;
+  /** Sharable token for invite-only games (`/g/<token>`). */
+  inviteToken?: string | null;
+  /** Coords + label so "Plan rematch" pre-fills location without an extra fetch. */
+  lat?: number | null;
+  lng?: number | null;
+  locationLabel?: string | null;
 };
 
 export type DmThreadFocus = {
@@ -56,6 +80,18 @@ export type DmThreadFocus = {
 };
 
 export type MessengerThreadFocus = GameThreadFocus | DmThreadFocus;
+
+export type PlanRematchPayload = {
+  fromGameId: string;
+  fromTitle: string;
+  sport: string;
+  spotsNeeded: number;
+  durationMinutes: number | null;
+  visibility: GameVisibility | null;
+  lat: number | null;
+  lng: number | null;
+  locationLabel: string | null;
+};
 
 type GameMessengerSheetProps = {
   open: boolean;
@@ -74,21 +110,82 @@ type GameMessengerSheetProps = {
   /** Idle-prefetched rows so the list can paint before network round-trips. */
   inboxBootstrap?: GameInboxRow[] | null;
   dmInboxBootstrap?: DmInboxRow[] | null;
+  /** Caller opens CreateGameModal pre-filled from the ended game's metadata. */
+  onPlanRematch?: (payload: PlanRematchPayload) => void;
 };
+
+/** Decide whether an inbox row should be in the "Past games" section. */
+function isInboxRowEnded(row: GameInboxRow, nowMs: number): boolean {
+  if (row.status === "completed" || row.status === "cancelled") return true;
+  if (row.ends_at) {
+    const t = Date.parse(row.ends_at);
+    if (!Number.isNaN(t) && t <= nowMs) return true;
+  }
+  return false;
+}
+
+/** Split inbox rows into "still active" and "ended" buckets, preserving sort order. */
+function partitionInboxByLifecycle(
+  rows: GameInboxRow[],
+  nowMs: number,
+): { active: GameInboxRow[]; ended: GameInboxRow[] } {
+  const active: GameInboxRow[] = [];
+  const ended: GameInboxRow[] = [];
+  for (const r of rows) {
+    if (isInboxRowEnded(r, nowMs)) ended.push(r);
+    else active.push(r);
+  }
+  return { active, ended };
+}
 
 function threadScheduleLines(args: {
   startsAt: string | null;
+  endsAt: string | null;
+  durationMinutes: number | null;
   createdAt: string | null;
+  status: GameInboxRow["status"];
   nowMs: number;
-}): { timeLine: string; countdownLine: string } {
+}): { timeLine: string; countdownLine: string; ended: boolean } {
   if (args.startsAt) {
     const d = new Date(args.startsAt);
     const t = d.getTime();
     const timeLine = format(d, "EEE, MMM d · h:mm a");
-    if (t <= args.nowMs) {
-      return { timeLine, countdownLine: "Live" };
+
+    const stub: GameRow = {
+      id: "",
+      title: "",
+      sport: "",
+      spots_needed: 0,
+      starts_at: args.startsAt,
+      created_by: null,
+      created_at: args.startsAt,
+      status: args.status ?? undefined,
+      ends_at: args.endsAt ?? undefined,
+      duration_minutes: args.durationMinutes ?? undefined,
+      distance_km: 0,
+      lat: 0,
+      lng: 0,
+    };
+
+    if (isGameEnded(stub, args.nowMs)) {
+      return { timeLine, countdownLine: "Game ended · Plan rematch?", ended: true };
     }
-    return { timeLine, countdownLine: `Starts in ${formatUrgentCountdown(t - args.nowMs)}` };
+    if (t <= args.nowMs) {
+      const ends = getGameEndsAtMs(stub);
+      if (ends != null) {
+        return {
+          timeLine,
+          countdownLine: `Live · ${formatUrgentCountdown(ends - args.nowMs)} left`,
+          ended: false,
+        };
+      }
+      return { timeLine, countdownLine: "Live", ended: false };
+    }
+    return {
+      timeLine,
+      countdownLine: `Starts in ${formatUrgentCountdown(t - args.nowMs)}`,
+      ended: false,
+    };
   }
   if (args.createdAt) {
     const rem = getCountdownRemainingMs(
@@ -96,21 +193,102 @@ function threadScheduleLines(args: {
       args.nowMs
     );
     const timeLine = "No set time";
-    if (rem == null) return { timeLine, countdownLine: "No longer on map" };
-    return { timeLine, countdownLine: `${formatUrgentCountdown(rem)} left on map` };
+    if (rem == null) return { timeLine, countdownLine: "No longer on map", ended: true };
+    return { timeLine, countdownLine: `${formatUrgentCountdown(rem)} left on map`, ended: false };
   }
-  return { timeLine: "Set time", countdownLine: "" };
+  return { timeLine: "Set time", countdownLine: "", ended: false };
+}
+
+function TrustBadge({ trust }: { trust: ChatTrust | undefined }) {
+  const label = trustBadgeLabel(trust);
+  if (!label) return null;
+  if (trust === "self") return null;
+  const tone = (() => {
+    switch (trust) {
+      case "stranger":
+        return "border-slate-500/40 bg-slate-700/30 text-slate-300";
+      case "host":
+        return "border-amber-400/40 bg-amber-500/15 text-amber-200";
+      case "friend":
+      case "mutual":
+        return "border-emerald-400/40 bg-emerald-500/15 text-emerald-200";
+      default:
+        return "border-white/10 bg-white/5 text-slate-300";
+    }
+  })();
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide",
+        tone,
+      )}
+      aria-label={label}
+      title={label}
+    >
+      {label}
+    </span>
+  );
+}
+
+function SquadMemberRow({
+  member,
+  trust,
+  isYou,
+  onOpenProfile,
+}: {
+  member: GameChatMember;
+  trust: ChatTrust | undefined;
+  isYou: boolean;
+  onOpenProfile?: (userId: string) => void;
+}) {
+  const label = member.display_name?.trim() || "Player";
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpenProfile?.(member.user_id)}
+        className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+        aria-label={`Open ${label}'s profile`}
+      >
+        <Avatar className="size-9 shrink-0 border border-white/10">
+          {member.avatar_url?.trim() ? (
+            <AvatarImage src={member.avatar_url} alt="" className="object-cover" />
+          ) : null}
+          <AvatarFallback className="bg-slate-800 text-xs text-slate-200">
+            {label.slice(0, 2).toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 truncate text-sm font-medium text-slate-100">
+            <span className="truncate">{label}</span>
+            {isYou ? (
+              <span className="text-[10px] font-normal text-cyan-400/90">(you)</span>
+            ) : (
+              <TrustBadge trust={trust} />
+            )}
+          </p>
+          <p className="text-[10px] text-slate-500 capitalize">{member.role}</p>
+        </div>
+      </button>
+    </li>
+  );
 }
 
 function SquadMemberList({
   membersLoading,
   chatMembers,
   currentUserId,
+  trustByUserId,
+  groupByTrust,
   onOpenProfile,
 }: {
   membersLoading: boolean;
   chatMembers: GameChatMember[];
   currentUserId: string | null;
+  /** Optional trust map; when present roster can group / badge. */
+  trustByUserId?: Map<string, ChatTrust>;
+  /** When true (public games), roster splits into Friends · You · Strangers. */
+  groupByTrust?: boolean;
   onOpenProfile?: (userId: string) => void;
 }) {
   if (membersLoading) {
@@ -125,41 +303,58 @@ function SquadMemberList({
       <p className="px-2 py-4 text-center text-xs text-slate-500">No members loaded yet.</p>
     );
   }
+
+  if (!groupByTrust || !trustByUserId) {
+    return (
+      <ul className="space-y-1">
+        {chatMembers.map((mem) => (
+          <SquadMemberRow
+            key={mem.user_id}
+            member={mem}
+            trust={trustByUserId?.get(mem.user_id)}
+            isYou={currentUserId != null && mem.user_id === currentUserId}
+            onOpenProfile={onOpenProfile}
+          />
+        ))}
+      </ul>
+    );
+  }
+
+  const groups: { key: string; label: string; rows: GameChatMember[] }[] = [
+    { key: "self_host", label: "You & host", rows: [] },
+    { key: "friends", label: "Friends", rows: [] },
+    { key: "strangers", label: "Strangers", rows: [] },
+  ];
+  for (const m of chatMembers) {
+    const t = trustByUserId.get(m.user_id) ?? "stranger";
+    if (t === "self" || t === "host") groups[0].rows.push(m);
+    else if (t === "friend" || t === "mutual") groups[1].rows.push(m);
+    else groups[2].rows.push(m);
+  }
+
   return (
-    <ul className="space-y-1">
-      {chatMembers.map((mem) => {
-        const isYou = currentUserId != null && mem.user_id === currentUserId;
-        const label = mem.display_name?.trim() || "Player";
-        return (
-          <li key={mem.user_id}>
-            <button
-              type="button"
-              onClick={() => onOpenProfile?.(mem.user_id)}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-              aria-label={`Open ${label}'s profile`}
-            >
-              <Avatar className="size-9 shrink-0 border border-white/10">
-                {mem.avatar_url?.trim() ? (
-                  <AvatarImage src={mem.avatar_url} alt="" className="object-cover" />
-                ) : null}
-                <AvatarFallback className="bg-slate-800 text-xs text-slate-200">
-                  {label.slice(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-100">
-                  {label}
-                  {isYou ? (
-                    <span className="ml-1.5 text-[10px] font-normal text-cyan-400/90">(you)</span>
-                  ) : null}
-                </p>
-                <p className="text-[10px] text-slate-500 capitalize">{mem.role}</p>
-              </div>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+    <div className="space-y-3">
+      {groups
+        .filter((g) => g.rows.length > 0)
+        .map((g) => (
+          <section key={g.key}>
+            <h4 className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              {g.label} · {g.rows.length}
+            </h4>
+            <ul className="space-y-1">
+              {g.rows.map((mem) => (
+                <SquadMemberRow
+                  key={mem.user_id}
+                  member={mem}
+                  trust={trustByUserId.get(mem.user_id)}
+                  isYou={currentUserId != null && mem.user_id === currentUserId}
+                  onOpenProfile={onOpenProfile}
+                />
+              ))}
+            </ul>
+          </section>
+        ))}
+    </div>
   );
 }
 
@@ -175,6 +370,7 @@ export function GameMessengerSheet({
   onLeaveThread,
   inboxBootstrap = null,
   dmInboxBootstrap = null,
+  onPlanRematch,
 }: GameMessengerSheetProps) {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"groups" | "direct">("groups");
@@ -554,7 +750,18 @@ export function GameMessengerSheet({
     focusThread?.kind === "game" ? inbox.find((r) => r.id === focusThread.gameId) : undefined;
   const threadStartsAt =
     focusThread?.kind === "game" ? focusThread.startsAt ?? inboxRow?.starts_at ?? null : null;
+  const threadEndsAt =
+    focusThread?.kind === "game" ? focusThread.endsAt ?? inboxRow?.ends_at ?? null : null;
+  const threadDurationMinutes =
+    focusThread?.kind === "game"
+      ? focusThread.durationMinutes ?? inboxRow?.duration_minutes ?? null
+      : null;
+  const threadStatus = focusThread?.kind === "game" ? inboxRow?.status ?? undefined : undefined;
   const threadCreatedAt = focusThread?.kind === "game" ? focusThread.createdAt ?? null : null;
+  const threadVisibility =
+    focusThread?.kind === "game" ? focusThread.visibility ?? inboxRow?.visibility ?? null : null;
+  const threadHostId =
+    focusThread?.kind === "game" ? focusThread.createdBy ?? inboxRow?.created_by ?? null : null;
   const participantTotal =
     focusThread?.kind === "game"
       ? Math.max(focusThread.participantCount ?? inboxRow?.participant_count ?? 0, chatMembers.length)
@@ -566,10 +773,63 @@ export function GameMessengerSheet({
     focusThread?.kind === "game"
       ? threadScheduleLines({
           startsAt: threadStartsAt,
+          endsAt: threadEndsAt,
+          durationMinutes: threadDurationMinutes,
           createdAt: threadCreatedAt,
+          status: threadStatus,
           nowMs: headerNow,
         })
-      : { timeLine: "", countdownLine: "" };
+      : { timeLine: "", countdownLine: "", ended: false };
+
+  // Resolve every visible chat member into a trust tier so we can badge / collapse / group.
+  const trustMembers = useMemo(
+    () =>
+      chatMembers.map((m) => ({
+        userId: m.user_id,
+        isHost: m.user_id === threadHostId,
+      })),
+    [chatMembers, threadHostId],
+  );
+  const trustByUserId = useChatTrust({
+    currentUserId,
+    hostUserId: threadHostId,
+    members: trustMembers,
+  });
+  const isPublicChat = threadVisibility === "public";
+
+  // Stranger messages start collapsed in public chats; tap to expand. Reset
+  // when switching threads so collapsed state never leaks across games.
+  const [revealedMessageIds, setRevealedMessageIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    setRevealedMessageIds(new Set());
+  }, [focusThread]);
+  const revealMessage = useCallback((id: string) => {
+    setRevealedMessageIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handlePlanRematch = () => {
+    if (!focusThread || focusThread.kind !== "game" || !onPlanRematch) return;
+    onPlanRematch({
+      fromGameId: focusThread.gameId,
+      fromTitle: focusThread.title || "Pickup game",
+      sport: focusThread.sport,
+      spotsNeeded: focusThread.spotsRemaining != null && focusThread.participantCount != null
+        ? focusThread.spotsRemaining + focusThread.participantCount
+        : inboxRow?.participant_count != null && inboxRow?.spots_remaining != null
+          ? inboxRow.participant_count + inboxRow.spots_remaining
+          : 4,
+      durationMinutes: threadDurationMinutes,
+      visibility: threadVisibility,
+      lat: focusThread.lat ?? inboxRow?.lat ?? null,
+      lng: focusThread.lng ?? inboxRow?.lng ?? null,
+      locationLabel: focusThread.locationLabel ?? inboxRow?.location_label ?? null,
+    });
+  };
 
   const rosterSummary =
     focusThread?.kind === "game"
@@ -786,14 +1046,30 @@ export function GameMessengerSheet({
                     </button>
                   ) : null}
                 </div>
-                <div className="space-y-0.5 text-left" aria-live="polite">
+                <div className="space-y-1 text-left" aria-live="polite">
                   {focusThread?.kind === "game" ? (
                     <>
                       <p className="text-xs text-slate-300 leading-snug">{schedule.timeLine}</p>
                       {schedule.countdownLine ? (
-                        <p className="text-xs font-medium text-cyan-400/95 tabular-nums">
+                        <p
+                          className={cn(
+                            "text-xs font-medium tabular-nums",
+                            schedule.ended ? "text-amber-300" : "text-cyan-400/95",
+                          )}
+                        >
                           {schedule.countdownLine}
                         </p>
+                      ) : null}
+                      {schedule.ended && onPlanRematch ? (
+                        <button
+                          type="button"
+                          onClick={handlePlanRematch}
+                          className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-cyan-400/45 bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold text-cyan-100 hover:bg-cyan-500/25 transition-colors"
+                          aria-label="Plan a rematch with the same crew"
+                        >
+                          <span aria-hidden>↻</span>
+                          Plan rematch
+                        </button>
                       ) : null}
                     </>
                   ) : (
@@ -838,20 +1114,13 @@ export function GameMessengerSheet({
                   Join a game on the map to unlock its chat. Your threads will show up here.
                 </p>
               ) : (
-                <ul
-                  className={cn(
-                    inboxExpanded
-                      ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"
-                      : "space-y-1.5",
-                  )}
-                >
-                  {inbox.map((row) => {
-                    // Read unread count from local store (tick forces re-render when it changes).
+                (() => {
+                  const partitions = partitionInboxByLifecycle(inbox, headerNow);
+                  const renderRow = (row: GameInboxRow, ended: boolean) => {
                     void unreadTick;
                     const unread = getUnreadCount(threadKey("game", row.id));
                     const badge = badgeText(unread);
                     const openThread = () => {
-                      // From expanded grid: open full-width thread (messages + members); compact list stays narrow.
                       setThreadExpanded(inboxExpanded);
                       onFocusThreadChange({
                         kind: "game",
@@ -859,8 +1128,16 @@ export function GameMessengerSheet({
                         title: row.title,
                         sport: row.sport,
                         startsAt: row.starts_at,
+                        endsAt: row.ends_at ?? null,
+                        durationMinutes: row.duration_minutes ?? null,
                         participantCount: row.participant_count,
                         spotsRemaining: row.spots_remaining,
+                        createdBy: row.created_by ?? null,
+                        visibility: row.visibility ?? null,
+                        inviteToken: row.invite_token ?? null,
+                        lat: row.lat ?? null,
+                        lng: row.lng ?? null,
+                        locationLabel: row.location_label ?? null,
                       });
                     };
                     return (
@@ -877,7 +1154,9 @@ export function GameMessengerSheet({
                           }}
                           className={cn(
                             "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
-                            "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
+                            ended
+                              ? "border-white/[0.05] bg-white/[0.015] hover:bg-white/[0.04] opacity-90"
+                              : "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
                             "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
                             "hover:border-cyan-300/20",
                             "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
@@ -889,8 +1168,15 @@ export function GameMessengerSheet({
                             </span>
                           ) : null}
                           <div className="flex justify-between gap-2 items-center">
-                            <span className="font-semibold text-slate-100 text-sm truncate min-w-0">
-                              {row.title}
+                            <span className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <span className="font-semibold text-slate-100 text-sm truncate">
+                                {row.title}
+                              </span>
+                              {ended ? (
+                                <span className="shrink-0 inline-flex items-center rounded-full border border-amber-400/40 bg-amber-500/15 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-amber-200">
+                                  Ended
+                                </span>
+                              ) : null}
                             </span>
                             <div className="flex items-center gap-1.5 shrink-0">
                               <button
@@ -915,25 +1201,28 @@ export function GameMessengerSheet({
                                   <Share2 className="size-3.5" aria-hidden />
                                 )}
                               </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onSelectGameOnMap?.(row.id);
-                                }}
-                                className="inline-flex size-7 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06] hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40"
-                                aria-label="View on map"
-                                title="View on map"
-                              >
-                                <MapPin className="size-3.5" aria-hidden />
-                              </button>
+                              {!ended && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSelectGameOnMap?.(row.id);
+                                  }}
+                                  className="inline-flex size-7 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06] hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40"
+                                  aria-label="View on map"
+                                  title="View on map"
+                                >
+                                  <MapPin className="size-3.5" aria-hidden />
+                                </button>
+                              )}
                               <span className="text-[10px] uppercase tracking-wide text-slate-500">
                                 {row.starts_at ? format(new Date(row.starts_at), "MMM d") : "—"}
                               </span>
                             </div>
                           </div>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            {row.sport} · {row.spots_remaining} spots left
+                            {row.sport}
+                            {!ended ? ` · ${row.spots_remaining} spots left` : ""}
                           </p>
                           <p className="text-xs text-slate-400 mt-1.5 line-clamp-2">
                             {row.last_message_body?.trim() ? row.last_message_body : "No messages yet — say hi!"}
@@ -946,8 +1235,31 @@ export function GameMessengerSheet({
                         </div>
                       </li>
                     );
-                  })}
-                </ul>
+                  };
+                  const listClass = inboxExpanded
+                    ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"
+                    : "space-y-1.5";
+                  return (
+                    <>
+                      <ul className={listClass}>
+                        {partitions.active.map((row) => renderRow(row, false))}
+                      </ul>
+                      {partitions.ended.length > 0 ? (
+                        <>
+                          <div className="mt-4 mb-2 flex items-center gap-2 px-1">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                              Past games · {partitions.ended.length}
+                            </span>
+                            <span className="h-px flex-1 bg-white/[0.06]" />
+                          </div>
+                          <ul className={listClass}>
+                            {partitions.ended.map((row) => renderRow(row, true))}
+                          </ul>
+                        </>
+                      ) : null}
+                    </>
+                  );
+                })()
               )
             ) : dmInboxLoading ? (
               <div className="flex justify-center py-12 text-slate-500">
@@ -1037,6 +1349,17 @@ export function GameMessengerSheet({
             )}
           >
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {focusThread?.kind === "game" ? (
+                <InviteAdminPanel
+                  gameId={focusThread.gameId}
+                  visibility={focusThread.visibility ?? inboxRow?.visibility ?? null}
+                  inviteToken={focusThread.inviteToken ?? inboxRow?.invite_token ?? null}
+                  isHost={
+                    currentUserId != null &&
+                    (focusThread.createdBy ?? inboxRow?.created_by ?? null) === currentUserId
+                  }
+                />
+              ) : null}
               <div className="relative flex-1 min-h-0">
                 <div
                   aria-hidden
@@ -1079,6 +1402,11 @@ export function GameMessengerSheet({
                     const mine = currentUserId != null && m.user_id === currentUserId;
                     const senderLabel = nameForUserId(m.user_id);
                     const senderAvatarUrl = avatarForUserId(m.user_id);
+                    const senderTrust = trustByUserId.get(m.user_id);
+                    const isStranger = !mine && senderTrust === "stranger";
+                    const collapsedByDefault = isPublicChat && isStranger;
+                    const revealed = revealedMessageIds.has(m.id);
+                    const showCollapsed = collapsedByDefault && !revealed;
                     return (
                       <div
                         key={m.id}
@@ -1089,7 +1417,9 @@ export function GameMessengerSheet({
                             "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
                             mine
                               ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
-                              : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
+                              : showCollapsed
+                                ? "bg-slate-800/40 text-slate-400 border-slate-700/60 rounded-bl-md"
+                                : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
                           )}
                         >
                           {!mine && (
@@ -1111,9 +1441,21 @@ export function GameMessengerSheet({
                               >
                                 {senderLabel}
                               </button>
+                              <TrustBadge trust={senderTrust} />
                             </div>
                           )}
-                          <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                          {showCollapsed ? (
+                            <button
+                              type="button"
+                              onClick={() => revealMessage(m.id)}
+                              className="text-left text-xs text-slate-300 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                              aria-label="Reveal message from a stranger"
+                            >
+                              Stranger sent a message — tap to read
+                            </button>
+                          ) : (
+                            <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                          )}
                           <p
                             className={cn(
                               "text-[10px] mt-1 opacity-70",
@@ -1185,6 +1527,8 @@ export function GameMessengerSheet({
                     membersLoading={membersLoading}
                     chatMembers={chatMembers}
                     currentUserId={currentUserId}
+                    trustByUserId={trustByUserId}
+                    groupByTrust={isPublicChat}
                     onOpenProfile={(uid) => navigate(`/athlete/${uid}`)}
                   />
                 </div>
@@ -1210,6 +1554,8 @@ export function GameMessengerSheet({
               membersLoading={membersLoading}
               chatMembers={chatMembers}
               currentUserId={currentUserId}
+              trustByUserId={trustByUserId}
+              groupByTrust={isPublicChat}
               onOpenProfile={(uid) => navigate(`/athlete/${uid}`)}
             />
           </div>
