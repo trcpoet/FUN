@@ -44,8 +44,8 @@ const L_GAME_CLUSTER_LABEL = "fun-games-cluster-label";
 /** Rasterized sport emoji only (`sport_map_icon` → addImage); no separate circle layer. */
 const L_GAME_ICON = "fun-games-sport-icon";
 const L_GAME_COUNT = "fun-games-roster";
-const L_NOTE_SOURCE = "fun-map-notes";
-const L_NOTE_DOTS = "fun-map-notes-dots";
+// Notes use DOM `mapboxgl.Marker` instances (pulsating Letter/Note icon),
+// managed via `noteMarkerEntriesRef` below — no GL source/layer.
 const L_VENUE_DOTS = "venue-dots-core";
 /** Dark bluish-purple halos (outer + inner gradient) — animated via rAF */
 const L_VENUE_DOTS_PULSE = "venue-dots-pulse";
@@ -213,6 +213,8 @@ export function MapboxMap(props: MapboxMapProps) {
   /** HTML markers for multiple games at the same coordinates (cluster pin). */
   const colocatedMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[]>([]);
   const randomGameMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[]>([]);
+  /** Pulsating note markers, keyed by note id (no React root — plain DOM). */
+  const noteMarkerEntriesRef = useRef<Map<string, { marker: import("mapbox-gl").Marker; root: HTMLButtonElement; dispose: () => void }>>(new Map());
   const userMarker2dRef = useRef<import("mapbox-gl").Marker | null>(null);
   const userMarker2dScaleElRef = useRef<HTMLDivElement | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -496,6 +498,12 @@ export function MapboxMap(props: MapboxMapProps) {
       gameLayersInitedRef.current = false;
       initialUserFlyDoneRef.current = false;
       setMapLoaded(false);
+      // Clear pulsating note markers before tearing down the map.
+      for (const entry of noteMarkerEntriesRef.current.values()) {
+        try { entry.dispose(); } catch (_) { /* noop */ }
+        try { entry.marker.remove(); } catch (_) { /* noop */ }
+      }
+      noteMarkerEntriesRef.current.clear();
       const m = mapRef.current;
       if (m) {
         try {
@@ -1080,24 +1088,7 @@ export function MapboxMap(props: MapboxMapProps) {
       },
     });
 
-    // Notes: lightweight non-clustered dots (cyan glow).
-    map.addSource(L_NOTE_SOURCE, {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: [] },
-    });
-
-    map.addLayer({
-      id: L_NOTE_DOTS,
-      type: "circle",
-      source: L_NOTE_SOURCE,
-      paint: {
-        "circle-color": "rgba(34, 211, 238, 0.35)",
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 4, 14, 7, 18, 10],
-        "circle-stroke-width": 1.5,
-        "circle-stroke-color": "rgba(34, 211, 238, 0.55)",
-        "circle-blur": 0.2,
-      },
-    });
+    // Notes are drawn as DOM markers in a separate effect (pulsating icon).
 
     const openPopupForGame = (game: GameRow, mapPoint: { x: number; y: number }) => {
       gameInteractionTsRef.current = Date.now();
@@ -1133,25 +1124,10 @@ export function MapboxMap(props: MapboxMapProps) {
 
     map.on("click", L_GAME_ICON, openGameFromFeature);
 
-    map.on("click", L_NOTE_DOTS, (e) => {
-      const f = e.features?.[0];
-      const nid = f?.properties?.id as string | undefined;
-      if (!nid) return;
-      const note = notesRef.current.find((n) => n.id === nid);
-      if (note) onOpenNoteThread?.(note);
-    });
-
     map.on("mouseenter", L_GAME_CLUSTERS, () => {
       map.getCanvas().style.cursor = "pointer";
     });
     map.on("mouseleave", L_GAME_CLUSTERS, () => {
-      map.getCanvas().style.cursor = "";
-    });
-
-    map.on("mouseenter", L_NOTE_DOTS, () => {
-      map.getCanvas().style.cursor = "pointer";
-    });
-    map.on("mouseleave", L_NOTE_DOTS, () => {
       map.getCanvas().style.cursor = "";
     });
 
@@ -1213,19 +1189,74 @@ export function MapboxMap(props: MapboxMapProps) {
     applyMapLayerVisibility();
   }, [mapLoaded, games, selectedGameId, mapMinuteEpoch, applyMapLayerVisibility]);
 
-  /** Push note GeoJSON into the notes source. */
+  /**
+   * Render notes as pulsating DOM markers (Letter/Note icon).
+   * One `mapboxgl.Marker` per note, diffed by id across renders.
+   */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-    const src = map.getSource(L_NOTE_SOURCE) as import("mapbox-gl").GeoJSONSource | undefined;
-    if (!src) return;
-    const features = notes.map((n) => ({
-      type: "Feature" as const,
-      geometry: { type: "Point" as const, coordinates: [n.lng, n.lat] as [number, number] },
-      properties: { id: n.id, visibility: n.visibility, comment_count: n.comment_count ?? null },
-    }));
-    src.setData({ type: "FeatureCollection", features });
-  }, [mapLoaded, notes]);
+
+    let cancelled = false;
+    void loadMapboxGl().then((mapboxgl) => {
+      if (cancelled || mapRef.current !== map) return;
+      const Marker = mapboxgl.default.Marker;
+
+      const existing = noteMarkerEntriesRef.current;
+      const nextById = new Map<string, MapNoteRow>(notes.map((n) => [n.id, n]));
+
+      // Drop markers whose notes are no longer present.
+      for (const [id, entry] of existing) {
+        if (!nextById.has(id)) {
+          try { entry.marker.remove(); } catch (_) { /* noop */ }
+          existing.delete(id);
+        }
+      }
+
+      // Add or update markers for current notes.
+      for (const note of notes) {
+        const prev = existing.get(note.id);
+        if (prev) {
+          // Reposition (lat/lng can change if note is updated server-side).
+          try { prev.marker.setLngLat([note.lng, note.lat]); } catch (_) { /* noop */ }
+          continue;
+        }
+
+        const root = document.createElement("button");
+        root.type = "button";
+        root.className = "fun-note-marker";
+        root.setAttribute("aria-label", "Open map note");
+        root.innerHTML =
+          '<span class="pulse-ring" aria-hidden="true"></span>' +
+          '<span class="pulse-ring delay" aria-hidden="true"></span>' +
+          '<span class="icon-chip" aria-hidden="true">' +
+          // Lucide "StickyNote" path (24x24).
+          '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2z"/>' +
+          '<path d="M16 3v4a2 2 0 0 0 2 2h4"/>' +
+          '</svg>' +
+          '</span>';
+
+        const handlePress = (ev: Event) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const live = notesRef.current.find((n) => n.id === note.id) ?? note;
+          onOpenNoteThread?.(live);
+        };
+        root.addEventListener("click", handlePress);
+
+        const marker = new Marker({ element: root, anchor: "center" })
+          .setLngLat([note.lng, note.lat])
+          .addTo(map);
+
+        existing.set(note.id, { marker, root, dispose: () => root.removeEventListener("click", handlePress) });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mapLoaded, notes, onOpenNoteThread]);
 
   /** Same-coordinate games: single HTML cluster pin (avoids overlapping GL sport icons). */
   useEffect(() => {

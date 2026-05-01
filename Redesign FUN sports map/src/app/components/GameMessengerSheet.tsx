@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { format } from "date-fns";
-import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Send, Share2, Users } from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
+import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Send, Share2, StickyNote, Users } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
   Sheet,
@@ -24,6 +24,9 @@ import type {
   GameMessageRow,
   GameRow,
   GameVisibility,
+  MapNoteCommentRow,
+  MapNoteVisibility,
+  NoteInboxRow,
 } from "../../lib/supabase";
 import {
   fetchGameChatMembers,
@@ -41,7 +44,14 @@ import {
   getGameEndsAtMs,
   isGameEnded,
 } from "../../lib/mapGameTimer";
-import { getGameLatLng } from "../../lib/api";
+import {
+  addNoteComment,
+  fetchMyNoteInbox,
+  fetchNoteById,
+  fetchNoteComments,
+  getGameLatLng,
+  subscribeNoteComments,
+} from "../../lib/api";
 import { InviteAdminPanel } from "./chat/InviteAdminPanel";
 import { useChatTrust, type ChatTrust, trustBadgeLabel } from "../../hooks/useChatTrust";
 
@@ -79,7 +89,21 @@ export type DmThreadFocus = {
   avatarUrl: string | null;
 };
 
-export type MessengerThreadFocus = GameThreadFocus | DmThreadFocus;
+export type NoteThreadFocus = {
+  kind: "note";
+  noteId: string;
+  /** Hydrated post body (lazy-loaded if missing). */
+  body?: string | null;
+  visibility?: MapNoteVisibility | null;
+  createdAt?: string | null;
+  createdBy?: string | null;
+  placeName?: string | null;
+  /** For "View on map" deep-link without a re-fetch. */
+  lat?: number | null;
+  lng?: number | null;
+};
+
+export type MessengerThreadFocus = GameThreadFocus | DmThreadFocus | NoteThreadFocus;
 
 export type PlanRematchPayload = {
   fromGameId: string;
@@ -373,7 +397,7 @@ export function GameMessengerSheet({
   onPlanRematch,
 }: GameMessengerSheetProps) {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"groups" | "direct">("groups");
+  const [mode, setMode] = useState<"groups" | "direct" | "notes">("groups");
   const [inbox, setInbox] = useState<GameInboxRow[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [messages, setMessages] = useState<GameMessageRow[]>([]);
@@ -382,6 +406,22 @@ export function GameMessengerSheet({
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
   const [dmMessages, setDmMessages] = useState<DmMessageRow[]>([]);
   const [dmMessagesLoading, setDmMessagesLoading] = useState(false);
+  // Map-notes Inbox + per-note thread state.
+  const [noteInbox, setNoteInbox] = useState<NoteInboxRow[]>([]);
+  const [noteInboxLoading, setNoteInboxLoading] = useState(false);
+  const [noteComments, setNoteComments] = useState<MapNoteCommentRow[]>([]);
+  const [noteCommentsLoading, setNoteCommentsLoading] = useState(false);
+  /** Hydrated note details for the currently focused note thread. */
+  const [activeNote, setActiveNote] = useState<{
+    id: string;
+    body: string;
+    visibility: MapNoteVisibility;
+    created_at: string;
+    created_by: string | null;
+    place_name: string | null;
+    lat: number | null;
+    lng: number | null;
+  } | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -418,20 +458,26 @@ export function GameMessengerSheet({
   const bumpUnreadTick = useCallback(() => setUnreadTick((n) => n + 1), []);
 
   const handleOpenThreadLocation = useCallback(async () => {
-    if (!focusThread || focusThread.kind !== "game") return;
+    if (!focusThread) return;
     setOpeningLocation(true);
     try {
-      if (onSelectGameOnMap) {
-        navigate("/");
-        requestAnimationFrame(() => onSelectGameOnMap(focusThread.gameId));
+      if (focusThread.kind === "game") {
+        if (onSelectGameOnMap) {
+          navigate("/");
+          requestAnimationFrame(() => onSelectGameOnMap(focusThread.gameId));
+          onOpenChange(false);
+          return;
+        }
+        const coords = await getGameLatLng(focusThread.gameId);
+        const urlLine = coords
+          ? `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`
+          : "";
+        if (urlLine) window.open(urlLine, "_blank", "noopener,noreferrer");
+      } else if (focusThread.kind === "note") {
+        // Use the deep-link the App.tsx focusNoteId effect already understands.
+        navigate(`/?focusNoteId=${encodeURIComponent(focusThread.noteId)}`);
         onOpenChange(false);
-        return;
       }
-      const coords = await getGameLatLng(focusThread.gameId);
-      const urlLine = coords
-        ? `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`
-        : "";
-      if (urlLine) window.open(urlLine, "_blank", "noopener,noreferrer");
     } finally {
       setOpeningLocation(false);
     }
@@ -535,11 +581,37 @@ export function GameMessengerSheet({
     loadDmInbox();
   }, [open, focusThread, mode, loadDmInbox, dmInboxBootstrap]);
 
+  const loadNoteInbox = useCallback(() => {
+    setNoteInboxLoading(true);
+    void fetchMyNoteInbox().then(({ data, error }) => {
+      setNoteInboxLoading(false);
+      if (error) {
+        console.warn("[FUN] note inbox", error);
+        setNoteInbox([]);
+        return;
+      }
+      const rows = (data ?? []).slice().sort((a, b) => {
+        const ta = Date.parse(a.last_comment_at ?? a.created_at ?? "") || 0;
+        const tb = Date.parse(b.last_comment_at ?? b.created_at ?? "") || 0;
+        return tb - ta;
+      });
+      setNoteInbox(rows);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    if (focusThread) return;
+    if (mode !== "notes") return;
+    loadNoteInbox();
+  }, [open, focusThread, mode, loadNoteInbox]);
+
   useEffect(() => {
     if (!open) return;
     if (!focusThread) return;
     if (focusThread.kind === "dm") setMode("direct");
     if (focusThread.kind === "game") setMode("groups");
+    if (focusThread.kind === "note") setMode("notes");
   }, [open, focusThread]);
 
   useEffect(() => {
@@ -609,6 +681,87 @@ export function GameMessengerSheet({
     };
   }, [open, focusThread]);
 
+  // Note threads: hydrate the post + comments + realtime fan-out for new comments.
+  useEffect(() => {
+    if (!open || !focusThread || focusThread.kind !== "note") {
+      setNoteComments([]);
+      setActiveNote(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    // Use the inbox row first if we have it; otherwise fetch by id.
+    const inboxRow = noteInbox.find((r) => r.id === focusThread.noteId);
+    const seed: typeof activeNote = inboxRow
+      ? {
+          id: inboxRow.id,
+          body: inboxRow.body,
+          visibility: inboxRow.visibility,
+          created_at: inboxRow.created_at,
+          created_by: inboxRow.created_by,
+          place_name: inboxRow.place_name,
+          lat: inboxRow.lat,
+          lng: inboxRow.lng,
+        }
+      : focusThread.body
+        ? {
+            id: focusThread.noteId,
+            body: focusThread.body,
+            visibility: (focusThread.visibility ?? "public") as MapNoteVisibility,
+            created_at: focusThread.createdAt ?? new Date().toISOString(),
+            created_by: focusThread.createdBy ?? null,
+            place_name: focusThread.placeName ?? null,
+            lat: focusThread.lat ?? null,
+            lng: focusThread.lng ?? null,
+          }
+        : null;
+    setActiveNote(seed);
+
+    if (!seed) {
+      // Need to fetch the note itself.
+      void fetchNoteById(focusThread.noteId).then(({ data }) => {
+        if (cancelled || !data) return;
+        setActiveNote({
+          id: data.id,
+          body: data.body,
+          visibility: data.visibility,
+          created_at: data.created_at,
+          created_by: data.created_by,
+          place_name: data.place_name,
+          lat: data.lat,
+          lng: data.lng,
+        });
+      });
+    }
+
+    setNoteCommentsLoading(true);
+    void fetchNoteComments(focusThread.noteId).then(({ data, error }) => {
+      if (cancelled) return;
+      setNoteCommentsLoading(false);
+      if (error) {
+        console.warn("[FUN] note comments", error);
+        setNoteComments([]);
+        return;
+      }
+      setNoteComments(data ?? []);
+    });
+
+    const unsub = subscribeNoteComments(focusThread.noteId, (row) => {
+      setNoteComments((prev) => {
+        if (prev.some((c) => c.id === row.id)) return prev;
+        return [...prev, row];
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+    // `noteInbox` intentionally excluded — we only seed once per focus change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, focusThread]);
+
   // While the sheet is open, listen for new messages in other threads to keep unread badges live.
   useEffect(() => {
     if (!open) return;
@@ -644,15 +797,28 @@ export function GameMessengerSheet({
       unsubs.push(unsubscribe);
     }
 
+    // Notes: subscribe to inbox rows so unread bumps when someone replies.
+    const noteIds = noteInbox.slice(0, 25).map((r) => r.id);
+    for (const nid of noteIds) {
+      if (focusThread?.kind === "note" && focusThread.noteId === nid) continue;
+      const unsub = subscribeNoteComments(nid, () => {
+        const isActive = focusThread?.kind === "note" && focusThread.noteId === nid;
+        if (isActive) return;
+        incrementUnread(threadKey("note", nid), 1);
+        bumpUnreadTick();
+      });
+      unsubs.push(unsub);
+    }
+
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [open, inbox, dmInbox, focusThread, bumpUnreadTick]);
+  }, [open, inbox, dmInbox, noteInbox, focusThread, bumpUnreadTick]);
 
   useEffect(() => {
     if (!open || !focusThread) return;
     listEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, dmMessages, open, focusThread]);
+  }, [messages, dmMessages, noteComments, open, focusThread]);
 
   useEffect(() => {
     if (!focusThread) setThreadExpanded(false);
@@ -717,6 +883,18 @@ export function GameMessengerSheet({
         setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
       }
       loadInbox();
+    } else if (focusThread.kind === "note") {
+      const { data: sent, error } = await addNoteComment({ noteId: focusThread.noteId, body: draft });
+      setSending(false);
+      if (error) {
+        setSendError(error.message);
+        return;
+      }
+      setDraft("");
+      if (sent) {
+        setNoteComments((prev) => (prev.some((c) => c.id === sent.id) ? prev : [...prev, sent]));
+      }
+      loadNoteInbox();
     } else {
       const { data: sent, error } = await sendDmMessage(focusThread.threadId, draft);
       setSending(false);
@@ -844,6 +1022,9 @@ export function GameMessengerSheet({
     if (focusThread.kind === "game") {
       clearUnread(threadKey("game", focusThread.gameId));
       bumpUnreadTick();
+    } else if (focusThread.kind === "note") {
+      clearUnread(threadKey("note", focusThread.noteId));
+      bumpUnreadTick();
     } else {
       clearUnread(threadKey("dm", focusThread.threadId));
       bumpUnreadTick();
@@ -877,14 +1058,20 @@ export function GameMessengerSheet({
               <div className="min-w-0 flex-1 flex items-start gap-2">
                 <div className="min-w-0 flex-1">
                   <SheetTitle className="text-left text-base text-white truncate">
-                    {mode === "groups" ? "Group chats" : "Direct messages"}
+                    {mode === "groups"
+                      ? "Group chats"
+                      : mode === "notes"
+                        ? "Map notes"
+                        : "Direct messages"}
                   </SheetTitle>
                   <SheetDescription className="text-left text-xs text-slate-500">
                     {mode === "groups"
                       ? inboxExpanded
                         ? "All your groups — tap a card to open the thread."
                         : "Pickups you joined — one thread per game."
-                      : "1:1 conversations — open a profile and tap Message to start."}
+                      : mode === "notes"
+                        ? "Notes you dropped or replied to — comments live here."
+                        : "1:1 conversations — open a profile and tap Message to start."}
                   </SheetDescription>
                   <div className="mt-2 flex items-center gap-2">
                     <button
@@ -910,6 +1097,20 @@ export function GameMessengerSheet({
                       )}
                     >
                       Direct
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMode("notes")}
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors inline-flex items-center gap-1",
+                        mode === "notes"
+                          ? "border-cyan-300/50 bg-cyan-400/15 text-cyan-100"
+                          : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]",
+                      )}
+                      aria-label="Notes — your map note conversations"
+                    >
+                      <StickyNote className="size-3" />
+                      Notes
                     </button>
                   </div>
                 </div>
@@ -943,7 +1144,8 @@ export function GameMessengerSheet({
                     onFocusThreadChange(null);
                     setThreadExpanded(false);
                     if (mode === "groups") loadInbox();
-                    else loadDmInbox();
+                    else if (mode === "direct") loadDmInbox();
+                    else if (mode === "notes") loadNoteInbox();
                   }}
                   className="p-2 rounded-full hover:bg-white/10 text-slate-300 -ml-2 shrink-0"
                   aria-label="Back to conversations"
@@ -1007,6 +1209,21 @@ export function GameMessengerSheet({
                       )}
                     </button>
                   </>
+                ) : focusThread?.kind === "note" ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleOpenThreadLocation()}
+                    disabled={openingLocation}
+                    className="p-2 rounded-full hover:bg-white/10 text-slate-300 shrink-0 disabled:opacity-50 disabled:pointer-events-none"
+                    aria-label="View note on map"
+                    title="View on map"
+                  >
+                    {openingLocation ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <MapPin className="w-5 h-5" />
+                    )}
+                  </button>
                 ) : null}
                 {focusThread?.kind === "game" && onLeaveThread && (
                   <button
@@ -1032,7 +1249,9 @@ export function GameMessengerSheet({
                       ? focusThread.title || "Game chat"
                       : focusThread?.kind === "dm"
                         ? focusThread.displayName?.trim() || "Direct message"
-                        : "Message"}
+                        : focusThread?.kind === "note"
+                          ? "Map note"
+                          : "Message"}
                   </SheetTitle>
                   {focusThread?.kind === "game" ? (
                     <button
@@ -1072,6 +1291,18 @@ export function GameMessengerSheet({
                         </button>
                       ) : null}
                     </>
+                  ) : focusThread?.kind === "note" ? (
+                    <p className="text-xs text-slate-300 leading-snug">
+                      {(activeNote?.place_name ?? focusThread.placeName)?.trim()
+                        ? activeNote?.place_name ?? focusThread.placeName
+                        : "Pinned to this location"}
+                      {activeNote?.created_at || focusThread.createdAt
+                        ? ` · ${formatDistanceToNow(
+                            new Date(activeNote?.created_at ?? focusThread.createdAt ?? Date.now()),
+                            { addSuffix: true },
+                          )}`
+                        : ""}
+                    </p>
                   ) : (
                     <p className="text-xs text-slate-500 leading-snug">Direct messages</p>
                   )}
@@ -1081,6 +1312,16 @@ export function GameMessengerSheet({
                         {focusThread.sport}
                         {rosterSummary ? ` · ${rosterSummary}` : ""}
                       </>
+                    ) : focusThread?.kind === "note" ? (
+                      <>
+                        {(activeNote?.visibility ?? focusThread.visibility) === "friends"
+                          ? "Friends only"
+                          : (activeNote?.visibility ?? focusThread.visibility) === "private"
+                            ? "Private"
+                            : "Public"}
+                        {" · "}
+                        {noteComments.length} {noteComments.length === 1 ? "comment" : "comments"}
+                      </>
                     ) : null}
                   </p>
                 </div>
@@ -1089,7 +1330,9 @@ export function GameMessengerSheet({
                     ? `${focusThread.title}. ${schedule.timeLine}. ${schedule.countdownLine || ""}. ${rosterSummary || ""}`
                     : focusThread?.kind === "dm"
                       ? `Direct messages with ${focusThread.displayName?.trim() || "Player"}`
-                      : ""}
+                      : focusThread?.kind === "note"
+                        ? `Map note · ${noteComments.length} comments`
+                        : ""}
                 </SheetDescription>
               </div>
             </div>
@@ -1261,6 +1504,116 @@ export function GameMessengerSheet({
                   );
                 })()
               )
+            ) : mode === "notes" ? (
+              noteInboxLoading ? (
+                <div className="flex justify-center py-12 text-slate-500">
+                  <Loader2 className="w-8 h-8 animate-spin opacity-60" />
+                </div>
+              ) : noteInbox.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center px-4 py-10 leading-relaxed">
+                  Drop a note on the map and your conversation will land here.
+                </p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {noteInbox.map((row) => {
+                    void unreadTick;
+                    const unread = getUnreadCount(threadKey("note", row.id));
+                    const badge = badgeText(unread);
+                    const visLabel =
+                      row.visibility === "friends"
+                        ? "Friends"
+                        : row.visibility === "private"
+                          ? "Private"
+                          : "Public";
+                    const openThread = () => {
+                      setThreadExpanded(false);
+                      onFocusThreadChange({
+                        kind: "note",
+                        noteId: row.id,
+                        body: row.body,
+                        visibility: row.visibility,
+                        createdAt: row.created_at,
+                        createdBy: row.created_by,
+                        placeName: row.place_name,
+                        lat: row.lat,
+                        lng: row.lng,
+                      });
+                    };
+                    const lastLine = row.last_comment_body?.trim()
+                      ? row.last_comment_body
+                      : row.body?.trim()
+                        ? row.body
+                        : "Pinned to this location";
+                    return (
+                      <li key={row.id}>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={openThread}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openThread();
+                            }
+                          }}
+                          className={cn(
+                            "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
+                            "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
+                            "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
+                            "hover:border-cyan-300/20",
+                            "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
+                          )}
+                        >
+                          {badge ? (
+                            <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums text-white shadow ring-2 ring-[#0b1020]">
+                              {badge}
+                            </span>
+                          ) : null}
+                          <div className="flex items-start gap-3">
+                            <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-300">
+                              <StickyNote className="size-4" aria-hidden />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold text-slate-100 text-sm truncate min-w-0">
+                                  {row.is_author ? "Your note" : "Note"}
+                                </span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-wider text-slate-300">
+                                    {visLabel}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigate(`/?focusNoteId=${encodeURIComponent(row.id)}`);
+                                      onOpenChange(false);
+                                    }}
+                                    className="inline-flex size-7 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06] hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40"
+                                    aria-label="View note on map"
+                                    title="View on map"
+                                  >
+                                    <MapPin className="size-3.5" aria-hidden />
+                                  </button>
+                                </div>
+                              </div>
+                              <p className="text-xs text-slate-400 mt-1 line-clamp-2">{lastLine}</p>
+                              <p className="text-[10px] text-slate-600 mt-1">
+                                {row.comment_count} {row.comment_count === 1 ? "comment" : "comments"}
+                                {row.last_comment_at
+                                  ? ` · ${formatDistanceToNow(new Date(row.last_comment_at), { addSuffix: true })}`
+                                  : row.created_at
+                                    ? ` · ${formatDistanceToNow(new Date(row.created_at), { addSuffix: true })}`
+                                    : ""}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )
             ) : dmInboxLoading ? (
               <div className="flex justify-center py-12 text-slate-500">
                 <Loader2 className="w-8 h-8 animate-spin opacity-60" />
@@ -1393,6 +1746,65 @@ export function GameMessengerSheet({
                       );
                     })
                   )
+                ) : focusThread?.kind === "note" ? (
+                  <>
+                    {/* Pinned post bubble — the note body itself. */}
+                    {(activeNote?.body ?? focusThread.body)?.trim() ? (
+                      <div className="flex justify-start">
+                        <div className="max-w-[92%] rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.07] px-3 py-2 shadow-[0_10px_26px_rgba(0,0,0,0.25)]">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-300/80 mb-1">
+                            Note
+                          </p>
+                          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-100">
+                            {activeNote?.body ?? focusThread.body}
+                          </p>
+                          <p className="text-[10px] mt-1 text-slate-500">
+                            {(activeNote?.created_at ?? focusThread.createdAt)
+                              ? format(
+                                  new Date(activeNote?.created_at ?? focusThread.createdAt!),
+                                  "MMM d · h:mm a",
+                                )
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {noteCommentsLoading ? (
+                      <div className="flex justify-center py-8 text-slate-500">
+                        <Loader2 className="w-6 h-6 animate-spin opacity-60" />
+                      </div>
+                    ) : noteComments.length === 0 ? (
+                      <p className="text-xs text-slate-500 text-center py-6">
+                        Be the first to reply.
+                      </p>
+                    ) : (
+                      noteComments.map((c) => {
+                        const mine = currentUserId != null && c.user_id === currentUserId;
+                        return (
+                          <div key={c.id} className={cn("flex", mine ? "justify-end" : "justify-start")}>
+                            <div
+                              className={cn(
+                                "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
+                                mine
+                                  ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
+                                  : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
+                              )}
+                            >
+                              <p className="whitespace-pre-wrap break-words">{c.body}</p>
+                              <p
+                                className={cn(
+                                  "text-[10px] mt-1 opacity-70",
+                                  mine ? "text-violet-50/90" : "text-slate-400/80",
+                                )}
+                              >
+                                {format(new Date(c.created_at), "h:mm a")}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </>
                 ) : messagesLoading ? (
                   <div className="flex justify-center py-12 text-slate-500">
                     <Loader2 className="w-8 h-8 animate-spin opacity-60" />
@@ -1487,7 +1899,13 @@ export function GameMessengerSheet({
                         if (!sending && draft.trim()) void handleSend();
                       }
                     }}
-                    placeholder="Message the squad…"
+                    placeholder={
+                      focusThread?.kind === "note"
+                        ? "Write a reply…"
+                        : focusThread?.kind === "dm"
+                          ? "Send a message…"
+                          : "Message the squad…"
+                    }
                     rows={2}
                     className="flex-1 resize-none rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
                   />

@@ -146,6 +146,14 @@ export async function addNoteComment(params: {
   return { data: (data as MapNoteCommentRow) ?? null, error: error ? new Error(error.message) : null };
 }
 
+// Map-notes inbox + realtime live in `./mapNotes.ts`. Re-export here so the
+// rest of the app keeps importing data helpers from the centralized API layer.
+export {
+  fetchMyNoteInbox,
+  fetchNoteById,
+  subscribeNoteComments,
+} from "./mapNotes";
+
 export type UnifiedFeedItem =
   | {
       kind: "note";

@@ -121,6 +121,22 @@ export type MapNoteCommentRow = {
   body: string;
 };
 
+/** Row shape returned by the `get_my_note_inbox` RPC (notes I created or commented on). */
+export type NoteInboxRow = {
+  id: string;
+  body: string;
+  visibility: MapNoteVisibility;
+  created_at: string;
+  created_by: string;
+  lat: number;
+  lng: number;
+  place_name: string | null;
+  comment_count: number;
+  last_comment_body: string | null;
+  last_comment_at: string | null;
+  is_author: boolean;
+};
+
 export type ProfileNearbyRow = {
   profile_id: string;
   display_name: string | null;

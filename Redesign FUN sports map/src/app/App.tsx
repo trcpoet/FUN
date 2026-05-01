@@ -187,6 +187,24 @@ export default function App() {
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
   }, [games, location.pathname, location.search, navigate]);
 
+  // Deep link from Feed / messenger → map note focus (centers + opens dialog).
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const nid = params.get("focusNoteId");
+    if (!nid) return;
+    const note = mapNotes.find((n) => n.id === nid);
+    if (!note) {
+      // Note not in current radius cache yet — kick off a refetch and wait
+      // for the next tick to find it (the param stays in the URL until then).
+      void refetchNotes();
+      return;
+    }
+    handleCenterOnCoords({ lat: note.lat, lng: note.lng });
+    setActiveMapNote(note);
+    params.delete("focusNoteId");
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
+  }, [mapNotes, location.pathname, location.search, navigate, refetchNotes]);
+
   // Sync user location to DB so avatar shows up on map
   useEffect(() => {
     if (!supabase || !userCoords) return;

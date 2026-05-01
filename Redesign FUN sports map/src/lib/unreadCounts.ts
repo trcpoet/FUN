@@ -40,7 +40,7 @@ export function getTotalUnreadCount(): number {
 
 export { UNREAD_UPDATED_EVENT };
 
-export function threadKey(kind: "game" | "dm", id: string): string {
+export function threadKey(kind: "game" | "dm" | "note", id: string): string {
   return `${kind}:${id}`;
 }
 

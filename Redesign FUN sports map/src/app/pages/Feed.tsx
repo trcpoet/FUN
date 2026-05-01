@@ -26,7 +26,6 @@ import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import { fetchUnifiedFeed, type UnifiedFeedItem } from "../../lib/api";
 import { GameFeedCard, NoteFeedCard, StatusFeedCard } from "../components/feed/UnifiedFeedCards";
-import { NoteThreadDialog } from "../components/feed/NoteThreadDialog";
 
 function notificationLabel(n: { type: string; payload?: unknown }): string {
   if (n.type === "badge_earned") {
@@ -80,7 +79,6 @@ export default function Feed() {
   const [statuses, setStatuses] = useState<StatusRow[]>([]);
   const [unified, setUnified] = useState<UnifiedFeedItem[]>([]);
   const [unifiedLoading, setUnifiedLoading] = useState(false);
-  const [activeNote, setActiveNote] = useState<Extract<UnifiedFeedItem, { kind: "note" }> | null>(null);
 
   useEffect(() => {
     const qs = new URLSearchParams(location.search);
@@ -231,21 +229,6 @@ export default function Feed() {
       </header>
 
       <main className="relative mx-auto w-full max-w-3xl px-4 py-8 pb-32">
-        {activeNote ? (
-          <NoteThreadDialog
-            open={true}
-            onOpenChange={(o) => {
-              if (!o) setActiveNote(null);
-            }}
-            note={{
-              id: activeNote.id,
-              body: activeNote.body,
-              created_at: activeNote.created_at,
-              visibility: activeNote.visibility,
-              place_name: null,
-            }}
-          />
-        ) : null}
         {tab === "discovery" && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Statuses Strip */}
@@ -374,7 +357,10 @@ export default function Feed() {
                   {unified.map((it) => (
                     <li key={`${it.kind}:${it.id}`}>
                       {it.kind === "note" ? (
-                        <NoteFeedCard item={it} onOpen={() => setActiveNote(it)} />
+                        <NoteFeedCard
+                          item={it}
+                          onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
+                        />
                       ) : it.kind === "game" ? (
                         <GameFeedCard
                           item={it}

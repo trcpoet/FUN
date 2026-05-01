@@ -126,3 +126,62 @@ button.header-map-btn:active {
     animation: none;
   }
 }
+
+/* Map notes: pulsating Letter/Note icon (replaces cyan dot circle layer) */
+@keyframes fun-note-marker-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50%      { transform: scale(1.65); opacity: 0; }
+}
+@keyframes fun-note-marker-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-1.5px); }
+}
+.fun-note-marker {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.fun-note-marker .pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  border: 1.5px solid rgba(34, 211, 238, 0.6);
+  background: rgba(34, 211, 238, 0.16);
+  animation: fun-note-marker-pulse 2s ease-out infinite;
+  pointer-events: none;
+}
+.fun-note-marker .pulse-ring.delay {
+  animation-delay: 1s;
+}
+.fun-note-marker .icon-chip {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(16, 185, 129, 0.18));
+  border: 1px solid rgba(34, 211, 238, 0.55);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.25),
+    0 6px 18px rgba(8, 47, 73, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #ecfeff;
+  animation: fun-note-marker-bob 2.6s ease-in-out infinite;
+  transition: transform 0.18s ease;
+}
+.fun-note-marker:hover .icon-chip {
+  transform: scale(1.08);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fun-note-marker .pulse-ring,
+  .fun-note-marker .icon-chip {
+    animation: none;
+  }
+}
