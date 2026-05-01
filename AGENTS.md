@@ -163,13 +163,13 @@ tests/           — Test suite
 <claude-mem-context>
 # Memory Context
 
-# [FUN] recent context, 2026-04-19 6:56pm CDT
+# [FUN] recent context, 2026-05-01 5:55am CDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 10 obs (2,734t read) | 26,717t work | 90% savings
+Stats: 35 obs (12,164t read) | 411,952t work | 97% savings
 
 ### Apr 19, 2026
 57 8:04a 🔵 git add . Hanging in Shell Background Process
@@ -182,6 +182,33 @@ Stats: 10 obs (2,734t read) | 26,717t work | 90% savings
 70 " 🔴 Remote Git Tree Successfully Reconstructed Locally by Fetching Blobs via curl
 72 " 🔴 Synthetic Local Commit Created Matching Remote GitHub Commit Metadata
 74 8:07a 🔵 Commit Message Newline Affects git commit-tree SHA
+77 6:56p 🔵 claudevm.bundle and OptGuideOnDeviceModel Identified as macOS AI/VM System Files
+78 " 🔵 claudevm.bundle Contains Linux VM Rootfs and Persistent Session Data
+79 6:58p ✅ Conservative Disk Cleanup Executed — ~2.8GB Caches Deleted, VS Code Installer Trashed
+81 7:01p 🔵 Visual Studio Code Not Installed — Only Installer Was Present, Now Trashed
+### Apr 20, 2026
+99 10:50p ⚖️ WordPress Coalition Test — Local Dev Plan Established
+100 " 🔵 Local Dev Stack Audit — PHP/MySQL/WP-CLI Missing, Apache and Homebrew Present
+102 " 🔵 macOS System Apache Config State — VHosts Disabled, No PHP Module, No Local Dev Tools
+105 10:51p 🔵 Coalition Test Assets Located at /Users/tahsinchowdhury/Desktop/Interview Tests/Coalition-test
+107 10:53p 🔵 WordPress Setup Blockers Confirmed — No Assets, No sudo, No hosts Entry
+108 " ✅ Homebrew Install Started — PHP 8.5.5, MariaDB 12.2.2, WP-CLI 2.12.0
+109 10:55p ✅ PHP 8.5.5, MariaDB 12.2.2, and WP-CLI 2.12.0 Successfully Installed via Homebrew
+110 " 🔵 Task Asset Download Link Expired — Reference Implementation Cloned from GitHub Instead
+114 10:56p 🔵 MariaDB Running — OS Username Works Passwordless, root Access Denied
+116 10:58p 🔴 WP-CLI `wp core download` OOM — Workaround via curl+tar, WordPress 6.9.4 Extracted
+117 " 🔴 wp-config.php Python Generation Failed — PHP Parse Error from Python `not in` Operator
+118 11:00p ✅ wp-config.php Parse Error Fixed — Dynamic WP_HOME/WP_SITEURL Now Uses preg_replace Port Logic
+119 " 🟣 WordPress 6.9.4 Installed, Underscores Theme Scaffolded, Contact Form 7 Activated
+120 11:02p 🔵 Underscores Theme page.php and content-page.php Template Structure Confirmed
+121 11:04p ⚖️ WordPress Coalition Test — Full Challenge Requirements Defined
+124 " 🟣 Coalition Test WordPress Theme — Core Files Created and Validated
+127 11:07p 🟣 WordPress Site Seeded and Serving Homepage Template via PHP Dev Server
+128 " 🔵 WordPress Theme File Structure — Underscores Base with Custom Overrides Confirmed
+129 11:09p 🔵 wp-config.php Uses Dynamic Host Detection for coalitiontest.local Compatibility
+130 " ✅ Coalition Test WordPress Implementation Plan Marked Complete
+### May 1, 2026
+203 5:46a ⚖️ Clothing Line Name Brainstorm — Futuristic Athleisure Brand Connected to FUN Sports App
 
-Access 27k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 412k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

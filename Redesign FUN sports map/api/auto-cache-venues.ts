@@ -28,6 +28,10 @@ function bboxQuery(bboxStr: string): string {
 
 async function fetchOverpassJson(body: string): Promise<{ elements?: unknown[] } | null> {
   const controllers = UPSTREAMS.map(() => new AbortController());
+  const hardTimeoutMs = 18_000;
+  const hardTimeout = setTimeout(() => {
+    controllers.forEach((c) => c.abort());
+  }, hardTimeoutMs);
   try {
     const text = await Promise.any(
       UPSTREAMS.map((url, i) =>
@@ -47,6 +51,8 @@ async function fetchOverpassJson(body: string): Promise<{ elements?: unknown[] }
     return JSON.parse(text) as { elements?: unknown[] };
   } catch {
     return null;
+  } finally {
+    clearTimeout(hardTimeout);
   }
 }
 

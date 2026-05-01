@@ -39,24 +39,33 @@ function bboxQuery(bboxStr: string): string {
 
 async function fetchOverpassText(body: string): Promise<string> {
   const controllers = UPSTREAMS.map(() => new AbortController());
-  return Promise.any(
-    UPSTREAMS.map((url, i) =>
-      fetch(url, {
-        method: "POST",
-        body,
-        headers: { 
-          "Content-Type": "text/plain",
-          "User-Agent": "FUN-Sports-App/1.0 (local dev)"
-        },
-        signal: controllers[i].signal,
-      }).then(async (r) => {
-        if (r.status === 429 || !r.ok) throw new Error(`upstream ${r.status}`);
-        const t = await r.text();
-        controllers.forEach((c, j) => { if (j !== i) c.abort(); });
-        return t;
-      })
-    )
-  );
+  const hardTimeoutMs = 18_000;
+  const hardTimeout = setTimeout(() => {
+    controllers.forEach((c) => c.abort());
+  }, hardTimeoutMs);
+
+  try {
+    return await Promise.any(
+      UPSTREAMS.map((url, i) =>
+        fetch(url, {
+          method: "POST",
+          body,
+          headers: {
+            "Content-Type": "text/plain",
+            "User-Agent": "FUN-Sports-App/1.0 (local dev)",
+          },
+          signal: controllers[i].signal,
+        }).then(async (r) => {
+          if (r.status === 429 || !r.ok) throw new Error(`upstream ${r.status}`);
+          const t = await r.text();
+          controllers.forEach((c, j) => { if (j !== i) c.abort(); });
+          return t;
+        })
+      )
+    );
+  } finally {
+    clearTimeout(hardTimeout);
+  }
 }
 
 export function overpassDevProxy(): Plugin {

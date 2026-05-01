@@ -69,8 +69,8 @@ type GameMessengerSheetProps = {
   joinedGameIds?: Set<string>;
   /** Center the map on the selected conversation's game. */
   onSelectGameOnMap?: (gameId: string) => void;
-  /** Leave chat and also unjoin the game (so the thread disappears). */
-  onLeaveThread?: (gameId: string) => Promise<void> | void;
+  /** Leave chat and also unjoin the game (so the thread disappears). Return an Error on failure, null on success. */
+  onLeaveThread?: (gameId: string) => Promise<Error | null | void>;
   /** Idle-prefetched rows so the list can paint before network round-trips. */
   inboxBootstrap?: GameInboxRow[] | null;
   dmInboxBootstrap?: DmInboxRow[] | null;
@@ -190,6 +190,7 @@ export function GameMessengerSheet({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [leavingThread, setLeavingThread] = useState(false);
+  const [leaveThreadError, setLeaveThreadError] = useState<string | null>(null);
   /** Wide layout: chat centered with members on the right (desktop). */
   const [threadExpanded, setThreadExpanded] = useState(false);
   /** Full-width inbox: all conversations / groups in a grid. */
@@ -430,9 +431,11 @@ export function GameMessengerSheet({
       unsubs.push(unsub);
     }
 
-    // DMs: subscribe to visible DM threads (cap).
+    // DMs: subscribe to visible DM threads (cap). Skip the focused DM — the effect above already subscribes
+    // with the same channel topic (`dm_messages:${tid}`); a second subscribe throws in Supabase Realtime.
     const dmThreadIds = dmInbox.slice(0, 25).map((r) => r.thread_id);
     for (const tid of dmThreadIds) {
+      if (focusThread?.kind === "dm" && focusThread.threadId === tid) continue;
       const { unsubscribe } = subscribeDmMessages({
         threadId: tid,
         onInsert: () => {
@@ -458,6 +461,7 @@ export function GameMessengerSheet({
   useEffect(() => {
     if (!focusThread) setThreadExpanded(false);
     else setInboxExpanded(false);
+    setLeaveThreadError(null);
   }, [focusThread]);
 
   useEffect(() => {
@@ -527,9 +531,11 @@ export function GameMessengerSheet({
 
   const handleLeaveChat = async () => {
     if (!focusThread || focusThread.kind !== "game" || !onLeaveThread || leavingThread) return;
+    setLeaveThreadError(null);
     setLeavingThread(true);
     try {
-      await onLeaveThread(focusThread.gameId);
+      const err = await onLeaveThread(focusThread.gameId);
+      if (err) setLeaveThreadError(err.message);
     } finally {
       setLeavingThread(false);
     }
@@ -739,6 +745,11 @@ export function GameMessengerSheet({
                   </button>
                 )}
               </div>
+              {focusThread?.kind === "game" && leaveThreadError ? (
+                <p className="text-xs text-amber-400 px-1" role="alert">
+                  {leaveThreadError}
+                </p>
+              ) : null}
               <div className="min-w-0 space-y-1">
                 <div className="flex items-start gap-1.5 min-w-0">
                   <SheetTitle className="text-left text-sm font-semibold text-white break-words leading-snug min-w-0 flex-1">

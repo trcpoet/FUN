@@ -168,17 +168,35 @@ async function fetchOverpassNetwork(
   signal?: AbortSignal
 ): Promise<SportsVenueGeoJSON> {
   const [minLat, minLng, maxLat, maxLng] = bboxStr.split(",").map(Number);
-  const res = await fetch(AUTO_CACHE_PATH, {
-    method: "POST",
-    body: JSON.stringify({ minLat, minLng, maxLat, maxLng }),
-    headers: { "Content-Type": "application/json" },
-    signal,
-  });
-  if (!res.ok) return { type: "FeatureCollection", features: [] };
+  const controller = new AbortController();
+  const timeoutMs = 18_000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
   try {
-    return (await res.json()) as SportsVenueGeoJSON;
-  } catch {
+    const res = await fetch(AUTO_CACHE_PATH, {
+      method: "POST",
+      body: JSON.stringify({ minLat, minLng, maxLat, maxLng }),
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    if (!res.ok) return { type: "FeatureCollection", features: [] };
+    try {
+      return (await res.json()) as SportsVenueGeoJSON;
+    } catch {
+      return { type: "FeatureCollection", features: [] };
+    }
+  } catch (e) {
+    if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
+      return { type: "FeatureCollection", features: [] };
+    }
     return { type: "FeatureCollection", features: [] };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

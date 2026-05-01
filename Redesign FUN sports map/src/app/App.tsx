@@ -264,21 +264,22 @@ export default function App() {
     refetchGames();
   };
 
-  const handleLeaveGame = async (gameId: string) => {
+  const handleLeaveGame = async (gameId: string): Promise<Error | null> => {
     const ok = await ensureSession();
-    if (!ok) return;
+    if (!ok) return new Error("Sign in to leave this game.");
 
     const err = await leaveGame(gameId);
-    if (!err) {
-      await reloadJoinedGameIds();
-      refetchGames();
+    if (err) return err;
 
-      // If the user is currently viewing the thread for this game, close it.
-      if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === gameId) {
-        setMessagesOpen(false);
-        setMessengerFocus(null);
-      }
+    await reloadJoinedGameIds();
+    refetchGames();
+
+    // If the user is currently viewing the thread for this game, close it.
+    if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === gameId) {
+      setMessagesOpen(false);
+      setMessengerFocus(null);
     }
+    return null;
   };
 
   const handleDeleteHostedGame = async (game: GameRow): Promise<boolean> => {
