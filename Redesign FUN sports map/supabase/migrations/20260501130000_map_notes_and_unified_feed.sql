@@ -14,6 +14,39 @@
 set search_path = public;
 
 -- -----------------------------------------------------------------------
+-- 0) Social graph dependency (friends-only visibility)
+-- -----------------------------------------------------------------------
+-- Notes visibility uses the same "either-direction follow" rule as games.
+-- Some deployments may not have run the game visibility migration yet, so
+-- we create the dependency table here (idempotent).
+create table if not exists public.user_follows (
+  follower_id uuid not null references auth.users(id) on delete cascade,
+  followed_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (follower_id, followed_id),
+  check (follower_id <> followed_id)
+);
+
+create index if not exists user_follows_followed_idx on public.user_follows (followed_id);
+
+alter table public.user_follows enable row level security;
+
+drop policy if exists "user_follows: read public" on public.user_follows;
+create policy "user_follows: read public"
+  on public.user_follows for select
+  using (true);
+
+drop policy if exists "user_follows: insert own" on public.user_follows;
+create policy "user_follows: insert own"
+  on public.user_follows for insert
+  with check (auth.uid() = follower_id);
+
+drop policy if exists "user_follows: delete own" on public.user_follows;
+create policy "user_follows: delete own"
+  on public.user_follows for delete
+  using (auth.uid() = follower_id);
+
+-- -----------------------------------------------------------------------
 -- 1) Core tables
 -- -----------------------------------------------------------------------
 create table if not exists public.map_notes (
