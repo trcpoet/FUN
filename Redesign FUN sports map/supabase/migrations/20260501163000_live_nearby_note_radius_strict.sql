@@ -7,6 +7,38 @@
 
 set search_path = public;
 
+-- Ensure dependency exists even if migrations were run out of order.
+create table if not exists public.map_note_likes (
+  note_id uuid not null references public.map_notes(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (note_id, user_id)
+);
+
+create index if not exists map_note_likes_note_idx on public.map_note_likes (note_id);
+
+alter table public.map_note_likes enable row level security;
+
+drop policy if exists "map_note_likes: read" on public.map_note_likes;
+create policy "map_note_likes: read"
+  on public.map_note_likes for select
+  using (
+    exists (
+      select 1 from public.map_notes n
+      where n.id = note_id
+    )
+  );
+
+drop policy if exists "map_note_likes: insert own" on public.map_note_likes;
+create policy "map_note_likes: insert own"
+  on public.map_note_likes for insert
+  with check (auth.uid() is not null and user_id = auth.uid());
+
+drop policy if exists "map_note_likes: delete own" on public.map_note_likes;
+create policy "map_note_likes: delete own"
+  on public.map_note_likes for delete
+  using (auth.uid() is not null and user_id = auth.uid());
+
 create or replace function public.get_live_nearby(
   p_lat double precision,
   p_lng double precision,
