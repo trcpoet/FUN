@@ -507,26 +507,33 @@ export function GameMessengerSheet({
       setSendError("Sign in to send messages.");
       return;
     }
+
     setSending(true);
-    const { data: sent, error } =
-      focusThread.kind === "game"
-        ? await sendGameMessage(focusThread.gameId, draft)
-        : await sendDmMessage(focusThread.threadId, draft);
-    setSending(false);
-    if (error) {
-      setSendError(error.message);
-      return;
-    }
-    setDraft("");
-    if (sent) {
-      if (focusThread.kind === "game") {
+    if (focusThread.kind === "game") {
+      const { data: sent, error } = await sendGameMessage(focusThread.gameId, draft);
+      setSending(false);
+      if (error) {
+        setSendError(error.message);
+        return;
+      }
+      setDraft("");
+      if (sent) {
         setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
-      } else {
+      }
+      loadInbox();
+    } else {
+      const { data: sent, error } = await sendDmMessage(focusThread.threadId, draft);
+      setSending(false);
+      if (error) {
+        setSendError(error.message);
+        return;
+      }
+      setDraft("");
+      if (sent) {
         setDmMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
       }
+      loadDmInbox();
     }
-    if (focusThread.kind === "game") loadInbox();
-    else loadDmInbox();
   };
 
   const handleLeaveChat = async () => {
@@ -589,14 +596,20 @@ export function GameMessengerSheet({
         side="right"
         className={cn(
           "h-full p-0 gap-0 sm:max-w-none flex flex-col overflow-hidden",
-          "border-border/80 bg-popover/95 text-popover-foreground backdrop-blur-xl",
+          [
+            // Glass drawer: deep navy tint + subtle cyan/violet edge glow.
+            "text-popover-foreground backdrop-blur-2xl",
+            "border-l border-cyan-400/15",
+            "bg-[radial-gradient(900px_circle_at_10%_0%,rgba(34,211,238,0.16),transparent_42%),radial-gradient(900px_circle_at_90%_20%,rgba(124,58,237,0.14),transparent_46%),linear-gradient(to_bottom,rgba(8,14,28,0.92),rgba(6,10,18,0.9))]",
+            "shadow-[0_0_0_1px_rgba(34,211,238,0.10),0_24px_70px_rgba(0,0,0,0.65)]",
+          ].join(" "),
           (threadExpanded && focusThread) || (inboxExpanded && showList)
             ? "!left-0 !right-0 !w-full !max-w-full !rounded-none"
             : "w-[20vw] min-w-[300px] max-w-[420px] rounded-l-2xl",
         )}
         aria-describedby={undefined}
       >
-        <SheetHeader className="border-b border-white/[0.08] px-4 py-3 space-y-0 shrink-0">
+        <SheetHeader className="border-b border-white/[0.08] bg-white/[0.02] px-4 py-3 space-y-0 shrink-0 shadow-[inset_0_-1px_0_rgba(255,255,255,0.04)]">
           {showList ? (
             <div className="flex items-start gap-2 pr-12">
               <div className="min-w-0 flex-1 flex items-start gap-2">
@@ -860,7 +873,13 @@ export function GameMessengerSheet({
                               openThread();
                             }
                           }}
-                          className="relative min-w-0 cursor-pointer rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 text-left outline-none transition-colors hover:bg-white/[0.06] focus-visible:ring-2 focus-visible:ring-cyan-500/40"
+                          className={cn(
+                            "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
+                            "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
+                            "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
+                            "hover:border-cyan-300/20",
+                            "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
+                          )}
                         >
                           {badge ? (
                             <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums text-white shadow ring-2 ring-[#0b1020]">
@@ -965,7 +984,13 @@ export function GameMessengerSheet({
                             openThread();
                           }
                         }}
-                        className="relative min-w-0 cursor-pointer rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 text-left outline-none transition-colors hover:bg-white/[0.06] focus-visible:ring-2 focus-visible:ring-cyan-500/40"
+                        className={cn(
+                          "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
+                          "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
+                          "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
+                          "hover:border-cyan-300/20",
+                          "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
+                        )}
                       >
                         {badge ? (
                           <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums text-white shadow ring-2 ring-[#0b1020]">
@@ -1010,7 +1035,12 @@ export function GameMessengerSheet({
             )}
           >
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+              <div className="relative flex-1 min-h-0">
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_20%_0%,rgba(34,211,238,0.12),transparent_45%),radial-gradient(900px_circle_at_85%_35%,rgba(124,58,237,0.14),transparent_52%)]"
+                />
+                <div className="relative flex-1 overflow-y-auto px-3 py-2 space-y-2">
                 {focusThread?.kind === "dm" ? (
                   dmMessagesLoading ? (
                     <div className="flex justify-center py-12 text-slate-500">
@@ -1023,14 +1053,14 @@ export function GameMessengerSheet({
                         <div key={m.id} className={cn("flex", mine ? "justify-end" : "justify-start")}>
                           <div
                             className={cn(
-                              "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                              "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
                               mine
-                                ? "bg-violet-600/90 text-white rounded-br-md"
-                                : "bg-white/[0.08] text-slate-200 rounded-bl-md",
+                                ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
+                                : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
                             )}
                           >
                             <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                            <p className={cn("text-[10px] mt-1 opacity-70", mine ? "text-violet-100" : "text-slate-500")}>
+                            <p className={cn("text-[10px] mt-1 opacity-70", mine ? "text-violet-50/90" : "text-slate-400/80")}>
                               {format(new Date(m.created_at), "h:mm a")}
                             </p>
                           </div>
@@ -1054,10 +1084,10 @@ export function GameMessengerSheet({
                       >
                         <div
                           className={cn(
-                            "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                            "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
                             mine
-                              ? "bg-violet-600/90 text-white rounded-br-md"
-                              : "bg-white/[0.08] text-slate-200 rounded-bl-md",
+                              ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
+                              : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
                           )}
                         >
                           {!mine && (
@@ -1085,7 +1115,7 @@ export function GameMessengerSheet({
                           <p
                             className={cn(
                               "text-[10px] mt-1 opacity-70",
-                              mine ? "text-violet-100" : "text-slate-500",
+                              mine ? "text-violet-50/90" : "text-slate-400/80",
                             )}
                           >
                             {format(new Date(m.created_at), "h:mm a")}
@@ -1096,9 +1126,10 @@ export function GameMessengerSheet({
                   })
                 )}
                 <div ref={listEndRef} />
+                </div>
               </div>
 
-              <div className="border-t border-white/[0.08] p-3 shrink-0 bg-[#0c1222]">
+              <div className="border-t border-white/[0.08] p-3 shrink-0 bg-white/[0.02] backdrop-blur-2xl shadow-[0_-18px_40px_rgba(0,0,0,0.45)]">
                 {sendError && (
                   <p className="text-xs text-amber-400 mb-2 px-1">{sendError}</p>
                 )}
@@ -1114,13 +1145,19 @@ export function GameMessengerSheet({
                     }}
                     placeholder="Message the squad…"
                     rows={2}
-                    className="flex-1 resize-none rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                    className="flex-1 resize-none rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
                   />
                   <button
                     type="button"
                     disabled={sending || !draft.trim()}
                     onClick={() => void handleSend()}
-                    className="shrink-0 h-11 w-11 rounded-xl bg-violet-600 text-white flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none hover:bg-violet-500 transition-colors"
+                    className={cn(
+                      "shrink-0 h-11 w-11 rounded-xl text-white flex items-center justify-center transition-colors",
+                      "border border-white/10",
+                      "bg-gradient-to-b from-violet-500/95 to-fuchsia-600/85 hover:from-violet-400 hover:to-fuchsia-500",
+                      "shadow-[0_12px_30px_rgba(124,58,237,0.22)]",
+                      "disabled:opacity-40 disabled:pointer-events-none",
+                    )}
                     aria-label="Send"
                   >
                     {sending ? (
@@ -1134,7 +1171,7 @@ export function GameMessengerSheet({
             </div>
 
             {threadExpanded && (
-              <aside className="hidden lg:flex w-full shrink-0 flex-col border-t border-white/[0.08] bg-[#080d18] lg:w-[min(20rem,34vw)] lg:border-l lg:border-t-0">
+              <aside className="hidden lg:flex w-full shrink-0 flex-col border-t border-white/[0.08] bg-white/[0.015] backdrop-blur-2xl lg:w-[min(20rem,34vw)] lg:border-l lg:border-t-0">
                 <div className="flex items-center gap-2 border-b border-white/[0.08] px-3 py-2.5">
                   <Users className="size-4 text-cyan-400" aria-hidden />
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
