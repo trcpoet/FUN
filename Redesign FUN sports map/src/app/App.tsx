@@ -77,19 +77,20 @@ export default function App() {
       ? userCoords.lng
       : mapSearchLocation?.lng ?? effectiveUserCoords.lng;
 
+  const [appliedFilters, setAppliedFilters] = useState<FiltersState>(DEFAULT_FILTERS);
+  const [filtersDraft, setFiltersDraft] = useState<FiltersState>(DEFAULT_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   const refetchNotes = useCallback(async () => {
     const { data } = await fetchNotesNearby({
       lat: gamesFetchLat,
       lng: gamesFetchLng,
-      radiusKm: 10,
+      // Keep notes roughly aligned with venue/game context so pins populate when the map area changes.
+      radiusKm: Math.max(10, appliedFilters.venueRadiusKm),
       limit: 120,
     });
     setMapNotes(data ?? []);
-  }, [gamesFetchLat, gamesFetchLng]);
-
-  const [appliedFilters, setAppliedFilters] = useState<FiltersState>(DEFAULT_FILTERS);
-  const [filtersDraft, setFiltersDraft] = useState<FiltersState>(DEFAULT_FILTERS);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  }, [gamesFetchLat, gamesFetchLng, appliedFilters.venueRadiusKm]);
 
   const {
     games,
@@ -180,6 +181,9 @@ export default function App() {
     if (!gid) return;
     const game = games.find((g) => g.id === gid);
     if (!game) return;
+    // Ensure venues + notes fetch around the deep-linked point (otherwise the map can look empty).
+    setMapSearchLocation({ lat: game.lat, lng: game.lng });
+    setMapSearchLocationName(game.location_label?.trim() || null);
     handleCenterOnCoords({ lat: game.lat, lng: game.lng });
     openGamePopupNonceRef.current += 1;
     setGamePopupRequest({ nonce: openGamePopupNonceRef.current, gameId: game.id });
@@ -199,6 +203,9 @@ export default function App() {
       void fetchNoteById(nid).then((r) => {
         if (r.error || !r.data) return;
         setMapNotes((prev) => (prev.some((n) => n.id === r.data!.id) ? prev : [...prev, r.data!]));
+        // Ensure venues + notes fetch around the deep-linked point.
+        setMapSearchLocation({ lat: r.data.lat, lng: r.data.lng });
+        setMapSearchLocationName(r.data.place_name?.trim() || "Pinned note");
         handleCenterOnCoords({ lat: r.data.lat, lng: r.data.lng });
         setActiveMapNote(r.data);
         params.delete("focusNoteId");
@@ -206,6 +213,9 @@ export default function App() {
       });
       return;
     }
+    // Ensure venues + notes fetch around the deep-linked point.
+    setMapSearchLocation({ lat: note.lat, lng: note.lng });
+    setMapSearchLocationName(note.place_name?.trim() || "Pinned note");
     handleCenterOnCoords({ lat: note.lat, lng: note.lng });
     setActiveMapNote(note);
     params.delete("focusNoteId");

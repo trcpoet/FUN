@@ -157,6 +157,8 @@ export {
   subscribeNoteComments,
 } from "./mapNotes";
 
+let missingUnifiedFeedUntilMs = 0;
+
 export type UnifiedFeedItem =
   | {
       kind: "note";
@@ -229,6 +231,9 @@ export async function fetchUnifiedFeed(params: {
   limit?: number;
 }): Promise<{ data: UnifiedFeedItem[]; error: Error | null }> {
   if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  // Avoid spamming the network if PostgREST briefly can't see the function yet (schema cache / grants).
+  // We retry after a short cool-down.
+  if (missingUnifiedFeedUntilMs > Date.now()) return { data: [], error: null };
   const { data, error } = await supabase.rpc("get_unified_feed", {
     p_lat: params.lat,
     p_lng: params.lng,
@@ -236,6 +241,7 @@ export async function fetchUnifiedFeed(params: {
     p_limit: params.limit ?? 80,
   });
   if (error && isMissingMapNotesRpc(error)) {
+    missingUnifiedFeedUntilMs = Date.now() + 30_000;
     return { data: [], error: null };
   }
   return { data: (data as UnifiedFeedItem[]) ?? [], error: error ? new Error(error.message) : null };

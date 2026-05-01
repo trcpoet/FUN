@@ -20,6 +20,7 @@ import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import { fetchLiveNearby, fetchUnifiedFeed, type LiveFeedItem, type UnifiedFeedItem } from "../../lib/api";
 import { GameFeedCard, LiveNearbyStripCard, NoteFeedCard, StatusFeedCard } from "../components/feed/UnifiedFeedCards";
+import LightRays from "../components/feed/LightRays";
 import { glassMessengerPage } from "../styles/glass";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -151,8 +152,29 @@ export default function Feed() {
         <div className="absolute top-[20%] -right-[5%] size-[30%] rounded-full bg-blue-500/5 blur-[100px]" />
       </div>
 
-      <header className="sticky top-0 z-[60] border-b border-white/[0.05] bg-black/60 backdrop-blur-2xl">
-        <div className="mx-auto max-w-3xl w-full px-4 pt-6 pb-4">
+      <header className="sticky top-0 z-[60] relative overflow-hidden border-b border-white/[0.05]">
+        <div className="pointer-events-none absolute inset-0 z-0">
+          <LightRays
+            raysOrigin="top-center"
+            raysColor="#ffffff"
+            raysSpeed={1}
+            lightSpread={0.5}
+            rayLength={3}
+            followMouse
+            mouseInfluence={0.1}
+            noiseAmount={0}
+            distortion={0}
+            className="opacity-40"
+            pulsating={false}
+            fadeDistance={1}
+            saturation={1}
+          />
+        </div>
+        <div
+          className="pointer-events-none absolute inset-0 z-[1] bg-black/60 backdrop-blur-2xl"
+          aria-hidden
+        />
+        <div className="relative z-10 mx-auto max-w-3xl w-full px-4 pt-6 pb-4">
           <div className="flex items-center justify-between gap-4 mb-6">
             <div className="flex items-center gap-3">
               <button
