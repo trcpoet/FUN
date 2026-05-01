@@ -167,6 +167,8 @@ export type UnifiedFeedItem =
       body: string;
       visibility: MapNoteVisibility;
       comment_count: number;
+      created_by: string | null;
+      like_count: number;
     }
   | {
       kind: "game";
@@ -178,31 +180,144 @@ export type UnifiedFeedItem =
       body: string | null;
       sport: string | null;
       visibility: GameVisibility;
+      comment_count: number;
+      created_by: string | null;
+      like_count: number;
     }
   | {
       kind: "status";
       id: string;
       created_at: string;
       body: string;
+      lat: number | null;
+      lng: number | null;
+      title: string | null;
+      sport: string | null;
+      visibility: string | null;
+      comment_count: number;
+      created_by: string | null;
+      like_count: number;
     };
+
+/** Games + map notes within a tight radius (default 25 km) for Discovery “Live”. */
+export type LiveFeedItem = Extract<UnifiedFeedItem, { kind: "game" | "note" }>;
+
+export async function fetchLiveNearby(params: {
+  lat: number;
+  lng: number;
+  radiusKm?: number;
+  limit?: number;
+}): Promise<{ data: LiveFeedItem[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_live_nearby", {
+    p_lat: params.lat,
+    p_lng: params.lng,
+    p_radius_km: params.radiusKm ?? 25,
+    p_limit: params.limit ?? 40,
+  });
+  if (error && isMissingMapNotesRpc(error)) {
+    return { data: [], error: null };
+  }
+  return { data: (data as LiveFeedItem[]) ?? [], error: error ? new Error(error.message) : null };
+}
 
 export async function fetchUnifiedFeed(params: {
   lat: number;
   lng: number;
-  radiusKm?: number;
+  /** Radius (km) for map games + notes. Statuses ignore geo. Default 120. */
+  mapRadiusKm?: number;
   limit?: number;
 }): Promise<{ data: UnifiedFeedItem[]; error: Error | null }> {
   if (!supabase) return { data: [], error: new Error("Supabase not configured") };
   const { data, error } = await supabase.rpc("get_unified_feed", {
     p_lat: params.lat,
     p_lng: params.lng,
-    p_radius_km: params.radiusKm ?? 25,
+    p_map_radius_km: params.mapRadiusKm ?? 120,
     p_limit: params.limit ?? 80,
   });
   if (error && isMissingMapNotesRpc(error)) {
     return { data: [], error: null };
   }
   return { data: (data as UnifiedFeedItem[]) ?? [], error: error ? new Error(error.message) : null };
+}
+
+export async function deleteMapNote(noteId: string): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.from("map_notes").delete().eq("id", noteId);
+  return { error: error ? new Error(error.message) : null };
+}
+
+export async function deleteMyStatus(statusId: string): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.rpc("delete_my_status", { p_status_id: statusId });
+  return { error: error ? new Error(error.message) : null };
+}
+
+export async function toggleMapNoteLike(noteId: string): Promise<{ liked: boolean; error: Error | null }> {
+  if (!supabase) return { liked: false, error: new Error("Supabase not configured") };
+  const { data: userRes } = await supabase.auth.getUser();
+  const uid = userRes.user?.id;
+  if (!uid) return { liked: false, error: new Error("Sign in to like notes.") };
+  const { data: removed, error: delErr } = await supabase
+    .from("map_note_likes")
+    .delete()
+    .eq("note_id", noteId)
+    .eq("user_id", uid)
+    .select("note_id");
+  if (delErr) return { liked: false, error: new Error(delErr.message) };
+  if (removed && removed.length > 0) return { liked: false, error: null };
+  const { error: insErr } = await supabase.from("map_note_likes").insert({ note_id: noteId, user_id: uid });
+  if (insErr) return { liked: false, error: new Error(insErr.message) };
+  return { liked: true, error: null };
+}
+
+export async function toggleStatusLike(statusId: string): Promise<{ liked: boolean; error: Error | null }> {
+  if (!supabase) return { liked: false, error: new Error("Supabase not configured") };
+  const { data: userRes } = await supabase.auth.getUser();
+  const uid = userRes.user?.id;
+  if (!uid) return { liked: false, error: new Error("Sign in to like statuses.") };
+  const { data: removed, error: delErr } = await supabase
+    .from("status_likes")
+    .delete()
+    .eq("status_id", statusId)
+    .eq("user_id", uid)
+    .select("status_id");
+  if (delErr) return { liked: false, error: new Error(delErr.message) };
+  if (removed && removed.length > 0) return { liked: false, error: null };
+  const { error: insErr } = await supabase.from("status_likes").insert({ status_id: statusId, user_id: uid });
+  if (insErr) return { liked: false, error: new Error(insErr.message) };
+  return { liked: true, error: null };
+}
+
+export async function fetchStatusComments(statusId: string): Promise<{ data: StatusCommentRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_status_comments", { p_status_id: statusId });
+  return { data: (data as StatusCommentRow[]) ?? [], error: error ? new Error(error.message) : null };
+}
+
+export async function addStatusComment(params: {
+  statusId: string;
+  body: string;
+}): Promise<{ data: StatusCommentRow | null; error: Error | null }> {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const trimmed = params.body.trim();
+  if (!trimmed) return { data: null, error: new Error("Comment is empty") };
+  const { data, error } = await supabase.rpc("add_status_comment", {
+    p_status_id: params.statusId,
+    p_body: trimmed.slice(0, 2000),
+  });
+  return { data: (data as StatusCommentRow) ?? null, error: error ? new Error(error.message) : null };
+}
+
+/** Recent image/video posts for the feed (empty until clients upload). */
+export async function fetchRecentFeedMediaPosts(limit = 12): Promise<{ data: FeedMediaPostRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const { data, error } = await supabase
+    .from("feed_media_posts")
+    .select("id, user_id, body, storage_path, created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return { data: (data as FeedMediaPostRow[]) ?? [], error: error ? new Error(error.message) : null };
 }
 
 // —— Auth (email/password, OWASP-aligned) ——

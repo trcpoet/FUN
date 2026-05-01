@@ -26,7 +26,7 @@ import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
 import { useTotalUnreadMessages } from "../hooks/useTotalUnreadMessages";
 import { supabase } from "../lib/supabase";
-import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby } from "../lib/api";
+import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById } from "../lib/api";
 import { fetchMyDmInbox, getOrCreateDmThread } from "../lib/dmChat";
 import { fetchMyGameInbox, sendGameMessage } from "../lib/gameChat";
 import { visibilityEnumToLabel } from "../lib/gamePreferenceOptions";
@@ -194,9 +194,16 @@ export default function App() {
     if (!nid) return;
     const note = mapNotes.find((n) => n.id === nid);
     if (!note) {
-      // Note not in current radius cache yet — kick off a refetch and wait
-      // for the next tick to find it (the param stays in the URL until then).
-      void refetchNotes();
+      // Note may be outside the current radius cache (e.g. Feed-only far note).
+      // Fetch it directly so the map can fly to the creation location.
+      void fetchNoteById(nid).then((r) => {
+        if (r.error || !r.data) return;
+        setMapNotes((prev) => (prev.some((n) => n.id === r.data!.id) ? prev : [...prev, r.data!]));
+        handleCenterOnCoords({ lat: r.data.lat, lng: r.data.lng });
+        setActiveMapNote(r.data);
+        params.delete("focusNoteId");
+        navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
+      });
       return;
     }
     handleCenterOnCoords({ lat: note.lat, lng: note.lng });

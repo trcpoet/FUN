@@ -87,6 +87,7 @@ $$;
 
 create or replace function public.get_latest_status(p_user uuid)
 returns table (
+  id uuid,
   body text,
   created_at timestamptz,
   expires_at timestamptz
@@ -94,7 +95,7 @@ returns table (
 language sql
 stable
 as $$
-  select s.body, s.created_at, s.expires_at
+  select s.id, s.body, s.created_at, s.expires_at
     from public.user_statuses s
    where s.user_id = p_user
      and s.expires_at > now()

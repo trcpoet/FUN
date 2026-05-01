@@ -1,46 +1,78 @@
-import { useEffect, useMemo, useState } from "react";
-import { 
-  Bell, 
-  Compass, 
-  Globe, 
-  HeartPulse, 
-  PenSquare, 
-  Sparkles, 
-  Users, 
-  Search, 
+import { useCallback, useEffect, useState } from "react";
+import {
+  Bell,
+  Compass,
+  Globe,
+  HeartPulse,
+  PenSquare,
+  Sparkles,
+  Users,
+  Search,
   ChevronRight,
-  TrendingUp,
   MapPin,
-  Flame
+  Flame,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { cn } from "../components/ui/utils";
-import { Button } from "../components/ui/button";
-import { ActivityFeed } from "../components/athlete-profile/ActivityFeed";
 import { useNotifications } from "../../hooks/useNotifications";
-import { getRecentStatuses, type StatusRow } from "../../lib/status";
-import { useMyProfile } from "../../hooks/useMyProfile";
 import { useGeolocation } from "../../hooks/useGeolocation";
-import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
-import { fetchUnifiedFeed, type UnifiedFeedItem } from "../../lib/api";
-import { GameFeedCard, NoteFeedCard, StatusFeedCard } from "../components/feed/UnifiedFeedCards";
+import { fetchLiveNearby, fetchUnifiedFeed, type LiveFeedItem, type UnifiedFeedItem } from "../../lib/api";
+import { GameFeedCard, LiveNearbyStripCard, NoteFeedCard, StatusFeedCard } from "../components/feed/UnifiedFeedCards";
 import { glassMessengerPage } from "../styles/glass";
+import { useAuth } from "../contexts/AuthContext";
 
 function notificationLabel(n: { type: string; payload?: unknown }): string {
+  const p = (n.payload ?? {}) as Record<string, unknown>;
   if (n.type === "badge_earned") {
-    return `Badge earned: ${(n.payload as { badge_slug?: string }).badge_slug ?? "?"}`;
+    return `Badge earned: ${(p.badge_slug as string | undefined) ?? "?"}`;
   }
   if (n.type === "game_completed") return "A game you joined was completed.";
+  if (n.type === "new_follower") return "Someone new is following you.";
+  if (n.type === "game_nearby") return `New game nearby: ${(p.sport as string | undefined)?.trim() || "Pickup"}`;
+  if (n.type === "map_note_nearby") return "New map note near you.";
+  if (n.type === "game_invite") return "You were invited to a game.";
+  if (n.type === "note_new_activity") return "New replies on a note you follow.";
   return "New notification";
 }
 
 function notificationActorUserId(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as Record<string, unknown>;
-  const v = p.user_id ?? p.profile_id ?? p.actor_id ?? p.from_user_id;
+  const v =
+    p.user_id ??
+    p.profile_id ??
+    p.actor_id ??
+    p.from_user_id ??
+    p.follower_id ??
+    p.invited_by ??
+    p.created_by;
   return typeof v === "string" && v.trim() ? v : null;
+}
+
+function handleNotificationNavigate(
+  navigate: (to: string) => void,
+  n: { type: string; payload?: unknown },
+): void {
+  const p = (n.payload ?? {}) as Record<string, unknown>;
+  if (n.type === "game_nearby" || n.type === "game_invite") {
+    const gid = typeof p.game_id === "string" ? p.game_id : null;
+    if (gid) navigate(`/?focusGameId=${encodeURIComponent(gid)}`);
+    return;
+  }
+  if (n.type === "map_note_nearby" || n.type === "note_new_activity") {
+    const nid = typeof p.note_id === "string" ? p.note_id : null;
+    if (nid) navigate(`/?focusNoteId=${encodeURIComponent(nid)}`);
+    return;
+  }
+  if (n.type === "new_follower") {
+    const fid = typeof p.follower_id === "string" ? p.follower_id : null;
+    if (fid) navigate(`/athlete/${encodeURIComponent(fid)}`);
+    return;
+  }
+  const actorId = notificationActorUserId(n.payload);
+  if (actorId) navigate(`/athlete/${encodeURIComponent(actorId)}`);
 }
 
 type TabId = "discovery" | "activity" | "similar" | "friends" | "notifications";
@@ -73,13 +105,28 @@ export default function Feed() {
   const [tab, setTab] = useState<TabId>("discovery");
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const { notifications, markRead } = useNotifications({ limit: 12 });
-  const { displayName, avatarUrl } = useMyProfile();
   const { coords } = useGeolocation();
   const unreadCount = notifications.filter((n) => !n.is_read).length;
-  const [statuses, setStatuses] = useState<StatusRow[]>([]);
   const [unified, setUnified] = useState<UnifiedFeedItem[]>([]);
   const [unifiedLoading, setUnifiedLoading] = useState(false);
+  const [liveItems, setLiveItems] = useState<LiveFeedItem[]>([]);
+  const [liveLoading, setLiveLoading] = useState(false);
+
+  const refreshFeeds = useCallback(() => {
+    if (!coords) return;
+    setUnifiedLoading(true);
+    setLiveLoading(true);
+    void fetchUnifiedFeed({ lat: coords.lat, lng: coords.lng, mapRadiusKm: 120, limit: 80 }).then((r) => {
+      setUnifiedLoading(false);
+      setUnified(r.data ?? []);
+    });
+    void fetchLiveNearby({ lat: coords.lat, lng: coords.lng, radiusKm: 25, limit: 40 }).then((r) => {
+      setLiveLoading(false);
+      setLiveItems(r.data ?? []);
+    });
+  }, [coords?.lat, coords?.lng]);
 
   useEffect(() => {
     const qs = new URLSearchParams(location.search);
@@ -92,53 +139,8 @@ export default function Feed() {
   }, [location.search]);
 
   useEffect(() => {
-    let cancelled = false;
-    void getRecentStatuses(24).then((r) => {
-      if (cancelled) return;
-      setStatuses(r.data ?? []);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!coords) return;
-    let cancelled = false;
-    setUnifiedLoading(true);
-    void fetchUnifiedFeed({ lat: coords.lat, lng: coords.lng, radiusKm: 25, limit: 80 }).then((r) => {
-      if (cancelled) return;
-      setUnifiedLoading(false);
-      setUnified(r.data ?? []);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [coords?.lat, coords?.lng]);
-
-  const placeholderPosts = useMemo(
-    () => [
-      {
-        id: "p1",
-        caption: "Morning run + mobility. Feeling fast today. ⚡",
-        timeAgo: "2h ago",
-        likes: 12,
-        comments: 2,
-        sport: "Running",
-        pinned: true,
-      },
-      {
-        id: "p2",
-        caption: "Looking for a pickup squad tonight — who’s in? 🏀",
-        timeAgo: "Yesterday",
-        likes: 7,
-        comments: 1,
-        sport: "Basketball",
-        pinned: false,
-      },
-    ],
-    []
-  );
+    refreshFeeds();
+  }, [refreshFeeds]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-foreground selection:bg-primary selection:text-white">
@@ -233,49 +235,53 @@ export default function Feed() {
       <main className="relative mx-auto w-full max-w-3xl px-4 py-8 pb-32">
         {tab === "discovery" && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Statuses Strip */}
-            {statuses.length > 0 && (
+            {/* Live: games + map notes within 25 km */}
+            {coords ? (
               <section className="space-y-4">
                 <div className="flex items-center justify-between px-1">
                   <div className="flex items-center gap-2">
                     <div className="flex size-8 items-center justify-center rounded-xl bg-orange-500/10 text-orange-500">
-                      <TrendingUp className="size-4" />
+                      <MapPin className="size-4" />
                     </div>
-                    <h2 className="text-sm font-black uppercase tracking-widest text-white">Live Updates</h2>
+                    <div>
+                      <h2 className="text-sm font-black uppercase tracking-widest text-white">Live near you</h2>
+                      <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
+                        Games & map notes · 25 km
+                      </p>
+                    </div>
                   </div>
-                  <button className="text-[10px] font-bold uppercase tracking-widest text-primary hover:underline">View All</button>
+                  <button
+                    type="button"
+                    onClick={() => setTab("activity")}
+                    className="text-[10px] font-bold uppercase tracking-widest text-primary hover:underline"
+                  >
+                    Full feed
+                  </button>
                 </div>
-                
-                <ScrollArea className="w-full">
-                  <div className="flex space-x-4 pb-4">
-                    {statuses.map((s, i) => (
-                      <div
-                        key={`${s.user_id}-${i}`}
-                        className="group relative w-[240px] shrink-0 overflow-hidden rounded-3xl border border-white/[0.08] bg-white/[0.02] p-5 transition-all hover:bg-white/[0.04] hover:border-primary/20"
-                      >
-                        <div className="flex items-center gap-3 mb-4">
-                          <Avatar className="size-10 border border-white/10 ring-2 ring-black/50">
-                            <AvatarFallback className="bg-primary/20 text-primary font-bold text-xs uppercase">PL</AvatarFallback>
-                          </Avatar>
-                          <div className="flex flex-col">
-                            <span className="text-xs font-bold text-white leading-none">Athlete</span>
-                            <span className="text-[9px] font-medium text-muted-foreground mt-1 uppercase tracking-tighter">Nearby</span>
-                          </div>
-                        </div>
-                        <p className="text-sm font-medium text-slate-300 leading-relaxed line-clamp-3 italic">
-                          "{s.body}"
-                        </p>
-                        <div className="absolute bottom-2 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <span className="text-[9px] font-black uppercase tracking-widest text-primary">Join Game</span>
-                          <ChevronRight className="size-3 text-primary" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <ScrollBar orientation="horizontal" className="hidden" />
-                </ScrollArea>
+                {liveLoading ? (
+                  <p className="text-xs text-slate-500 px-1">Loading live activity…</p>
+                ) : liveItems.length === 0 ? (
+                  <p className="text-xs text-slate-500 px-1">No games or notes in range yet — check the map or widen your search from Feed.</p>
+                ) : (
+                  <ScrollArea className="w-full">
+                    <div className="flex space-x-4 pb-4">
+                      {liveItems.map((it) => (
+                        <LiveNearbyStripCard
+                          key={`${it.kind}:${it.id}`}
+                          item={it}
+                          onOpen={() =>
+                            it.kind === "game"
+                              ? navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)
+                              : navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)
+                          }
+                        />
+                      ))}
+                    </div>
+                    <ScrollBar orientation="horizontal" className="hidden" />
+                  </ScrollArea>
+                )}
               </section>
-            )}
+            ) : null}
 
             {/* Recommendations Grid */}
             <section className="space-y-4">
@@ -331,7 +337,7 @@ export default function Feed() {
                     <span className="inline-block size-1.5 rounded-full bg-primary animate-pulse" />
                   </h2>
                   <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">
-                    Games + Notes + Statuses near you
+                    Map posts within 120 km · statuses worldwide
                   </p>
                 </div>
               </div>
@@ -361,15 +367,19 @@ export default function Feed() {
                       {it.kind === "note" ? (
                         <NoteFeedCard
                           item={it}
+                          currentUserId={user?.id ?? null}
                           onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
+                          onInvalidate={refreshFeeds}
                         />
                       ) : it.kind === "game" ? (
                         <GameFeedCard
                           item={it}
+                          currentUserId={user?.id ?? null}
                           onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
+                          onInvalidate={refreshFeeds}
                         />
                       ) : (
-                        <StatusFeedCard item={it} />
+                        <StatusFeedCard item={it} currentUserId={user?.id ?? null} onInvalidate={refreshFeeds} />
                       )}
                     </li>
                   ))}
@@ -432,8 +442,7 @@ export default function Feed() {
                         type="button"
                         onClick={() => {
                           if (!n.is_read) markRead(n.id);
-                          const actorId = notificationActorUserId(n.payload);
-                          if (actorId) navigate(`/athlete/${actorId}`);
+                          handleNotificationNavigate(navigate, n);
                         }}
                         className={cn(
                           "flex w-full items-center gap-4 px-6 py-5 text-left transition-all hover:bg-white/[0.03]",
@@ -444,7 +453,17 @@ export default function Feed() {
                           <div className="absolute left-2 top-1/2 -translate-y-1/2 size-1.5 rounded-full bg-primary" />
                         )}
                         <div className="size-10 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-center shrink-0">
-                          {n.type === "badge_earned" ? <Sparkles className="size-5 text-amber-500" /> : <HeartPulse className="size-5 text-primary" />}
+                          {n.type === "badge_earned" ? (
+                            <Sparkles className="size-5 text-amber-500" />
+                          ) : n.type === "new_follower" ? (
+                            <Users className="size-5 text-sky-400" />
+                          ) : n.type === "game_nearby" || n.type === "game_invite" ? (
+                            <MapPin className="size-5 text-violet-400" />
+                          ) : n.type === "map_note_nearby" || n.type === "note_new_activity" ? (
+                            <Compass className="size-5 text-cyan-400" />
+                          ) : (
+                            <HeartPulse className="size-5 text-primary" />
+                          )}
                         </div>
                         <div className="flex flex-col min-w-0">
                           <span className="text-sm font-bold text-white tracking-tight">{notificationLabel(n)}</span>
