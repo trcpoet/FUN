@@ -5,6 +5,7 @@ import { Button } from "../ui/button";
 import { cn } from "../ui/utils";
 import type { MapNoteCommentRow, MapNoteRow } from "../../../lib/supabase";
 import { addNoteComment, fetchNoteComments } from "../../../lib/api";
+import { glassMessengerPanel } from "../../styles/glass";
 
 type Props = {
   open: boolean;
@@ -68,7 +69,7 @@ export function NoteThreadDialog({ open, onOpenChange, note }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[520px] border-white/10 bg-slate-950/85 backdrop-blur-2xl">
+      <DialogContent className={glassMessengerPanel("max-w-[520px]")}>
         <DialogHeader>
           <DialogTitle className="text-white flex items-center justify-between gap-3">
             <span className="truncate">Note</span>

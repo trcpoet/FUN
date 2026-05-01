@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { addHours, format } from "date-fns";
 import { supabase } from "../../lib/supabase";
 import { createGame, createMapNote } from "../../lib/api";
+import { glassMessengerPanel } from "../styles/glass";
 import {
   durationPresetsForSport,
   defaultDurationForSport,
@@ -229,7 +230,7 @@ export function CreateGameSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="rounded-t-3xl max-h-[72vh] flex flex-col p-4 border-border/80 bg-popover/95 text-popover-foreground backdrop-blur-xl"
+        className={glassMessengerPanel("rounded-t-3xl max-h-[72vh] flex flex-col p-4 border-border/80")}
         aria-describedby="create-game-desc"
       >
         <SheetDescription id="create-game-desc" className="sr-only">

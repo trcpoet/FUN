@@ -5,6 +5,7 @@ import type { GameRow } from "../../lib/supabase";
 import { formatVenueGameTimerSummary } from "../../lib/mapGameTimer";
 import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";
 import { getSportIconEmoji } from "../map/gameSportIcons";
+import { glassMessengerPanel } from "../styles/glass";
 
 type VenueInfoPopupProps = {
   venue: VenueSelection;
@@ -148,7 +149,9 @@ export function VenueInfoPopup({
       ref={rootRef}
       role="dialog"
       aria-modal="true"
-      className="fixed z-[1000] w-[min(20rem,calc(100vw-2rem))] max-h-[min(28rem,70vh)] overflow-auto rounded-xl border border-slate-600 bg-slate-900/95 shadow-xl backdrop-blur-sm pointer-events-auto"
+      className={glassMessengerPanel(
+        "fixed z-[1000] w-[min(20rem,calc(100vw-2rem))] max-h-[min(28rem,70vh)] overflow-auto rounded-xl pointer-events-auto"
+      )}
       style={{
         left,
         top,

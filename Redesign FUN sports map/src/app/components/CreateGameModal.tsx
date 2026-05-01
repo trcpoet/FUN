@@ -25,6 +25,7 @@ import { motion, useAnimate } from "motion/react";
 import { supabase } from "../../lib/supabase";
 import { createGame, createMapNote } from "../../lib/api";
 import { getSportsForPicker, filterSportsByQuery, sportEmojiFor } from "../../lib/sportDisplay";
+import { glassMessengerPanel } from "../styles/glass";
 import {
   LEVEL_OPTIONS,
   AGE_RANGE_OPTIONS,
@@ -473,7 +474,9 @@ export function CreateGameModal({
         role="dialog"
         aria-labelledby="create-game-modal-title"
         aria-describedby="create-game-modal-desc"
-        className="fixed z-[70] w-[360px] max-h-[88vh] flex flex-col rounded-2xl border border-white/10 bg-slate-950/95 shadow-2xl shadow-violet-950/20 overflow-hidden backdrop-blur-xl"
+        className={glassMessengerPanel(
+          "fixed z-[70] w-[360px] max-h-[88vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl shadow-violet-950/20"
+        )}
         style={
           hasAnchor
             ? {

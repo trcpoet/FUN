@@ -26,6 +26,7 @@ import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import { fetchUnifiedFeed, type UnifiedFeedItem } from "../../lib/api";
 import { GameFeedCard, NoteFeedCard, StatusFeedCard } from "../components/feed/UnifiedFeedCards";
+import { glassMessengerPage } from "../styles/glass";
 
 function notificationLabel(n: { type: string; payload?: unknown }): string {
   if (n.type === "badge_earned") {
@@ -143,6 +144,7 @@ export default function Feed() {
     <div className="min-h-screen bg-[#050505] text-foreground selection:bg-primary selection:text-white">
       {/* Dynamic Background Elements */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className={cn("absolute inset-0 opacity-90", glassMessengerPage())} />
         <div className="absolute -top-[10%] -left-[10%] size-[40%] rounded-full bg-primary/10 blur-[120px]" />
         <div className="absolute top-[20%] -right-[5%] size-[30%] rounded-full bg-blue-500/5 blur-[100px]" />
       </div>

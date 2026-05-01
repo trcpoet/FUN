@@ -4,6 +4,7 @@ import { cn } from "./MapCanvas";
 import { format } from "date-fns";
 import { Clock, Trash2, Navigation, Share2, Play, Square, MessageCircle, X, Users } from "lucide-react";
 import { sportEmojiFor } from "../../lib/sportDisplay";
+import { glassMessengerPanel } from "../styles/glass";
 
 const SPORT_GRADIENT: Record<string, string> = {
   soccer:     'from-emerald-600 to-green-800',
@@ -167,7 +168,9 @@ export function GameEventPopup({
 
   return (
     <div
-      className="absolute z-[1000] w-[min(20rem,calc(100vw-2rem))] max-w-[20rem] rounded-2xl border border-slate-700/60 bg-slate-900 shadow-2xl overflow-hidden"
+      className={glassMessengerPanel(
+        "absolute z-[1000] w-[min(20rem,calc(100vw-2rem))] max-w-[20rem] rounded-2xl overflow-hidden border-white/10"
+      )}
       style={{ transform: "translate(-50%, calc(-100% - 14px))" }}
     >
       {/* Gradient header */}

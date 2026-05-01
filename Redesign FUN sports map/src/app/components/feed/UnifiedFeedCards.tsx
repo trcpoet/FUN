@@ -5,6 +5,7 @@ import { cn } from "../ui/utils";
 import { Badge } from "../ui/badge";
 import { addNoteComment, fetchNoteComments, type UnifiedFeedItem } from "../../../lib/api";
 import type { MapNoteCommentRow } from "../../../lib/supabase";
+import { glassMessengerPanel } from "../../styles/glass";
 
 export function visibilityChip(v: string | null | undefined): string {
   if (!v) return "Public";
@@ -81,8 +82,7 @@ export function NoteFeedCard(props: {
   return (
     <article
       className={cn(
-        "group relative overflow-hidden transition-all duration-300",
-        "rounded-3xl border border-white/[0.08] bg-card/40 backdrop-blur-sm",
+        glassMessengerPanel("group relative overflow-hidden transition-all duration-300 rounded-3xl"),
         "hover:border-cyan-400/25 hover:shadow-[0_0_34px_-14px_rgba(34,211,238,0.35)]",
       )}
     >
@@ -199,8 +199,7 @@ export function GameFeedCard(props: {
   return (
     <article
       className={cn(
-        "group relative overflow-hidden transition-all duration-300",
-        "rounded-3xl border border-white/[0.08] bg-card/40 backdrop-blur-sm",
+        glassMessengerPanel("group relative overflow-hidden transition-all duration-300 rounded-3xl"),
         "hover:border-violet-400/25 hover:shadow-[0_0_30px_-12px_rgba(124,58,237,0.35)]",
       )}
     >
@@ -245,8 +244,7 @@ export function StatusFeedCard(props: { item: Extract<UnifiedFeedItem, { kind: "
   return (
     <article
       className={cn(
-        "group relative overflow-hidden transition-all duration-300",
-        "rounded-3xl border border-white/[0.08] bg-card/40 backdrop-blur-sm",
+        glassMessengerPanel("group relative overflow-hidden transition-all duration-300 rounded-3xl"),
         "hover:border-primary/25 hover:shadow-[0_0_30px_-12px_rgba(225,29,72,0.25)]",
       )}
     >

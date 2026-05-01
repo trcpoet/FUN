@@ -17,6 +17,7 @@ import {
 } from "./ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { cn } from "./ui/utils";
+import { glassMessengerPanel } from "../styles/glass";
 import type {
   DmInboxRow,
   DmMessageRow,
@@ -1037,15 +1038,7 @@ export function GameMessengerSheet({
         side="right"
         className={cn(
           "h-full p-0 gap-0 sm:max-w-none flex flex-col overflow-hidden",
-          [
-            // Glass drawer: deep navy tint + subtle cyan/violet edge glow.
-            "text-popover-foreground backdrop-blur-2xl",
-            "border-l border-cyan-400/15",
-            // Clearer glass: reduce navy opacity and add a light wash for "transparent glass" feel.
-            // Foggy see-through glass: much lower tint + stronger frosted wash.
-            "bg-[radial-gradient(900px_circle_at_10%_0%,rgba(34,211,238,0.12),transparent_42%),radial-gradient(900px_circle_at_90%_20%,rgba(124,58,237,0.10),transparent_46%),linear-gradient(to_bottom,rgba(8,14,28,0.38),rgba(6,10,18,0.22)),linear-gradient(to_bottom,rgba(255,255,255,0.10),rgba(255,255,255,0.04))]",
-            "shadow-[0_0_0_1px_rgba(34,211,238,0.10),0_24px_70px_rgba(0,0,0,0.65)]",
-          ].join(" "),
+          glassMessengerPanel("border-l border-cyan-400/15 border-t-0 border-r-0 border-b-0"),
           (threadExpanded && focusThread) || (inboxExpanded && showList)
             ? "!left-0 !right-0 !w-full !max-w-full !rounded-none"
             : "w-[20vw] min-w-[300px] max-w-[420px] rounded-l-2xl",
