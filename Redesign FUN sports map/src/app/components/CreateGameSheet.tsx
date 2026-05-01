@@ -230,7 +230,9 @@ export function CreateGameSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className={glassMessengerPanel("rounded-t-3xl max-h-[72vh] flex flex-col p-4 border-border/80")}
+        className={glassMessengerPanel(
+          "rounded-t-3xl max-h-[72vh] flex flex-col p-4 border-t border-border/80 border-l-0 border-r-0 border-b-0"
+        )}
         aria-describedby="create-game-desc"
       >
         <SheetDescription id="create-game-desc" className="sr-only">

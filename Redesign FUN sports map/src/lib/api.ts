@@ -18,6 +18,8 @@ import type {
   BadgeRow,
   UserBadgeRow,
   NotificationRow,
+  StatusCommentRow,
+  FeedMediaPostRow,
 } from "./supabase";
 import { cachedAsync, cacheClear } from "./requestCache";
 
@@ -64,7 +66,8 @@ function isMissingMapNotesRpc(err: { message?: string; code?: string } | null): 
     m.includes("map_note_comments") ||
     m.includes("create_map_note") ||
     m.includes("get_notes_nearby") ||
-    m.includes("get_unified_feed")
+    m.includes("get_unified_feed") ||
+    m.includes("get_live_nearby")
   );
 }
 

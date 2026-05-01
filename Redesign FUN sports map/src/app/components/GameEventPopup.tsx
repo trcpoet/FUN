@@ -169,7 +169,7 @@ export function GameEventPopup({
   return (
     <div
       className={glassMessengerPanel(
-        "absolute z-[1000] w-[min(20rem,calc(100vw-2rem))] max-w-[20rem] rounded-2xl overflow-hidden border-white/10"
+        "absolute z-[1000] w-[min(20rem,calc(100vw-2rem))] max-w-[20rem] rounded-2xl overflow-hidden"
       )}
       style={{ transform: "translate(-50%, calc(-100% - 14px))" }}
     >

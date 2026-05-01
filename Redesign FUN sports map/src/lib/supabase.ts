@@ -121,6 +121,23 @@ export type MapNoteCommentRow = {
   body: string;
 };
 
+export type StatusCommentRow = {
+  id: string;
+  created_at: string;
+  status_id: string;
+  user_id: string;
+  body: string;
+};
+
+/** Optional feed attachment row (see `feed_media_posts` migration). */
+export type FeedMediaPostRow = {
+  id: string;
+  user_id: string;
+  body: string | null;
+  storage_path: string;
+  created_at: string;
+};
+
 /** Row shape returned by the `get_my_note_inbox` RPC (notes I created or commented on). */
 export type NoteInboxRow = {
   id: string;

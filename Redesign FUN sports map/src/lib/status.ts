@@ -2,6 +2,8 @@ import { supabase } from "./supabase";
 import { cachedAsync } from "./requestCache";
 
 export type StatusRow = {
+  /** Row id (UUID) for comments/likes/deletes. */
+  id: string;
   user_id: string;
   body: string;
   created_at: string;
@@ -18,7 +20,8 @@ export async function getRecentStatuses(limit = 40): Promise<{ data: StatusRow[]
   return cachedAsync(`status:recent:${limit}`, 10_000, async () => {
     if (!supabase) return { data: [], error: new Error("Supabase not configured") };
     const { data, error } = await supabase.rpc("get_recent_statuses", { p_limit: limit });
-    return { data: (data as StatusRow[]) ?? [], error: error ? new Error(error.message) : null };
+    const rows = (data as StatusRow[]) ?? [];
+    return { data: rows, error: error ? new Error(error.message) : null };
   });
 }
 

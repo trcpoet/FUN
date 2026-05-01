@@ -150,7 +150,7 @@ export function VenueInfoPopup({
       role="dialog"
       aria-modal="true"
       className={glassMessengerPanel(
-        "fixed z-[1000] w-[min(20rem,calc(100vw-2rem))] max-h-[min(28rem,70vh)] overflow-auto rounded-xl pointer-events-auto"
+        "fixed z-[1000] w-[min(20rem,calc(100vw-2rem))] max-h-[min(28rem,70vh)] overflow-auto rounded-xl pointer-events-auto backdrop-blur-md shadow-xl"
       )}
       style={{
         left,
