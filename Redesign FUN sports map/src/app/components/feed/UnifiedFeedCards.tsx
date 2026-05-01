@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Heart, MessageCircle, MapPin, Send, Loader2, Trash2, ChevronRight } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "../ui/utils";
