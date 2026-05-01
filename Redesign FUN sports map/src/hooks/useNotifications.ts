@@ -29,10 +29,22 @@ export function useNotifications(options?: { limit?: number }) {
 
   useEffect(() => {
     if (!supabase) return;
-    const unsub = subscribeToNotifications((row) => {
-      setList((prev) => [row, ...prev].slice(0, limit));
+    let cancelled = false;
+    let unsub: (() => void) | null = null;
+
+    void supabase.auth.getUser().then(({ data: { user } }) => {
+      if (cancelled) return;
+      if (!user?.id) return;
+      unsub = subscribeToNotifications({
+        userId: user.id,
+        onInsert: (row) => {
+          setList((prev) => [row, ...prev].slice(0, limit));
+        },
+      });
     });
+
     return () => {
+      cancelled = true;
       if (unsub) unsub();
     };
   }, [limit]);

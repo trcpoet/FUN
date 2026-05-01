@@ -921,32 +921,33 @@ export async function markNotificationRead(notificationId: string): Promise<Erro
 }
 
 /** Subscribe to new notifications for the current user (Realtime). Call returned fn to unsubscribe. */
-export function subscribeToNotifications(
-  onNotification: (row: NotificationRow) => void
-): (() => void) | null {
+export function subscribeToNotifications(args: {
+  userId: string;
+  onInsert: (row: NotificationRow) => void;
+}): (() => void) | null {
   if (!supabase) return null;
-  const client = supabase;
-  const state: { channel: ReturnType<typeof client.channel> | null } = { channel: null };
-  client.auth.getUser().then(({ data: { user } }) => {
-    if (!user) return;
-    state.channel = client
-      .channel(`notifications:${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          onNotification(payload.new as NotificationRow);
-        }
-      )
-      .subscribe();
-  });
+  const client = supabase; // capture non-null reference; type narrowing doesn't extend into closures
+  const userId = args.userId.trim();
+  if (!userId) return null;
+
+  const channel = client
+    .channel(`notifications:${userId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "notifications",
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload) => {
+        args.onInsert(payload.new as NotificationRow);
+      }
+    )
+    .subscribe();
+
   return () => {
-    if (state.channel) client.removeChannel(state.channel);
+    void client.removeChannel(channel);
   };
 }
 
