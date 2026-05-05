@@ -1,5 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { Heart, MessageCircle, MapPin, Send, Loader2, Trash2, ChevronRight } from "lucide-react";
+import {
+  Heart,
+  MessageCircle,
+  MapPin,
+  Send,
+  Loader2,
+  Trash2,
+  ChevronRight,
+  Image as ImageIcon,
+  Clapperboard,
+  User,
+} from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "../ui/utils";
 import { Badge } from "../ui/badge";
@@ -11,12 +22,14 @@ import {
   deleteMyStatus,
   fetchNoteComments,
   fetchStatusComments,
+  feedMediaLooksVideo,
+  feedMediaPublicUrl,
   toggleMapNoteLike,
   toggleStatusLike,
   type LiveFeedItem,
   type UnifiedFeedItem,
 } from "../../../lib/api";
-import type { MapNoteCommentRow, StatusCommentRow } from "../../../lib/supabase";
+import type { FeedMediaPostRow, MapNoteCommentRow, StatusCommentRow } from "../../../lib/supabase";
 import { glassMessengerPanel } from "../../styles/glass";
 import { NoteCommentLikeButton } from "./NoteCommentLikeButton";
 
@@ -547,6 +560,82 @@ export function StatusFeedCard(props: {
             </button>
           </div>
         </div>
+      </div>
+    </article>
+  );
+}
+
+/** Photo or reel card for the global network stream (`feed_media_posts`). */
+export function MediaFeedCard(props: {
+  item: FeedMediaPostRow;
+  variant: "post" | "reel";
+  onOpenProfile?: () => void;
+}) {
+  const { item, variant, onOpenProfile } = props;
+  const url = feedMediaPublicUrl(item.storage_path);
+  const isVideo = feedMediaLooksVideo(item.storage_path, url);
+  const label = variant === "reel" ? "Reel" : "Photo";
+
+  return (
+    <article
+      className={cn(
+        glassMessengerPanel("group relative overflow-hidden transition-all duration-300 rounded-3xl"),
+        "hover:border-sky-400/25 hover:shadow-[0_0_30px_-12px_rgba(56,189,248,0.28)]",
+      )}
+    >
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex size-9 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-300 border border-sky-400/10">
+              {variant === "reel" ? <Clapperboard className="size-4" /> : <ImageIcon className="size-4" />}
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">{label}</p>
+              <p className="text-xs font-semibold text-slate-200 line-clamp-1">{relTime(item.created_at)}</p>
+            </div>
+          </div>
+          <Badge className="bg-black/40 backdrop-blur-md border-white/10 text-[10px] font-bold uppercase tracking-wider py-0.5 px-2.5 shrink-0">
+            Public
+          </Badge>
+        </div>
+
+        {item.body?.trim() ? (
+          <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap break-words">{item.body.trim()}</p>
+        ) : null}
+
+        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-black/40">
+          {!url ? (
+            <div className="flex aspect-video items-center justify-center px-4 py-10 text-center text-xs text-slate-500">
+              Media unavailable (check storage path).
+            </div>
+          ) : isVideo ? (
+            <video
+              className="max-h-[min(70vh,520px)] w-full object-contain bg-black"
+              controls
+              playsInline
+              preload="metadata"
+              src={url}
+            />
+          ) : (
+            <img
+              src={url}
+              alt=""
+              loading="lazy"
+              className="max-h-[min(70vh,520px)] w-full object-contain bg-black/60"
+            />
+          )}
+        </div>
+
+        {onOpenProfile ? (
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-slate-300 hover:bg-white/[0.06] hover:text-white transition-colors"
+          >
+            <User className="size-3.5" />
+            View profile
+          </button>
+        ) : null}
       </div>
     </article>
   );

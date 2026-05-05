@@ -358,6 +358,95 @@ export async function fetchRecentFeedMediaPosts(limit = 12): Promise<{ data: Fee
   return { data: (data as FeedMediaPostRow[]) ?? [], error: error ? new Error(error.message) : null };
 }
 
+/** Public URL for a row in `feed_media_posts.storage_path` (avatars bucket). */
+export function feedMediaPublicUrl(storagePath: string): string | null {
+  if (!supabase) return null;
+  const p = storagePath?.trim();
+  if (!p) return null;
+  const { data } = supabase.storage.from("avatars").getPublicUrl(p);
+  return data.publicUrl ?? null;
+}
+
+export function feedMediaVariantFromPath(storagePath: string): "post" | "reel" {
+  const p = storagePath.toLowerCase();
+  if (p.includes("/reels/") || p.includes("feed/reels")) return "reel";
+  return "post";
+}
+
+export function feedMediaLooksVideo(storagePath: string, publicUrl: string | null): boolean {
+  const blob = `${storagePath} ${publicUrl ?? ""}`.toLowerCase();
+  return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(blob);
+}
+
+/**
+ * Recent photo/reel posts, excluding creators whose `athlete_profile.is_private` is true.
+ * The viewer always sees their own uploads.
+ */
+export async function fetchPublicFeedMediaPosts(params: {
+  limit?: number;
+  viewerUserId?: string | null;
+}): Promise<{ data: FeedMediaPostRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const cap = Math.min(Math.max(1, params.limit ?? 24), 80);
+  const { data: rows, error } = await supabase
+    .from("feed_media_posts")
+    .select("id, user_id, body, storage_path, created_at")
+    .order("created_at", { ascending: false })
+    .limit(cap * 3);
+
+  if (error) return { data: [], error: new Error(error.message) };
+  const list = (rows as FeedMediaPostRow[]) ?? [];
+  if (!list.length) return { data: [], error: null };
+
+  const userIds = [...new Set(list.map((r) => r.user_id))];
+  const { data: profiles, error: profErr } = await supabase
+    .from("profiles")
+    .select("id, athlete_profile")
+    .in("id", userIds);
+
+  if (profErr || !profiles?.length) {
+    return { data: list.slice(0, cap), error: null };
+  }
+
+  const viewer = params.viewerUserId?.trim() ?? null;
+  const privateByUser = new Map<string, boolean>();
+  for (const row of profiles as { id: string; athlete_profile?: unknown }[]) {
+    privateByUser.set(row.id, Boolean(parseAthleteProfile(row.athlete_profile).is_private));
+  }
+
+  const filtered = list.filter((r) => {
+    if (viewer && r.user_id === viewer) return true;
+    return !privateByUser.get(r.user_id);
+  });
+
+  return { data: filtered.slice(0, cap), error: null };
+}
+
+/** Single chronological stream: unified RPC rows + media posts (Explore / Feed “Global network”). */
+export type GlobalNetworkItem =
+  | { type: "unified"; item: UnifiedFeedItem }
+  | { type: "media"; item: FeedMediaPostRow; variant: "post" | "reel" };
+
+export function mergeGlobalNetworkChronological(
+  unified: UnifiedFeedItem[],
+  media: FeedMediaPostRow[]
+): GlobalNetworkItem[] {
+  const merged: GlobalNetworkItem[] = [
+    ...unified.map((item) => ({ type: "unified" as const, item })),
+    ...media.map((item) => ({
+      type: "media" as const,
+      item,
+      variant: feedMediaVariantFromPath(item.storage_path),
+    })),
+  ];
+  merged.sort((a, b) => {
+    const ta = new Date(a.type === "unified" ? a.item.created_at : a.item.created_at).getTime();
+    const tb = new Date(b.type === "unified" ? b.item.created_at : b.item.created_at).getTime();
+    return tb - ta;
+  });
+  return merged;
+}
+
 // —— Auth (email/password, OWASP-aligned) ——
 
 const MIN_PASSWORD_LENGTH = 8;

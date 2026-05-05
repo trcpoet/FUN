@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bell,
   Compass,
@@ -11,6 +11,7 @@ import {
   ChevronRight,
   MapPin,
   Flame,
+  Loader2,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { cn } from "../components/ui/utils";
@@ -18,8 +19,22 @@ import { useNotifications } from "../../hooks/useNotifications";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
-import { fetchLiveNearby, fetchUnifiedFeed, type LiveFeedItem, type UnifiedFeedItem } from "../../lib/api";
-import { GameFeedCard, NoteFeedCard, StatusFeedCard } from "../components/feed/UnifiedFeedCards";
+import {
+  fetchLiveNearby,
+  fetchPublicFeedMediaPosts,
+  fetchUnifiedFeed,
+  mergeGlobalNetworkChronological,
+  type GlobalNetworkItem,
+  type LiveFeedItem,
+  type UnifiedFeedItem,
+} from "../../lib/api";
+import type { FeedMediaPostRow } from "../../lib/supabase";
+import {
+  GameFeedCard,
+  MediaFeedCard,
+  NoteFeedCard,
+  StatusFeedCard,
+} from "../components/feed/UnifiedFeedCards";
 import LightRays from "../components/feed/LightRays";
 import { glassMessengerPage } from "../styles/glass";
 import { useAuth } from "../contexts/AuthContext";
@@ -83,6 +98,94 @@ function handleNotificationNavigate(
 
 type TabId = "discovery" | "activity" | "similar" | "friends" | "notifications";
 
+function LiveSectionSkeleton() {
+  return (
+    <div className="grid gap-4 px-1" aria-hidden>
+      {[0, 1].map((i) => (
+        <div
+          key={i}
+          className="rounded-3xl border border-white/[0.08] bg-white/[0.02] p-5 animate-pulse flex gap-4"
+        >
+          <div className="size-12 shrink-0 rounded-2xl bg-white/10" />
+          <div className="flex-1 space-y-2 pt-1">
+            <div className="h-2.5 w-24 rounded bg-white/10" />
+            <div className="h-3 w-full rounded bg-white/10" />
+            <div className="h-3 w-4/5 rounded bg-white/5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GlobalNetworkSkeleton() {
+  return (
+    <div className="grid gap-6" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="rounded-3xl border border-white/[0.08] bg-white/[0.02] p-6 animate-pulse space-y-3"
+        >
+          <div className="flex items-center gap-3">
+            <div className="size-9 rounded-2xl bg-white/10" />
+            <div className="h-2.5 w-28 rounded bg-white/10" />
+          </div>
+          <div className="h-3 w-full rounded bg-white/10" />
+          <div className="h-3 w-[88%] rounded bg-white/5" />
+          <div className="h-40 w-full rounded-2xl bg-white/5" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function globalNetworkRowKey(row: GlobalNetworkItem, index: number): string {
+  if (row.type === "media") return `m:${row.item.id}`;
+  return `${row.item.kind}:${row.item.id}:${index}`;
+}
+
+function renderGlobalNetworkItem(
+  row: GlobalNetworkItem,
+  ctx: {
+    userId: string | null | undefined;
+    navigate: (to: string) => void;
+    refreshFeeds: () => void;
+  },
+): React.ReactNode {
+  const { userId, navigate, refreshFeeds } = ctx;
+  if (row.type === "media") {
+    return (
+      <MediaFeedCard
+        item={row.item}
+        variant={row.variant}
+        onOpenProfile={() => navigate(`/athlete/${encodeURIComponent(row.item.user_id)}`)}
+      />
+    );
+  }
+  const it = row.item;
+  if (it.kind === "note") {
+    return (
+      <NoteFeedCard
+        item={it}
+        currentUserId={userId ?? null}
+        onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
+        onInvalidate={refreshFeeds}
+      />
+    );
+  }
+  if (it.kind === "game") {
+    return (
+      <GameFeedCard
+        item={it}
+        currentUserId={userId ?? null}
+        onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
+        onInvalidate={refreshFeeds}
+      />
+    );
+  }
+  return <StatusFeedCard item={it} currentUserId={userId ?? null} onInvalidate={refreshFeeds} />;
+}
+
 function TabButton(props: {
   active: boolean;
   label: string;
@@ -119,9 +222,24 @@ export default function Feed() {
   const [unifiedLoading, setUnifiedLoading] = useState(false);
   const [liveItems, setLiveItems] = useState<LiveFeedItem[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
+  const [mediaPosts, setMediaPosts] = useState<FeedMediaPostRow[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
 
   const refreshFeeds = useCallback(() => {
-    if (!coords) return;
+    setMediaLoading(true);
+    void fetchPublicFeedMediaPosts({ limit: 28, viewerUserId: user?.id ?? null }).then((r) => {
+      setMediaLoading(false);
+      setMediaPosts(r.data ?? []);
+    });
+
+    if (!coords) {
+      setUnifiedLoading(false);
+      setLiveLoading(false);
+      setUnified([]);
+      setLiveItems([]);
+      return;
+    }
+
     setUnifiedLoading(true);
     setLiveLoading(true);
     void fetchUnifiedFeed({ lat: coords.lat, lng: coords.lng, mapRadiusKm: 120, limit: 80 }).then((r) => {
@@ -132,7 +250,14 @@ export default function Feed() {
       setLiveLoading(false);
       setLiveItems(r.data ?? []);
     });
-  }, [coords?.lat, coords?.lng]);
+  }, [coords?.lat, coords?.lng, user?.id]);
+
+  const mergedGlobal = useMemo(
+    () => mergeGlobalNetworkChronological(coords ? unified : [], mediaPosts),
+    [coords, unified, mediaPosts],
+  );
+
+  const globalStreamLoading = (coords ? unifiedLoading : false) || mediaLoading;
 
   useEffect(() => {
     const qs = new URLSearchParams(location.search);
@@ -198,7 +323,9 @@ export default function Feed() {
                 </h1>
                 <div className="flex items-center gap-1.5 mt-1">
                   <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pulse Active</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                    Explore · Global network
+                  </span>
                 </div>
               </div>
             </div>
@@ -265,59 +392,99 @@ export default function Feed() {
         {tab === "discovery" && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Live: games + map notes within 25 km */}
-            {coords ? (
-              <section className="space-y-4">
-                <div className="flex items-center justify-between px-1">
-                  <div className="flex items-center gap-2">
-                    <div className="flex size-8 items-center justify-center rounded-xl bg-orange-500/10 text-orange-500">
-                      <MapPin className="size-4" />
-                    </div>
-                    <div>
-                      <h2 className="text-sm font-black uppercase tracking-widest text-white">Live near you</h2>
-                      <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
-                        Games & map notes · 25 km
-                      </p>
-                    </div>
+            <section className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex size-8 items-center justify-center rounded-xl bg-orange-500/10 text-orange-500">
+                    <MapPin className="size-4" />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setTab("activity")}
-                    className="text-[10px] font-bold uppercase tracking-widest text-primary hover:underline"
-                  >
-                    Full feed
-                  </button>
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-widest text-white">Live near you</h2>
+                    <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
+                      Games & map notes · 25 km
+                    </p>
+                  </div>
                 </div>
-                {liveLoading ? (
-                  <p className="text-xs text-slate-500 px-1">Loading live activity…</p>
-                ) : liveItems.length === 0 ? (
-                  <p className="text-xs text-slate-500 px-1">No games or notes in range yet — check the map or widen your search from Feed.</p>
-                ) : (
-                  <ul className="grid gap-6">
-                    {liveItems.map((it) =>
-                      it.kind === "note" ? (
-                        <li key={`note:${it.id}`}>
-                          <NoteFeedCard
-                            item={it}
-                            currentUserId={user?.id ?? null}
-                            onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
-                            onInvalidate={refreshFeeds}
-                          />
-                        </li>
-                      ) : (
-                        <li key={`game:${it.id}`}>
-                          <GameFeedCard
-                            item={it}
-                            currentUserId={user?.id ?? null}
-                            onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
-                            onInvalidate={refreshFeeds}
-                          />
-                        </li>
-                      )
-                    )}
-                  </ul>
-                )}
-              </section>
-            ) : null}
+                <button
+                  type="button"
+                  onClick={() => setTab("activity")}
+                  className="text-[10px] font-bold uppercase tracking-widest text-primary hover:underline"
+                >
+                  Feed tab
+                </button>
+              </div>
+              {!coords ? (
+                <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90">
+                  Turn on location to load nearby games and notes. Photos & reels below still update from the global network.
+                </div>
+              ) : liveLoading ? (
+                <LiveSectionSkeleton />
+              ) : liveItems.length === 0 ? (
+                <p className="text-xs text-slate-500 px-1">
+                  No games or notes in range yet — create one on the map or search a new area.
+                </p>
+              ) : (
+                <ul className="grid gap-6">
+                  {liveItems.map((it) =>
+                    it.kind === "note" ? (
+                      <li key={`note:${it.id}`}>
+                        <NoteFeedCard
+                          item={it}
+                          currentUserId={user?.id ?? null}
+                          onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
+                          onInvalidate={refreshFeeds}
+                        />
+                      </li>
+                    ) : (
+                      <li key={`game:${it.id}`}>
+                        <GameFeedCard
+                          item={it}
+                          currentUserId={user?.id ?? null}
+                          onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
+                          onInvalidate={refreshFeeds}
+                        />
+                      </li>
+                    ),
+                  )}
+                </ul>
+              )}
+            </section>
+
+            {/* Global network: games, notes, statuses, photos & reels (same stream as Feed tab) */}
+            <section className="space-y-4">
+              <div className="flex items-center justify-between px-1 gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">
+                    <Globe className="size-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-black uppercase tracking-widest text-white">Global network</h2>
+                    <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5 truncate">
+                      Games & notes (120 km) · statuses · photos & reels
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {globalStreamLoading ? (
+                <GlobalNetworkSkeleton />
+              ) : mergedGlobal.length === 0 ? (
+                <p className="text-xs text-slate-500 px-1">
+                  Nothing in the network stream yet — post a status, drop a map note, or share a photo from your profile.
+                </p>
+              ) : (
+                <ul className="grid gap-6">
+                  {mergedGlobal.map((row, i) => (
+                    <li key={globalNetworkRowKey(row, i)}>
+                      {renderGlobalNetworkItem(row, {
+                        userId: user?.id,
+                        navigate,
+                        refreshFeeds,
+                      })}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
 
             {/* Recommendations Grid */}
             <section className="space-y-4">
@@ -364,59 +531,99 @@ export default function Feed() {
         )}
 
         {tab === "activity" && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <section className="space-y-6">
-              <div className="flex items-center justify-between px-2">
-                <div className="space-y-1">
-                  <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-                    Feed
-                    <span className="inline-block size-1.5 rounded-full bg-primary animate-pulse" />
-                  </h2>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">
-                    Map posts within 120 km · statuses worldwide
+          <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <section className="space-y-3 px-1">
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                  Feed
+                  <span className="inline-block size-1.5 rounded-full bg-primary animate-pulse" />
+                </h2>
+                {globalStreamLoading || (coords && liveLoading) ? (
+                  <Loader2 className="size-4 animate-spin text-primary" aria-label="Loading" />
+                ) : null}
+              </div>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">
+                Same as Explore: near you, then global network (games, notes, statuses, photos & reels)
+              </p>
+            </section>
+
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 px-1">
+                <div className="flex size-8 items-center justify-center rounded-xl bg-orange-500/10 text-orange-500">
+                  <MapPin className="size-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-black uppercase tracking-widest text-white">Live near you</h2>
+                  <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
+                    Games & map notes · 25 km
                   </p>
                 </div>
               </div>
-
               {!coords ? (
-                <div className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md p-10 text-center">
-                  <p className="text-sm font-bold text-slate-300 uppercase tracking-widest">Location needed</p>
-                  <p className="text-xs text-slate-500 mt-2">
-                    Allow location to see nearby games and notes.
-                  </p>
+                <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90">
+                  Turn on location to load nearby games and notes.
                 </div>
-              ) : unifiedLoading ? (
-                <div className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md p-10 text-center">
-                  <p className="text-sm text-slate-400">Loading nearby activity…</p>
-                </div>
-              ) : unified.length === 0 ? (
-                <div className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md p-10 text-center">
-                  <p className="text-sm font-bold text-slate-300 uppercase tracking-widest">No activity yet</p>
-                  <p className="text-xs text-slate-500 mt-2">
-                    Create a game or drop a note on the map to start the conversation.
-                  </p>
-                </div>
+              ) : liveLoading ? (
+                <LiveSectionSkeleton />
+              ) : liveItems.length === 0 ? (
+                <p className="text-xs text-slate-500 px-1">No games or notes in range yet.</p>
               ) : (
                 <ul className="grid gap-6">
-                  {unified.map((it) => (
-                    <li key={`${it.kind}:${it.id}`}>
-                      {it.kind === "note" ? (
+                  {liveItems.map((it) =>
+                    it.kind === "note" ? (
+                      <li key={`feed-note:${it.id}`}>
                         <NoteFeedCard
                           item={it}
                           currentUserId={user?.id ?? null}
                           onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
                           onInvalidate={refreshFeeds}
                         />
-                      ) : it.kind === "game" ? (
+                      </li>
+                    ) : (
+                      <li key={`feed-game:${it.id}`}>
                         <GameFeedCard
                           item={it}
                           currentUserId={user?.id ?? null}
                           onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
                           onInvalidate={refreshFeeds}
                         />
-                      ) : (
-                        <StatusFeedCard item={it} currentUserId={user?.id ?? null} onInvalidate={refreshFeeds} />
-                      )}
+                      </li>
+                    ),
+                  )}
+                </ul>
+              )}
+            </section>
+
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 px-1">
+                <div className="flex size-8 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">
+                  <Globe className="size-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-black uppercase tracking-widest text-white">Global network</h2>
+                  <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
+                    Games & notes (120 km) · statuses · photos & reels
+                  </p>
+                </div>
+              </div>
+              {globalStreamLoading ? (
+                <GlobalNetworkSkeleton />
+              ) : mergedGlobal.length === 0 ? (
+                <div className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md p-10 text-center">
+                  <p className="text-sm font-bold text-slate-300 uppercase tracking-widest">No activity yet</p>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Create a game, drop a map note, post a status, or share media from your profile.
+                  </p>
+                </div>
+              ) : (
+                <ul className="grid gap-6">
+                  {mergedGlobal.map((row, i) => (
+                    <li key={`feed-global:${globalNetworkRowKey(row, i)}`}>
+                      {renderGlobalNetworkItem(row, {
+                        userId: user?.id,
+                        navigate,
+                        refreshFeeds,
+                      })}
                     </li>
                   ))}
                 </ul>
