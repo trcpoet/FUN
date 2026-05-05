@@ -1843,9 +1843,11 @@ export function MapboxMap(props: MapboxMapProps) {
 
   // —— Sports venues: subtle GL polygons + small center dots (no DOM flag markers) ———
   const venueSportSig = venueSportsFilter.slice().sort().join("|");
-  // Data key: only location + radius — drives the network fetch.
+  // Data key: location + radius (+ a recenter epoch) — drives the network fetch.
+  // `centerOnUserTrigger` is bumped by the recenter button even when coords don't change,
+  // so venues can be refreshed on demand.
   const venueFetchDataKey = debouncedVenueFetchCenter
-    ? `${debouncedVenueFetchCenter.lat.toFixed(4)},${debouncedVenueFetchCenter.lng.toFixed(4)},${venueSearchRadiusKm}`
+    ? `${debouncedVenueFetchCenter.lat.toFixed(4)},${debouncedVenueFetchCenter.lng.toFixed(4)},${venueSearchRadiusKm},${centerOnUserTrigger ?? 0}`
     : null;
   // Render key: includes sport sig — drives the effect to re-run on filter changes.
   const venueFetchKey = venueFetchDataKey ? `${venueFetchDataKey},${venueSportSig}` : null;

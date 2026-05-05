@@ -22,6 +22,7 @@ import type {
   FeedMediaPostRow,
 } from "./supabase";
 import { cachedAsync, cacheClear } from "./requestCache";
+import { getAuthUserDeduped } from "./authDedup";
 
 const DEFAULT_RADIUS_KM = 15;
 const DEFAULT_PROFILES_LIMIT = 50;
@@ -246,7 +247,9 @@ export async function fetchUnifiedFeed(params: {
   const { data, error } = await supabase.rpc("get_unified_feed", {
     p_lat: params.lat,
     p_lng: params.lng,
-    p_map_radius_km: params.mapRadiusKm ?? 120,
+    // DB function signature uses `p_radius_km` (not `p_map_radius_km`).
+    // If we send the wrong arg name, PostgREST returns 404 "function not found" due to signature mismatch.
+    p_radius_km: params.mapRadiusKm ?? 120,
     p_limit: params.limit ?? 80,
   });
   if (error && isMissingMapNotesRpc(error)) {
@@ -944,7 +947,7 @@ export async function getMyProfile(): Promise<{
       error: new Error("Supabase not configured"),
     };
   }
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUserDeduped();
   if (!user) {
     return {
       avatarId: null,
@@ -986,7 +989,7 @@ export async function updateMyProfile(updates: {
   athlete_profile?: AthleteProfilePayload;
 }): Promise<Error | null> {
   if (!supabase) return new Error("Supabase not configured");
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUserDeduped();
   if (!user) return new Error("Not signed in");
   const set: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (updates.display_name !== undefined) set.display_name = updates.display_name;
@@ -1029,7 +1032,7 @@ export async function updateMyProfile(updates: {
 
 export async function getMyStats(): Promise<{ data: UserStatsRow | null; error: Error | null }> {
   if (!supabase) return { data: null, error: null };
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUserDeduped();
   if (!user) return { data: null, error: null };
   const { data, error } = await supabase
     .from("user_stats")
@@ -1042,7 +1045,7 @@ export async function getMyStats(): Promise<{ data: UserStatsRow | null; error: 
 
 export async function getMyBadges(): Promise<{ data: UserBadgeRow[]; error: Error | null }> {
   if (!supabase) return { data: [], error: new Error("Supabase not configured") };
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUserDeduped();
   if (!user) return { data: [], error: new Error("Not signed in") };
   const { data, error } = await supabase
     .from("user_badges")
@@ -1060,7 +1063,7 @@ export async function getMyNotifications(limit = 20): Promise<{
   error: Error | null;
 }> {
   if (!supabase) return { data: [], error: null };
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUserDeduped();
   if (!user) return { data: [], error: null };
   const { data, error } = await supabase
     .from("notifications")

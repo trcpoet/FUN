@@ -318,6 +318,9 @@ export default function App() {
       setMapSearchLocation(null);
       setMapSearchLocationName(null);
       setCenterOnUserTrigger((n) => n + 1);
+      // Recenter should also refresh nearby content (games + notes).
+      refetchGames();
+      void refetchNotes();
     }
   };
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { getMyNotifications, markNotificationRead, subscribeToNotifications } from "../lib/api";
 import type { NotificationRow } from "../lib/supabase";
+import { getAuthUserDeduped } from "../lib/authDedup";
 
 export function useNotifications(options?: { limit?: number }) {
   const [list, setList] = useState<NotificationRow[]>([]);
@@ -32,7 +33,7 @@ export function useNotifications(options?: { limit?: number }) {
     let cancelled = false;
     let unsub: (() => void) | null = null;
 
-    void supabase.auth.getUser().then(({ data: { user } }) => {
+    void getAuthUserDeduped().then((user) => {
       if (cancelled) return;
       if (!user?.id) return;
       unsub = subscribeToNotifications({

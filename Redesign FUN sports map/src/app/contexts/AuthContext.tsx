@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { supabase } from "../../lib/supabase";
 import { getMyProfile } from "../../lib/api";
 import type { User } from "@supabase/supabase-js";
+import { getAuthSessionDeduped } from "../../lib/authDedup";
 
 type AuthContextValue = {
   user: User | null;
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       return;
     }
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    void getAuthSessionDeduped().then((session) => {
       setUser(session?.user ?? null);
       setLoading(false);
     });

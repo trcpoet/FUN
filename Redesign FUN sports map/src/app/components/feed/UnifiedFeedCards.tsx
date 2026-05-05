@@ -99,8 +99,12 @@ export function NoteFeedCard(props: {
     if (data) {
       setComments((prev) => [...prev, data]);
       setLoaded(true);
+    } else {
+      setError("Comment saved, but couldn't display it yet. Pull to refresh to see it.");
     }
-    onInvalidate?.();
+    // Do not invalidate the entire feed on a new comment; we already have the
+    // newly inserted row and can update local UI without triggering global
+    // loading states / scroll jumps.
   };
 
   const handleLike = async () => {
@@ -411,8 +415,10 @@ export function StatusFeedCard(props: {
     if (data) {
       setComments((prev) => [...prev, data]);
       setLoaded(true);
+    } else {
+      setError("Comment saved, but couldn't display it yet. Pull to refresh to see it.");
     }
-    onInvalidate?.();
+    // Same as notes: avoid full-feed refresh on comment send.
   };
 
   const handleLike = async () => {
