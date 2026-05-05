@@ -35,6 +35,7 @@ import { VenueInfoPopup } from "./VenueInfoPopup";
 import { ColocatedGamesPin } from "./ColocatedGamesPin";
 import { RandomLocationGamePin } from "./RandomLocationGamePin";
 import { ColocatedGamesModal } from "./ColocatedGamesModal";
+import { GameMapCountdownPill } from "./GameMapCountdownPill";
 import { useIsMobile } from "./ui/use-mobile";
 
 /** Layer / source ids: games use GL clustering (geo-anchored, no DOM drift). */
@@ -213,6 +214,10 @@ export function MapboxMap(props: MapboxMapProps) {
   /** HTML markers for multiple games at the same coordinates (cluster pin). */
   const colocatedMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[]>([]);
   const randomGameMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[]>([]);
+  /** Venue singles use GL icons; this holds DOM-only countdown pills above them. */
+  const venueCountdownEntriesRef = useRef(
+    new Map<string, { marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }>()
+  );
   /** Pulsating note markers, keyed by note id (no React root — plain DOM). */
   const noteMarkerEntriesRef = useRef<Map<string, { marker: import("mapbox-gl").Marker; root: HTMLButtonElement; dispose: () => void }>>(new Map());
   const userMarker2dRef = useRef<import("mapbox-gl").Marker | null>(null);
@@ -959,6 +964,11 @@ export function MapboxMap(props: MapboxMapProps) {
       if (el) el.style.visibility = showIndividuals ? "visible" : "hidden";
     });
 
+    venueCountdownEntriesRef.current.forEach(({ marker }) => {
+      const el = marker.getElement();
+      if (el) el.style.visibility = showIndividuals ? "visible" : "hidden";
+    });
+
     const g = gamesRef.current;
     setMapUxHint(
       g.length > 0 && !showClusters && !showIndividuals && zoom < MapCfg.GAME_INDIVIDUAL_MIN_ZOOM
@@ -986,6 +996,10 @@ export function MapboxMap(props: MapboxMapProps) {
       ent.scaleEl.style.transformOrigin = "center";
     }
     for (const ent of playerMarkerEntriesRef.current) {
+      ent.scaleEl.style.transform = `scale(${s})`;
+      ent.scaleEl.style.transformOrigin = "center";
+    }
+    for (const ent of venueCountdownEntriesRef.current.values()) {
       ent.scaleEl.style.transform = `scale(${s})`;
       ent.scaleEl.style.transformOrigin = "center";
     }
@@ -1396,6 +1410,103 @@ export function MapboxMap(props: MapboxMapProps) {
       }, 0);
     };
   }, [mapLoaded, games, selectedGameId, bumpGameId, mapMinuteEpoch, applyMapLayerVisibility]);
+
+  /**
+   * Venue games (location_label set) are drawn as GL symbols. To keep parity with
+   * map-tap pins, render a tiny DOM-only countdown/LIVE badge above each venue
+   * single. (Non-interactive; clicks go to the GL layer.)
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
+    const { singles } = splitColocatedGames(capped);
+    const venueSingles = singles.filter((g) => isVenueGame(g));
+    const nextById = new Map<string, GameRow>(venueSingles.map((g) => [g.id, g]));
+
+    let cancelled = false;
+    void loadMapboxGl().then((mapboxgl) => {
+      if (cancelled || mapRef.current !== map) return;
+      const Marker = mapboxgl.default.Marker;
+      const existing = venueCountdownEntriesRef.current;
+
+      // Drop entries not in next set.
+      const toUnmount: ReactRoot[] = [];
+      for (const [id, entry] of existing) {
+        if (!nextById.has(id)) {
+          try {
+            entry.marker.remove();
+          } catch (_) {}
+          toUnmount.push(entry.root);
+          existing.delete(id);
+        }
+      }
+      if (toUnmount.length) {
+        window.setTimeout(() => {
+          for (const root of toUnmount) {
+            try {
+              root.unmount();
+            } catch (_) {}
+          }
+        }, 0);
+      }
+
+      // Add/update entries.
+      for (const game of venueSingles) {
+        const prev = existing.get(game.id);
+        if (prev) {
+          // Keep marker in sync with any server-side coordinate fixes.
+          prev.marker.setLngLat([game.lng, game.lat]);
+          prev.root.render(
+            <div className="relative h-[52px] w-[52px] pointer-events-none">
+              <GameMapCountdownPill game={game} />
+            </div>
+          );
+          continue;
+        }
+
+        const outer = document.createElement("div");
+        outer.style.pointerEvents = "none";
+        const scaleEl = document.createElement("div");
+        scaleEl.style.willChange = "transform";
+        outer.appendChild(scaleEl);
+        const root = createRoot(scaleEl);
+        root.render(
+          <div className="relative h-[52px] w-[52px] pointer-events-none">
+            <GameMapCountdownPill game={game} />
+          </div>
+        );
+        const marker = new Marker({ element: outer, anchor: "center" })
+          .setLngLat([game.lng, game.lat])
+          .addTo(map);
+        existing.set(game.id, { marker, root, scaleEl });
+      }
+
+      applyMapLayerVisibility();
+      applyDomMarkerScale();
+    });
+
+    return () => {
+      cancelled = true;
+      // On unmount, remove any remaining markers.
+      const existing = venueCountdownEntriesRef.current;
+      const entries = [...existing.values()];
+      existing.clear();
+      for (const entry of entries) {
+        try {
+          entry.marker.remove();
+        } catch (_) {}
+      }
+      window.setTimeout(() => {
+        for (const entry of entries) {
+          try {
+            entry.root.unmount();
+          } catch (_) {}
+        }
+      }, 0);
+    };
+  }, [mapLoaded, games, mapMinuteEpoch, applyMapLayerVisibility, applyDomMarkerScale]);
 
   /** Selected / bump / hover: game sport icon layout + halo. */
   useEffect(() => {

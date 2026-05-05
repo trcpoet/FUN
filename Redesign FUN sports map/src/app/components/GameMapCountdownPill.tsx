@@ -43,7 +43,6 @@ export function GameMapCountdownPill({ game }: { game: GameRow }) {
     return () => window.clearInterval(id);
   }, []);
 
-  if (isVenueGame(game)) return null;
   if (isGameLive(game, now)) {
     return (
       <span className={`${posTopRight} ${livePillClass()}`} aria-hidden>
