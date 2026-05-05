@@ -549,6 +549,8 @@ export default function App() {
             setCreateGameCoords({ lat, lng });
             setCreateGameAnchorPoint(viewportPoint ?? null);
             setCreateGameLocationLabel(null);
+            setMapSearchLocation({ lat, lng });
+            setMapSearchLocationName(null);
             setCreateGameOpen(true);
           }}
           onCreateGameAtVenue={(venue, viewportPoint) => {
@@ -731,16 +733,21 @@ export default function App() {
         }}
         onSelectGameOnMap={async (gameId) => {
           let lat: number, lng: number;
+          let label: string | null = null;
           const game = games.find((g) => g.id === gameId);
           if (game) {
             lat = game.lat;
             lng = game.lng;
+            label = game.location_label?.trim() || null;
           } else {
             const coords = await getGameLatLng(gameId);
             if (!coords) return;
             lat = coords.lat;
             lng = coords.lng;
           }
+          setMapSearchLocation({ lat, lng });
+          setMapSearchLocationName(label);
+          refetchGames();
           handleCenterOnCoords({ lat, lng });
         }}
 

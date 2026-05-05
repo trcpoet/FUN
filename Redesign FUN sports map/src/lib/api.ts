@@ -531,7 +531,7 @@ export async function createGame(params: {
     p_location_label: locationLabel,
     p_description: params.description?.trim() ? params.description.trim() : null,
     p_requirements:
-      params.requirements && Object.keys(params.requirements).length > 0 ? params.requirements : null,
+      params.requirements && Object.keys(params.requirements).length > 0 ? params.requirements : {},
     p_duration_minutes: clampDurationMinutes(params.durationMinutes ?? 90),
     p_visibility: normalizeVisibility(params.visibility),
   };

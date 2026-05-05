@@ -1481,6 +1481,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
         map.easeTo({
           center: [tapLng, tapLat],
+          zoom: Math.max(map.getZoom(), MapCfg.GAME_INDIVIDUAL_MIN_ZOOM),
           duration: 300,
         });
 
@@ -1529,6 +1530,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
       map.easeTo({
         center: [tapLng, tapLat],
+        zoom: Math.max(map.getZoom(), MapCfg.GAME_INDIVIDUAL_MIN_ZOOM),
         duration: 300,
       });
 
