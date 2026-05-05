@@ -233,6 +233,16 @@ export async function fetchLiveNearby(params: {
   return { data: (data as LiveFeedItem[]) ?? [], error: error ? new Error(error.message) : null };
 }
 
+function isRpcSignatureMismatch(err: { message?: string; code?: string } | null): boolean {
+  if (!err) return false;
+  const m = (err.message ?? "").toLowerCase();
+  return (
+    err.code === "PGRST202" ||
+    /not found|could not find function|404/.test(m) ||
+    m.includes("schema cache")
+  );
+}
+
 export async function fetchUnifiedFeed(params: {
   lat: number;
   lng: number;
@@ -244,14 +254,30 @@ export async function fetchUnifiedFeed(params: {
   // Avoid spamming the network if PostgREST briefly can't see the function yet (schema cache / grants).
   // We retry after a short cool-down.
   if (missingUnifiedFeedUntilMs > Date.now()) return { data: [], error: null };
-  const { data, error } = await supabase.rpc("get_unified_feed", {
-    p_lat: params.lat,
-    p_lng: params.lng,
-    // DB function signature uses `p_radius_km` (not `p_map_radius_km`).
-    // If we send the wrong arg name, PostgREST returns 404 "function not found" due to signature mismatch.
-    p_radius_km: params.mapRadiusKm ?? 120,
-    p_limit: params.limit ?? 80,
+
+  const lat = params.lat;
+  const lng = params.lng;
+  const rkm = params.mapRadiusKm ?? 120;
+  const lim = params.limit ?? 80;
+
+  // `20260505170000_unified_feed_exclude_past_games.sql` renames the radius arg to `p_map_radius_km`.
+  // Older DBs still use `p_radius_km` (`20260501130000_map_notes_and_unified_feed.sql`). Wrong name → PostgREST 404.
+  let res = await supabase.rpc("get_unified_feed", {
+    p_lat: lat,
+    p_lng: lng,
+    p_map_radius_km: rkm,
+    p_limit: lim,
   });
+  if (res.error && isRpcSignatureMismatch(res.error)) {
+    res = await supabase.rpc("get_unified_feed", {
+      p_lat: lat,
+      p_lng: lng,
+      p_radius_km: rkm,
+      p_limit: lim,
+    });
+  }
+
+  const { data, error } = res;
   if (error && isMissingMapNotesRpc(error)) {
     missingUnifiedFeedUntilMs = Date.now() + 30_000;
     return { data: [], error: null };
@@ -422,7 +448,7 @@ export async function fetchPublicFeedMediaPosts(params: {
   return { data: filtered.slice(0, cap), error: null };
 }
 
-/** Single chronological stream: unified RPC rows + media posts (Explore / Feed “Global network”). */
+/** Single chronological stream: unified RPC rows + media posts (Explore tab “Global network”). */
 export type GlobalNetworkItem =
   | { type: "unified"; item: UnifiedFeedItem }
   | { type: "media"; item: FeedMediaPostRow; variant: "post" | "reel" };

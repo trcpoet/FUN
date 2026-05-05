@@ -324,7 +324,9 @@ export default function Feed() {
                 <div className="flex items-center gap-1.5 mt-1">
                   <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                    Explore · Global network
+                    {tab === "activity"
+                      ? "Feed · Live games near you"
+                      : "Explore · Global network"}
                   </span>
                 </div>
               </div>
@@ -391,66 +393,21 @@ export default function Feed() {
       <main className="relative mx-auto w-full max-w-3xl px-4 py-8 pb-32">
         {tab === "discovery" && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Live: games + map notes within 25 km */}
-            <section className="space-y-4">
-              <div className="flex items-center justify-between px-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex size-8 items-center justify-center rounded-xl bg-orange-500/10 text-orange-500">
-                    <MapPin className="size-4" />
-                  </div>
-                  <div>
-                    <h2 className="text-sm font-black uppercase tracking-widest text-white">Live near you</h2>
-                    <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
-                      Games & map notes · 25 km
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setTab("activity")}
-                  className="text-[10px] font-bold uppercase tracking-widest text-primary hover:underline"
-                >
-                  Feed tab
-                </button>
-              </div>
-              {!coords ? (
-                <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90">
-                  Turn on location to load nearby games and notes. Photos & reels below still update from the global network.
-                </div>
-              ) : liveLoading ? (
-                <LiveSectionSkeleton />
-              ) : liveItems.length === 0 ? (
-                <p className="text-xs text-slate-500 px-1">
-                  No games or notes in range yet — create one on the map or search a new area.
-                </p>
-              ) : (
-                <ul className="grid gap-6">
-                  {liveItems.map((it) =>
-                    it.kind === "note" ? (
-                      <li key={`note:${it.id}`}>
-                        <NoteFeedCard
-                          item={it}
-                          currentUserId={user?.id ?? null}
-                          onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
-                          onInvalidate={refreshFeeds}
-                        />
-                      </li>
-                    ) : (
-                      <li key={`game:${it.id}`}>
-                        <GameFeedCard
-                          item={it}
-                          currentUserId={user?.id ?? null}
-                          onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
-                          onInvalidate={refreshFeeds}
-                        />
-                      </li>
-                    ),
-                  )}
-                </ul>
-              )}
-            </section>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-white/[0.08] bg-white/[0.02] px-4 py-3">
+              <p className="text-xs text-muted-foreground font-medium">
+                Games and map notes near you live on{" "}
+                <span className="text-white font-bold">Feed</span>.
+              </p>
+              <button
+                type="button"
+                onClick={() => setTab("activity")}
+                className="shrink-0 text-[10px] font-bold uppercase tracking-widest text-primary hover:underline"
+              >
+                Open Feed
+              </button>
+            </div>
 
-            {/* Global network: games, notes, statuses, photos & reels (same stream as Feed tab) */}
+            {/* Global network: games, notes, statuses, photos & reels */}
             <section className="space-y-4">
               <div className="flex items-center justify-between px-1 gap-3">
                 <div className="flex items-center gap-2 min-w-0">
@@ -538,12 +495,12 @@ export default function Feed() {
                   Feed
                   <span className="inline-block size-1.5 rounded-full bg-primary animate-pulse" />
                 </h2>
-                {globalStreamLoading || (coords && liveLoading) ? (
+                {coords && liveLoading ? (
                   <Loader2 className="size-4 animate-spin text-primary" aria-label="Loading" />
                 ) : null}
               </div>
               <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">
-                Same as Explore: near you, then global network (games, notes, statuses, photos & reels)
+                Live games and map notes within 25 km — global stream is on Explore
               </p>
             </section>
 
@@ -553,7 +510,7 @@ export default function Feed() {
                   <MapPin className="size-4" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-black uppercase tracking-widest text-white">Live near you</h2>
+                  <h2 className="text-sm font-black uppercase tracking-widest text-white">Live games near you</h2>
                   <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
                     Games & map notes · 25 km
                   </p>
@@ -590,42 +547,6 @@ export default function Feed() {
                       </li>
                     ),
                   )}
-                </ul>
-              )}
-            </section>
-
-            <section className="space-y-4">
-              <div className="flex items-center gap-2 px-1">
-                <div className="flex size-8 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">
-                  <Globe className="size-4" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-black uppercase tracking-widest text-white">Global network</h2>
-                  <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
-                    Games & notes (120 km) · statuses · photos & reels
-                  </p>
-                </div>
-              </div>
-              {globalStreamLoading ? (
-                <GlobalNetworkSkeleton />
-              ) : mergedGlobal.length === 0 ? (
-                <div className="rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md p-10 text-center">
-                  <p className="text-sm font-bold text-slate-300 uppercase tracking-widest">No activity yet</p>
-                  <p className="text-xs text-slate-500 mt-2">
-                    Create a game, drop a map note, post a status, or share media from your profile.
-                  </p>
-                </div>
-              ) : (
-                <ul className="grid gap-6">
-                  {mergedGlobal.map((row, i) => (
-                    <li key={`feed-global:${globalNetworkRowKey(row, i)}`}>
-                      {renderGlobalNetworkItem(row, {
-                        userId: user?.id,
-                        navigate,
-                        refreshFeeds,
-                      })}
-                    </li>
-                  ))}
                 </ul>
               )}
             </section>
