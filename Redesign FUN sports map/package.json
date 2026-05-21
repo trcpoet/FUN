@@ -7,7 +7,8 @@
     "build": "npx vite build",
     "dev": "vite --host",
     "start": "vite --host",
-    "import-osm": "node scripts/import-osm-venues.mjs"
+    "import-osm": "node scripts/import-osm-venues.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -77,6 +78,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "4.7.0",
     "tailwindcss": "4.1.12",
+    "typescript": "~5.8.3",
     "vite": "6.3.5"
   },
   "peerDependencies": {

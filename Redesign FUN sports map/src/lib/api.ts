@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 /**
  * Central API layer for Supabase: games, profiles, stats, notifications, complete-game.
  * Use these from components/hooks instead of calling supabase directly for consistency.
@@ -913,7 +915,7 @@ async function probeProfileRowWithAthlete(userId: string): Promise<{ ok: true; r
   const existing = athleteProfileProbeByUser.get(userId);
   if (existing) return existing;
 
-  const p = (async () => {
+  const p = (async (): Promise<{ ok: true; row: Record<string, unknown> } | { ok: false }> => {
     const res = await supabase!
       .from("profiles")
       .select(PROFILE_SELECT_WITH_ATHLETE)

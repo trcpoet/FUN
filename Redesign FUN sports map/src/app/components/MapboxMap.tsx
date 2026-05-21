@@ -52,6 +52,22 @@ const L_VENUE_DOTS = "venue-dots-core";
 const L_VENUE_DOTS_PULSE = "venue-dots-pulse";
 const L_VENUE_DOTS_PULSE_INNER = "venue-dots-pulse-inner";
 const SRC_VENUE_DOTS = "venue-dots";
+const VENUE_AREAS_SOURCE_ID = "venue-areas";
+
+/** Remove venue GL layers/sources — map teardown or basemap style swap only (not venue-fetch effect re-runs). */
+function removeVenueGlLayers(map: import("mapbox-gl").Map): void {
+  try {
+    if (map.getLayer(L_VENUE_DOTS)) map.removeLayer(L_VENUE_DOTS);
+    if (map.getLayer(L_VENUE_DOTS_PULSE_INNER)) map.removeLayer(L_VENUE_DOTS_PULSE_INNER);
+    if (map.getLayer(L_VENUE_DOTS_PULSE)) map.removeLayer(L_VENUE_DOTS_PULSE);
+    if (map.getLayer("venue-areas-outline")) map.removeLayer("venue-areas-outline");
+    if (map.getLayer("venue-areas-fill")) map.removeLayer("venue-areas-fill");
+    if (map.getSource(SRC_VENUE_DOTS)) map.removeSource(SRC_VENUE_DOTS);
+    if (map.getSource(VENUE_AREAS_SOURCE_ID)) map.removeSource(VENUE_AREAS_SOURCE_ID);
+  } catch (_) {
+    /* style swap / already removed */
+  }
+}
 
 function lerpPulseRgb(
   a: { readonly r: number; readonly g: number; readonly b: number },
@@ -511,6 +527,7 @@ export function MapboxMap(props: MapboxMapProps) {
       noteMarkerEntriesRef.current.clear();
       const m = mapRef.current;
       if (m) {
+        removeVenueGlLayers(m);
         try {
           m.remove();
         } catch (_) {}
@@ -530,6 +547,7 @@ export function MapboxMap(props: MapboxMapProps) {
     lastAppliedStyleUrlRef.current = next;
     gameLayersInitedRef.current = false;
     venueClustersRef.current = [];
+    removeVenueGlLayers(map);
     setMapLoaded(false);
 
     let cancelled = false;
@@ -1886,7 +1904,7 @@ export function MapboxMap(props: MapboxMapProps) {
         venueClustersRef.current = clusterOut.clusters;
         const { areaCollection, dotCollection } = clusterOut;
 
-        const sourceId = "venue-areas";
+        const sourceId = VENUE_AREAS_SOURCE_ID;
         const fillLayerId = "venue-areas-fill";
         const outlineLayerId = "venue-areas-outline";
         const beforeGames = mapInstance.getLayer(L_GAME_CLUSTERS) ? L_GAME_CLUSTERS : undefined;
@@ -2229,17 +2247,6 @@ export function MapboxMap(props: MapboxMapProps) {
       if (idleFallbackId !== undefined) clearTimeout(idleFallbackId);
       map.off("idle", kickoffVenueFetch);
       onVenuesFetchLoadingChangeRef.current?.(false);
-      const m = mapRef.current;
-      if (!m) return;
-      try {
-        if (m.getLayer(L_VENUE_DOTS)) m.removeLayer(L_VENUE_DOTS);
-        if (m.getLayer(L_VENUE_DOTS_PULSE_INNER)) m.removeLayer(L_VENUE_DOTS_PULSE_INNER);
-        if (m.getLayer(L_VENUE_DOTS_PULSE)) m.removeLayer(L_VENUE_DOTS_PULSE);
-        if (m.getLayer("venue-areas-outline")) m.removeLayer("venue-areas-outline");
-        if (m.getLayer("venue-areas-fill")) m.removeLayer("venue-areas-fill");
-        if (m.getSource(SRC_VENUE_DOTS)) m.removeSource(SRC_VENUE_DOTS);
-        if (m.getSource("venue-areas")) m.removeSource("venue-areas");
-      } catch (_) {}
     };
   }, [
     mapLoaded,
@@ -2249,7 +2256,6 @@ export function MapboxMap(props: MapboxMapProps) {
     venueSearchRadiusKm,
     venueSportsFilter,
     onSelectVenue,
-    applyMapLayerVisibility,
     pauseVenueFetch,
   ]);
 

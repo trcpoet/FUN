@@ -507,6 +507,8 @@ export default function App() {
     [liveNowOpen, liveStripGames, displayGames]
   );
 
+  const venueSportsFilter = useMemo(() => appliedFilters.sports, [appliedFilters.sports]);
+
   const avatarGlbUrl = avatarIdToGlbUrl(avatarId);
 
   return (
@@ -552,8 +554,6 @@ export default function App() {
             setCreateGameCoords({ lat, lng });
             setCreateGameAnchorPoint(viewportPoint ?? null);
             setCreateGameLocationLabel(null);
-            setMapSearchLocation({ lat, lng });
-            setMapSearchLocationName(null);
             setCreateGameOpen(true);
           }}
           onCreateGameAtVenue={(venue, viewportPoint) => {
@@ -603,7 +603,7 @@ export default function App() {
           }}
           venuesCenter={mapSearchLocation}
           onVenuesFetchLoadingChange={handleVenuesFetchLoading}
-          venueSportsFilter={appliedFilters.sports}
+          venueSportsFilter={venueSportsFilter}
           venueSearchRadiusKm={appliedFilters.venueRadiusKm}
           mapMinuteEpoch={mapMinuteEpoch}
           pauseVenueFetch={messagesOpen}

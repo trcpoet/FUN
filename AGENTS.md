@@ -163,13 +163,13 @@ tests/           — Test suite
 <claude-mem-context>
 # Memory Context
 
-# [FUN] recent context, 2026-05-01 5:55am CDT
+# [FUN] recent context, 2026-05-13 1:50am CDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 35 obs (12,164t read) | 411,952t work | 97% savings
+Stats: 38 obs (13,462t read) | 467,871t work | 97% savings
 
 ### Apr 19, 2026
 57 8:04a 🔵 git add . Hanging in Shell Background Process
@@ -209,6 +209,10 @@ Stats: 35 obs (12,164t read) | 411,952t work | 97% savings
 130 " ✅ Coalition Test WordPress Implementation Plan Marked Complete
 ### May 1, 2026
 203 5:46a ⚖️ Clothing Line Name Brainstorm — Futuristic Athleisure Brand Connected to FUN Sports App
+### May 13, 2026
+249 1:47a 🔵 Mac Slowness Root Cause — pgAdmin Renderer and Zombie Jest Workers Pegging CPU
+251 " 🔵 Jest Worker Orphans Traced to easy-dsa Project — Working Directory Confirmed
+252 1:50a 🔵 Mac CPU Recovered to 68% Idle After Jest Worker Zombies Eliminated
 
-Access 412k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 468k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
