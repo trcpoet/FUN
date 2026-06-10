@@ -36,6 +36,14 @@ import { filterGamesVisibleOnMap, isGameInLiveWindow } from "../lib/mapGameTimer
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
 import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
+import { VenueSportSlider } from "./components/VenueSportSlider";
+import { VenueSportPrompt } from "./components/VenueSportPrompt";
+import {
+  readStoredVenueSportIntent,
+  venueIntentToSportFilter,
+  writeStoredVenueSportIntent,
+  type VenueSportIntent,
+} from "./lib/venueSportIntent";
 
 const DEFAULT_AVATAR_IMAGE =
   "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=100";
@@ -139,6 +147,23 @@ export default function App() {
 
   const { avatarId, avatarUrl, athleteProfile } = useMyProfile();
   const favoriteSport = athleteProfile.favoriteSport?.trim() ?? null;
+
+  const [venueSportIntent, setVenueSportIntent] = useState<VenueSportIntent | null>(null);
+  const [venueIntentReady, setVenueIntentReady] = useState(false);
+
+  useEffect(() => {
+    if (venueIntentReady) return;
+    if (favoriteSport) {
+      setVenueSportIntent(favoriteSport);
+      setVenueIntentReady(true);
+      return;
+    }
+    const stored = readStoredVenueSportIntent();
+    if (stored !== undefined) {
+      setVenueSportIntent(stored);
+      setVenueIntentReady(true);
+    }
+  }, [favoriteSport, venueIntentReady]);
   const { stats } = useUserStats();
   const navigate = useNavigate();
   const location = useLocation();
@@ -507,7 +532,18 @@ export default function App() {
     [liveNowOpen, liveStripGames, displayGames]
   );
 
-  const venueSportsFilter = useMemo(() => appliedFilters.sports, [appliedFilters.sports]);
+  const venueSportsFilter = useMemo(() => {
+    if (!venueIntentReady) return [];
+    return venueIntentToSportFilter(venueSportIntent);
+  }, [venueIntentReady, venueSportIntent]);
+
+  const handleVenueSportIntentChange = useCallback((next: VenueSportIntent) => {
+    setVenueSportIntent(next);
+    writeStoredVenueSportIntent(next);
+    setVenueIntentReady(true);
+  }, []);
+
+  const showVenueSportPrompt = !venueIntentReady;
 
   const avatarGlbUrl = avatarIdToGlbUrl(avatarId);
 
@@ -604,6 +640,7 @@ export default function App() {
           venuesCenter={mapSearchLocation}
           onVenuesFetchLoadingChange={handleVenuesFetchLoading}
           venueSportsFilter={venueSportsFilter}
+          venueFetchEnabled={venueIntentReady}
           venueSearchRadiusKm={appliedFilters.venueRadiusKm}
           mapMinuteEpoch={mapMinuteEpoch}
           pauseVenueFetch={messagesOpen}
@@ -682,6 +719,18 @@ export default function App() {
         mapSearchLocationName={mapSearchLocationName}
         onClearMapSearch={clearMapSearch}
       />
+
+      <VenueSportPrompt
+        open={showVenueSportPrompt}
+        onPick={(sport) => handleVenueSportIntentChange(sport)}
+        onPickAll={() => handleVenueSportIntentChange(null)}
+      />
+
+      <div className="absolute bottom-[7.5rem] left-0 right-0 z-[42] flex justify-center pointer-events-none px-2 md:bottom-[8.5rem]">
+        {venueIntentReady ? (
+          <VenueSportSlider value={venueSportIntent} onChange={handleVenueSportIntentChange} />
+        ) : null}
+      </div>
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
         <BottomCarousel

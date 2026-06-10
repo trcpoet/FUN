@@ -141,6 +141,18 @@ export const VENUE_DOT_PULSE_HZ_SMOOTHING = 6;
 /** Polygon footprint radius around clustered venue (meters) — smaller = subtler */
 export const VENUE_AREA_RADIUS_METERS = 42;
 
+/** Mapbox venue clustering — above this zoom, individual venue points emit. */
+export const VENUE_CLUSTER_MAX_ZOOM = 14;
+
+/** Pixel radius for venue clustering when zoomed out. */
+export const VENUE_CLUSTER_RADIUS_PX = 52;
+
+/** Base `icon-size` for venue sport symbols on the map. */
+export const VENUE_ICON_LAYOUT_BASE = 0.72;
+
+/** Defer venue network fetch below this zoom (experiment / density tier). */
+export const VENUE_FETCH_MIN_ZOOM = 11;
+
 // —— Zoom / bounds: when is “near me” meaningful? ——————————————
 
 /** Below this zoom: hide all game layers (clusters + individuals). World / continent view. */

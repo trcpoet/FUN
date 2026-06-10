@@ -1,17 +1,20 @@
+// Thin wrapper that runs venue clustering in a Web Worker when possible,
+// and quietly falls back to running it on the main thread when not.
 import { clusterVenuePoints, DEFAULT_VENUE_CLUSTER_OPTS } from "./venueClusterEngine";
 import type { ClusterVenueResult } from "./venueClusterEngine";
 import type { SportsVenueGeoJSON } from "./sportsVenueTypes";
 
-let worker: Worker | null = null;
-let nextId = 0;
+let worker: Worker | null = null; // one shared worker, created lazily and reused
+let nextId = 0; // increments per job so replies can be matched to requests
 
+// Returns the shared worker, creating it on first use. Null if workers aren't supported.
 function getWorker(): Worker | null {
-  if (typeof Worker === "undefined") return null;
+  if (typeof Worker === "undefined") return null; // e.g. server-side render — no Worker
   try {
     worker ??= new Worker(new URL("./venueCluster.worker.ts", import.meta.url), { type: "module" });
     return worker;
   } catch {
-    return null;
+    return null; // creation failed — caller will fall back to main-thread clustering
   }
 }
 
@@ -23,6 +26,7 @@ export function runVenueClusterAsync(
   venueSportsFilter: string[]
 ): Promise<ClusterVenueResult> {
   const w = getWorker();
+  // No worker available: just cluster on the main thread and resolve immediately.
   if (!w) {
     return Promise.resolve(
       clusterVenuePoints(geojson, {
@@ -33,8 +37,9 @@ export function runVenueClusterAsync(
     );
   }
 
+  // Worker path: send the job and resolve once the matching reply comes back.
   return new Promise((resolve, reject) => {
-    const id = ++nextId;
+    const id = ++nextId; // unique ticket for this job
     const onMessage = (ev: MessageEvent) => {
       const d = ev.data as
         | {
@@ -46,8 +51,9 @@ export function runVenueClusterAsync(
             clusters: ClusterVenueResult["clusters"];
           }
         | { type: "cluster"; id: number; ok: false; error: string };
+      // Ignore replies for other jobs; only handle the one matching our id.
       if (d.type !== "cluster" || d.id !== id) return;
-      w.removeEventListener("message", onMessage);
+      w.removeEventListener("message", onMessage); // one-shot: stop listening once handled
       if (d.ok) {
         resolve({
           areaCollection: d.areaCollection,
@@ -55,10 +61,11 @@ export function runVenueClusterAsync(
           clusters: d.clusters,
         });
       } else {
-        reject(new Error(d.error));
+        reject(new Error(d.error)); // worker reported a failure
       }
     };
-    w.addEventListener("message", onMessage);
+    w.addEventListener("message", onMessage); // listen before sending so we don't miss the reply
+    // Hand the job to the worker.
     w.postMessage({
       type: "cluster",
       id,

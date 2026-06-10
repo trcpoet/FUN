@@ -62,7 +62,7 @@ type OsmEl = {
   lat?: number;
   lon?: number;
   center?: { lat?: number; lon?: number };
-  tags?: { name?: string; sport?: string; leisure?: string };
+  tags?: { name?: string; sport?: string; leisure?: string; surface?: string; lit?: string; access?: string };
 };
 
 type GeoFeature = {
@@ -73,6 +73,9 @@ type GeoFeature = {
     name?: string;
     sport?: string;
     leisure?: string;
+    surface?: string;
+    lit?: string;
+    access?: string;
     osm_type: string;
     osm_id: number;
   };
@@ -98,6 +101,9 @@ function elementsToFeatures(elements: unknown[]): { features: GeoFeature[]; rows
         name: el.tags?.name,
         sport: el.tags?.sport,
         leisure: el.tags?.leisure,
+        surface: el.tags?.surface,
+        lit: el.tags?.lit,
+        access: el.tags?.access,
         osm_type: el.type,
         osm_id: el.id,
       },
