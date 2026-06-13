@@ -9,6 +9,7 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+
 @import 'mapbox-gl/dist/mapbox-gl.css';
 
 /* Ensure markers stay fixed at geographic coords (fixes zoom/pan drift) */

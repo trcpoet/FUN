@@ -36,10 +36,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       return;
     }
-    void getAuthSessionDeduped().then((session) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    void getAuthSessionDeduped()
+      .then((session) => {
+        setUser(session?.user ?? null);
+      })
+      .catch(() => {
+        setUser(null);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
 
     const {
       data: { subscription },

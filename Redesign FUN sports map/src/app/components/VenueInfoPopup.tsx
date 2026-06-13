@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { X, MapPin, Activity, ChevronRight, MessageCircle, Navigation, Share2 } from "lucide-react";
-import type { VenueSelection } from "./MapboxMap";
+import type { VenueSelection } from "./mapboxMapTypes";
 import type { GameRow } from "../../lib/supabase";
 import { formatVenueGameTimerSummary } from "../../lib/mapGameTimer";
 import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";

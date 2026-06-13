@@ -1,7 +1,7 @@
 import React, { Suspense, useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
-import type { MapCameraRequest, VenueSelection } from "./components/MapboxMap";
+import type { MapCameraRequest, VenueSelection } from "./components/mapboxMapTypes";
 import { prefetchMapboxGl } from "./lib/mapboxCached";
 
 const MapboxMap = React.lazy(() =>
@@ -36,7 +36,6 @@ import { filterGamesVisibleOnMap, isGameInLiveWindow } from "../lib/mapGameTimer
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
 import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
-import { VenueSportSlider } from "./components/VenueSportSlider";
 import { VenueSportPrompt } from "./components/VenueSportPrompt";
 import {
   readStoredVenueSportIntent,
@@ -549,17 +548,7 @@ export default function App() {
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-[#0A0F1C] font-sans selection:bg-emerald-500/30">
-      <Suspense
-        fallback={
-          <div className="flex h-full w-full items-center justify-center bg-[#0A0F1C]">
-            <div className="flex flex-col items-center gap-4">
-              <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-              <p className="text-sm font-medium text-slate-400">Booting map engine…</p>
-            </div>
-          </div>
-        }
-      >
-        {activeMapNote ? (
+      {activeMapNote ? (
           <NoteThreadDialog
             open={true}
             onOpenChange={(o) => {
@@ -574,6 +563,16 @@ export default function App() {
             }}
           />
         ) : null}
+      <Suspense
+        fallback={
+          <div className="flex h-full w-full items-center justify-center bg-[#0A0F1C]">
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+              <p className="text-sm font-medium text-slate-400">Loading map…</p>
+            </div>
+          </div>
+        }
+      >
         <MapboxMap
           userCoords={effectiveUserCoords}
           games={mapGames}
@@ -718,6 +717,9 @@ export default function App() {
         liveGamesCount={games.filter(g => g.status === 'live').length}
         mapSearchLocationName={mapSearchLocationName}
         onClearMapSearch={clearMapSearch}
+        venueSportIntent={venueSportIntent}
+        venueSportIntentReady={venueIntentReady}
+        onVenueSportIntentChange={handleVenueSportIntentChange}
       />
 
       <VenueSportPrompt
@@ -725,12 +727,6 @@ export default function App() {
         onPick={(sport) => handleVenueSportIntentChange(sport)}
         onPickAll={() => handleVenueSportIntentChange(null)}
       />
-
-      <div className="absolute bottom-[7.5rem] left-0 right-0 z-[42] flex justify-center pointer-events-none px-2 md:bottom-[8.5rem]">
-        {venueIntentReady ? (
-          <VenueSportSlider value={venueSportIntent} onChange={handleVenueSportIntentChange} />
-        ) : null}
-      </div>
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
         <BottomCarousel

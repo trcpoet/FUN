@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
+import type { MapCameraRequest, VenueSelection } from "./mapboxMapTypes";
+
+export type { MapCameraRequest, VenueSelection } from "./mapboxMapTypes";
 import { createRoot } from "react-dom/client";
 import { useNavigate } from "react-router";
 
@@ -70,6 +73,15 @@ function removeVenueGlLayers(map: import("mapbox-gl").Map): void {
   }
 }
 
+/** True when venue source + core layers exist (setStyle can leave a stale source without layers). */
+function venueGlLayersReady(map: import("mapbox-gl").Map): boolean {
+  return Boolean(
+    map.getSource(SRC_VENUE_POINTS) &&
+      map.getLayer(L_VENUE_DOTS) &&
+      map.getLayer(L_VENUE_SPORT_ICON)
+  );
+}
+
 // Blends between two RGB colors. t=0 returns color a, t=1 returns color b, 0.5 is halfway.
 // Used to animate the venue pulse halo smoothly between two tints.
 function lerpPulseRgb(
@@ -107,10 +119,6 @@ function haversineDistanceMeters(
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return earthRadius * c;
 }
-
-export type MapCameraRequest =
-  | { id: number; kind: "fly"; lat: number; lng: number; zoom?: number }
-  | { id: number; kind: "fitBounds"; coordinates: [number, number][] };
 
 type MapboxMapProps = {
   userCoords: { lat: number; lng: number } | null;
@@ -179,14 +187,6 @@ type MapboxMapProps = {
   mapStyleUrl?: string | null;
 };
 
-export type VenueSelection = {
-  id: string;
-  name?: string;
-  sport?: string;
-  leisure?: string;
-  center: { lat: number; lng: number };
-};
-
 export function MapboxMap(props: MapboxMapProps) {
   const {
     userCoords,
@@ -225,6 +225,7 @@ export function MapboxMap(props: MapboxMapProps) {
     mapStyleUrl = null,
   } = props;
   const navigate = useNavigate();
+
   const currentUserId = props.currentUserId ?? null;
   const joinedSet = joinedGameIds ?? new Set<string>();
   const hostSet = props.hostGameIds ?? new Set<string>();
@@ -270,7 +271,13 @@ export function MapboxMap(props: MapboxMapProps) {
   const [mapUxHint, setMapUxHint] = useState<string | null>(null);
   /** Bumps when venue GL layers are first created so hover/selection paint expressions apply. */
   const [venueLayerEpoch, setVenueLayerEpoch] = useState(0);
+  /** Bumps after each basemap style swap so GL layer effects re-bind even if mapLoaded batches. */
+  const [basemapStyleEpoch, setBasemapStyleEpoch] = useState(0);
   const activeStyleUrl = (mapStyleUrl ?? "").trim() || MAP_STYLE_URL;
+  const activeStyleUrlRef = useRef(activeStyleUrl);
+  activeStyleUrlRef.current = activeStyleUrl;
+  const userCoordsRef = useRef(userCoords);
+  userCoordsRef.current = userCoords;
   const lastAppliedStyleUrlRef = useRef(activeStyleUrl);
   const venuesFetchCenter = venuesCenter ?? userCoords; // where to look for venues (explicit center, else the user)
   /** Debounced anchor so rapid search / map moves don’t spam Overpass + Supabase. */
@@ -284,6 +291,11 @@ export function MapboxMap(props: MapboxMapProps) {
     const tid = window.setTimeout(() => setDebouncedVenueFetchCenter(venuesFetchCenter), 420);
     return () => clearTimeout(tid); // cancel the pending update if the center changes again first
   }, [venuesFetchCenter?.lat, venuesFetchCenter?.lng]);
+  // Recenter button: skip debounce so venues refresh at the user's location immediately.
+  useEffect(() => {
+    if ((centerOnUserTrigger ?? 0) < 1 || !venuesFetchCenter) return;
+    setDebouncedVenueFetchCenter(venuesFetchCenter);
+  }, [centerOnUserTrigger, venuesFetchCenter?.lat, venuesFetchCenter?.lng]);
   const venueClustersRef = useRef<VenueClusterPoint[]>([]);
   const onVenuesFetchLoadingChangeRef = useRef(onVenuesFetchLoadingChange);
   onVenuesFetchLoadingChangeRef.current = onVenuesFetchLoadingChange;
@@ -457,7 +469,7 @@ export function MapboxMap(props: MapboxMapProps) {
       const container = containerRef.current;
       if (!container) return;
 
-      mapboxgl.default.accessToken = MAPBOX_TOKEN;
+      mapboxgl.accessToken = MAPBOX_TOKEN;
 
       try {
         container.innerHTML = "";
@@ -466,11 +478,13 @@ export function MapboxMap(props: MapboxMapProps) {
       }
 
       let map: import("mapbox-gl").Map | null = null;
+      const styleAtInit = activeStyleUrlRef.current;
+      const coordsAtInit = userCoordsRef.current;
       try {
-        map = new mapboxgl.default.Map({
+        map = new mapboxgl.Map({
           container,
-          style: activeStyleUrl,
-          center: userCoords ? [userCoords.lng, userCoords.lat] : [-98, 40],
+          style: styleAtInit,
+          center: coordsAtInit ? [coordsAtInit.lng, coordsAtInit.lat] : [-98, 40],
           zoom: 15,
           pitch: enable3D ? 50 : 0,
           antialias: true,
@@ -489,10 +503,22 @@ export function MapboxMap(props: MapboxMapProps) {
       }
 
       mapRef.current = map;
-      lastAppliedStyleUrlRef.current = activeStyleUrl;
+      lastAppliedStyleUrlRef.current = styleAtInit;
+      if (import.meta.env.DEV) {
+        // Dev-only handle for console debugging and headless UI checks (never in prod builds).
+        (window as unknown as { __FUN_MAP__?: unknown }).__FUN_MAP__ = map;
+      }
+
+      const loadTimeoutId = window.setTimeout(() => {
+        if (cancelled || mapRef.current !== map) return;
+        if (!map!.loaded()) {
+          setMapError("Map timed out while loading. Check your network or Mapbox token.");
+        }
+      }, 20000);
 
       // Once the basemap finishes loading: enable terrain (3D), disable dbl-click zoom, add fog.
       map.on("load", () => {
+        window.clearTimeout(loadTimeoutId);
         if (cancelled || mapRef.current !== map) return;
         setMapLoaded(true);
         setMapError(null);
@@ -524,14 +550,17 @@ export function MapboxMap(props: MapboxMapProps) {
       });
 
       map.on("error", (e) => {
-        if (e.error?.message) {
-          setMapError(e.error.message);
-          try {
-            map.remove();
-          } catch (_) {}
-          if (mapRef.current === map) mapRef.current = null;
+        const msg = e.error?.message ?? "";
+        // Tile/sprite/source failures are routine — never tear down the whole map for them.
+        if (e.sourceId) return;
+        if (/access token|unauthorized|401|403/i.test(msg)) {
+          setMapError(msg || "Mapbox authentication failed");
         }
       });
+    }).catch((err: unknown) => {
+      if (cancelled) return;
+      const msg = err instanceof Error ? err.message : String(err);
+      setMapError(msg || "Failed to load mapbox-gl");
     });
 
     // Cleanup on unmount: remove markers and destroy the map so nothing leaks.
@@ -555,7 +584,7 @@ export function MapboxMap(props: MapboxMapProps) {
         mapRef.current = null;
       }
     };
-  }, [MAPBOX_TOKEN, activeStyleUrl, enable3D, userCoords]);
+  }, [MAPBOX_TOKEN]);
 
   // —— Basemap style toggle (satellite, etc.) ———
   // Swaps the map style when the user changes basemaps. setStyle wipes our custom
@@ -574,21 +603,37 @@ export function MapboxMap(props: MapboxMapProps) {
     setMapLoaded(false); // flips back true on style.load below
 
     let cancelled = false;
-    const onStyleLoad = () => {
+    const finishStyleSwap = () => {
       if (cancelled) return;
-      // After setStyle, custom sources/layers are removed; our effects will re-add them.
+      removeVenueGlLayers(map);
+      venueClustersRef.current = [];
+      gameLayersInitedRef.current = false;
+      setBasemapStyleEpoch((n) => n + 1);
       setMapLoaded(true);
     };
+
+    const onStyleLoad = () => {
+      window.clearTimeout(styleRecoveryId);
+      finishStyleSwap();
+    };
+
+    const styleRecoveryId = window.setTimeout(() => {
+      if (cancelled) return;
+      if (!map.isStyleLoaded()) return;
+      finishStyleSwap();
+    }, 6000);
 
     try {
       map.once("style.load", onStyleLoad);
       map.setStyle(next);
     } catch (_) {
-      setMapLoaded(true);
+      window.clearTimeout(styleRecoveryId);
+      finishStyleSwap();
     }
 
     return () => {
       cancelled = true;
+      window.clearTimeout(styleRecoveryId);
       try {
         map.off("style.load", onStyleLoad);
       } catch (_) {}
@@ -643,7 +688,7 @@ export function MapboxMap(props: MapboxMapProps) {
         return;
       }
       // Grow a bounding box to include every coordinate, then frame it.
-      const bounds = new mapboxgl.default.LngLatBounds(coords[0], coords[0]);
+      const bounds = new mapboxgl.LngLatBounds(coords[0], coords[0]);
       for (let i = 1; i < coords.length; i++) bounds.extend(coords[i]);
       m.fitBounds(bounds, {
         padding: { top: 120, bottom: 240, left: 48, right: 48 },
@@ -1244,7 +1289,7 @@ export function MapboxMap(props: MapboxMapProps) {
       gameIconHoverTargetRef.current = 0;
       gameIconHoverLastTsRef.current = null;
     };
-  }, [mapLoaded, applyMapLayerVisibility, applyDomMarkerScale, applyGameIconLayout]);
+  }, [mapLoaded, basemapStyleEpoch, applyMapLayerVisibility, applyDomMarkerScale, applyGameIconLayout]);
 
   /** Push game GeoJSON into clustered source (capped by viewport for performance). */
   // Whenever the games list (or selection/minute tick) changes, feed fresh data to the GL source.
@@ -1258,7 +1303,7 @@ export function MapboxMap(props: MapboxMapProps) {
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
     src.setData(gamesToGeoJSON(capped, selectedGameId));
     applyMapLayerVisibility();
-  }, [mapLoaded, games, selectedGameId, mapMinuteEpoch, applyMapLayerVisibility]);
+  }, [mapLoaded, basemapStyleEpoch, games, selectedGameId, mapMinuteEpoch, applyMapLayerVisibility]);
 
   /**
    * Render notes as pulsating DOM markers (Letter/Note icon).
@@ -1271,7 +1316,7 @@ export function MapboxMap(props: MapboxMapProps) {
     let cancelled = false;
     void loadMapboxGl().then((mapboxgl) => {
       if (cancelled || mapRef.current !== map) return;
-      const Marker = mapboxgl.default.Marker;
+      const Marker = mapboxgl.Marker;
 
       const existing = noteMarkerEntriesRef.current; // markers already on the map, keyed by note id
       const nextById = new Map<string, MapNoteRow>(notes.map((n) => [n.id, n])); // notes we want now
@@ -1327,7 +1372,7 @@ export function MapboxMap(props: MapboxMapProps) {
     return () => {
       cancelled = true;
     };
-  }, [mapLoaded, notes, onOpenNoteThread]);
+  }, [mapLoaded, basemapStyleEpoch, notes, onOpenNoteThread]);
 
   /** Same-coordinate games: single HTML cluster pin (avoids overlapping GL sport icons). */
   // When several games sit at the exact same spot, draw one combined HTML pin that opens
@@ -1343,7 +1388,7 @@ export function MapboxMap(props: MapboxMapProps) {
     if (groups.length > 0) {
       loadMapboxGl().then((mapboxgl) => {
         if (cancelled || mapRef.current !== map) return;
-        const Marker = mapboxgl.default.Marker;
+        const Marker = mapboxgl.Marker;
         const next: { marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[] = [];
 
         for (const group of groups) {
@@ -1414,7 +1459,7 @@ export function MapboxMap(props: MapboxMapProps) {
     if (randomSingles.length > 0) {
       loadMapboxGl().then((mapboxgl) => {
         if (cancelled || mapRef.current !== map) return;
-        const Marker = mapboxgl.default.Marker;
+        const Marker = mapboxgl.Marker;
         const next: { marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[] = [];
 
         for (const game of randomSingles) {
@@ -1489,7 +1534,7 @@ export function MapboxMap(props: MapboxMapProps) {
     let cancelled = false;
     void loadMapboxGl().then((mapboxgl) => {
       if (cancelled || mapRef.current !== map) return;
-      const Marker = mapboxgl.default.Marker;
+      const Marker = mapboxgl.Marker;
       const existing = venueCountdownEntriesRef.current;
 
       // Drop entries not in next set.
@@ -1791,7 +1836,7 @@ export function MapboxMap(props: MapboxMapProps) {
       const m = mapRef.current;
       if (!m || use3DOverlay) return;
       userMarker2dRef.current?.remove();
-      userMarker2dRef.current = new mapboxgl.default.Marker({ element: outer })
+      userMarker2dRef.current = new mapboxgl.Marker({ element: outer })
         .setLngLat([userCoords.lng, userCoords.lat])
         .addTo(m);
       applyDomMarkerScale();
@@ -1896,7 +1941,7 @@ export function MapboxMap(props: MapboxMapProps) {
         });
         outer.appendChild(scaleWrap);
 
-        const marker = new mapboxgl.default.Marker({ element: outer })
+        const marker = new mapboxgl.Marker({ element: outer })
           .setLngLat([profile.lng, profile.lat])
           .addTo(map);
         playerMarkersRef.current.push(marker);
@@ -1975,9 +2020,10 @@ export function MapboxMap(props: MapboxMapProps) {
           });
         };
 
-        if (mapInstance.getSource(SRC_VENUE_POINTS)) {
+        if (venueGlLayersReady(mapInstance)) {
           (mapInstance.getSource(SRC_VENUE_POINTS) as import("mapbox-gl").GeoJSONSource).setData(enriched);
         } else {
+          removeVenueGlLayers(mapInstance);
           registerGameSportImages(mapInstance);
 
           mapInstance.addSource(SRC_VENUE_POINTS, {
@@ -2197,8 +2243,8 @@ export function MapboxMap(props: MapboxMapProps) {
         }
 
         applyMapLayerVisibility();
-      } catch (_) {
-        /* ignore */
+      } catch (err) {
+        console.warn("[FUN] venue layer add failed", err);
       } finally {
         onDone?.();
       }
@@ -2281,6 +2327,9 @@ export function MapboxMap(props: MapboxMapProps) {
     map.on("idle", kickoffVenueFetch);
     map.on("zoomend", onVenueZoomForFetch);
     idleFallbackId = window.setTimeout(kickoffVenueFetch, 2500);
+    if (map.isStyleLoaded()) {
+      kickoffVenueFetch();
+    }
 
     // Cleanup: cancel any in-flight fetch and detach the idle/fallback triggers.
     return () => {
@@ -2293,6 +2342,7 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [
     mapLoaded,
+    basemapStyleEpoch,
     venueFetchKey,
     venueFetchDataKey,
     debouncedVenueFetchCenter,
@@ -2301,6 +2351,7 @@ export function MapboxMap(props: MapboxMapProps) {
     onSelectVenue,
     pauseVenueFetch,
     venueFetchEnabled,
+    centerOnUserTrigger,
   ]);
 
   // Games happening at (within 120m of) the selected venue — shown inside the venue card.

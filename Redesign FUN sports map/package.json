@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "npx vite build",
-    "dev": "vite --host",
-    "start": "vite --host",
+    "dev": "vite",
+    "start": "vite",
     "import-osm": "node scripts/import-osm-venues.mjs",
     "typecheck": "tsc --noEmit"
   },
