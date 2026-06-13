@@ -11,6 +11,8 @@ import type { SearchSectionId } from '../../lib/mergeSearchResults';
 import { sportEmojiFor } from '../../lib/sportDisplay';
 import type { LocationVisibilityMode } from "../../lib/locationVisibility";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { VenueSportMenu } from "./VenueSportMenu";
+import type { VenueSportIntent } from "../lib/venueSportIntent";
 
 /** Glass morphism for map toolbar round controls (search, filter). */
 const MAP_GLASS_ICON_BTN =
@@ -95,6 +97,10 @@ export type TopNavigationProps = {
   mapSearchLocationName?: string | null;
   /** Clears the map search anchor and resets to user GPS. */
   onClearMapSearch?: () => void;
+  /** Courts/venues sport filter (shown as dropdown under messages when ready). */
+  venueSportIntent?: VenueSportIntent | null;
+  venueSportIntentReady?: boolean;
+  onVenueSportIntentChange?: (next: VenueSportIntent) => void;
 };
 
 function placeSubtitle(placeName: string): string | undefined {
@@ -146,6 +152,9 @@ export const TopNavigation = (props: TopNavigationProps) => {
     liveGamesCount = 0,
     mapSearchLocationName = null,
     onClearMapSearch,
+    venueSportIntent = null,
+    venueSportIntentReady = false,
+    onVenueSportIntentChange,
   } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [feedToolbarHintOpen, setFeedToolbarHintOpen] = useState(false);
@@ -600,6 +609,14 @@ export const TopNavigation = (props: TopNavigationProps) => {
                       </span>
                     )}
                   </button>
+                </div>
+              ) : null}
+              {venueSportIntentReady && onVenueSportIntentChange ? (
+                <div className="flex flex-col items-center gap-0.5">
+                  <VenueSportMenu
+                    value={venueSportIntent}
+                    onChange={onVenueSportIntentChange}
+                  />
                 </div>
               ) : null}
             </div>
