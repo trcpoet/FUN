@@ -6,6 +6,8 @@
  * First user in any area pays the Overpass cost (~2-5s).
  * Every subsequent user in that area gets an instant DB read.
  */
+import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "./lib/osmVenueTags";
+
 export const config = { runtime: "edge" };
 
 const UPSTREAMS = [
@@ -62,23 +64,13 @@ type OsmEl = {
   lat?: number;
   lon?: number;
   center?: { lat?: number; lon?: number };
-  tags?: { name?: string; sport?: string; leisure?: string; surface?: string; lit?: string; access?: string };
+  tags?: OsmVenueTags;
 };
 
 type GeoFeature = {
   type: "Feature";
   geometry: { type: "Point"; coordinates: [number, number] };
-  properties: {
-    id: string;
-    name?: string;
-    sport?: string;
-    leisure?: string;
-    surface?: string;
-    lit?: string;
-    access?: string;
-    osm_type: string;
-    osm_id: number;
-  };
+  properties: ReturnType<typeof osmVenueRowToGeoProperties>;
 };
 
 function elementsToFeatures(elements: unknown[]): { features: GeoFeature[]; rows: Record<string, unknown>[] } {
@@ -92,33 +84,13 @@ function elementsToFeatures(elements: unknown[]): { features: GeoFeature[]; rows
     const lon = el.lon ?? el.center?.lon;
     if (lat == null || lon == null) continue;
     if (el.type == null || el.id == null) continue;
-    const id = `${el.type}/${el.id}`;
+    const row = buildOsmVenueRow(el.type, el.id, lat, lon, el.tags, now);
     features.push({
       type: "Feature",
       geometry: { type: "Point", coordinates: [lon, lat] },
-      properties: {
-        id,
-        name: el.tags?.name,
-        sport: el.tags?.sport,
-        leisure: el.tags?.leisure,
-        surface: el.tags?.surface,
-        lit: el.tags?.lit,
-        access: el.tags?.access,
-        osm_type: el.type,
-        osm_id: el.id,
-      },
+      properties: osmVenueRowToGeoProperties(row.id, row.osm_type, row.osm_id, row),
     });
-    rows.push({
-      id,
-      lat,
-      lng: lon,
-      name: el.tags?.name ?? null,
-      sport: el.tags?.sport ?? null,
-      leisure: el.tags?.leisure ?? null,
-      osm_type: el.type,
-      osm_id: el.id,
-      imported_at: now,
-    });
+    rows.push(row);
   }
   return { features, rows };
 }

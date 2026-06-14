@@ -5,7 +5,9 @@
 
 import { expectedOsmTokensForDisplaySports } from "../../lib/osmSportTags";
 import { supabase } from "../../lib/supabase";
+import type { OsmSportsVenueRow } from "../../lib/supabase";
 import type { SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
+import { dbRowToVenueProperties } from "./venueSelection";
 
 export type { SportsVenueProperties, SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 
@@ -213,7 +215,9 @@ export async function fetchSportsVenuesFromDb(
 
   const { data, error } = await supabase
     .from("osm_sports_venues")
-    .select("id, lat, lng, name, sport, leisure, osm_type, osm_id")
+    .select(
+      "id, lat, lng, name, sport, leisure, osm_type, osm_id, surface, lit, access, opening_hours, website, operator, wikidata, hero_image_url, wikidata_label, wikidata_description"
+    )
     .gte("lat", minLat)
     .lte("lat", maxLat)
     .gte("lng", minLng)
@@ -234,8 +238,9 @@ export async function fetchSportsVenuesFromDb(
 
   const features: SportsVenueFeature[] = [];
   for (const row of data) {
-    const leisure = (row.leisure as string | null) ?? "";
-    const sport = (row.sport as string | null) ?? "";
+    const typed = row as OsmSportsVenueRow;
+    const leisure = typed.leisure ?? "";
+    const sport = typed.sport ?? "";
     // Apply sport filter only to pitches; sports_centres always pass through
     if (sportTokens && leisure === "pitch") {
       const rowSports = sport.toLowerCase().split(";").map((s) => s.trim());
@@ -243,15 +248,8 @@ export async function fetchSportsVenuesFromDb(
     }
     features.push({
       type: "Feature",
-      geometry: { type: "Point", coordinates: [row.lng as number, row.lat as number] },
-      properties: {
-        id: row.id as string,
-        name: (row.name as string | null) ?? undefined,
-        sport: sport || undefined,
-        leisure: leisure || undefined,
-        osm_type: row.osm_type as string,
-        osm_id: Number(row.osm_id),
-      },
+      geometry: { type: "Point", coordinates: [typed.lng, typed.lat] },
+      properties: dbRowToVenueProperties(typed),
     });
   }
 
@@ -301,7 +299,7 @@ export async function fetchSportsVenuesFromOverpass(
       if (e && typeof e === "object" && "name" in e && (e as { name: string }).name === "AbortError") {
         throw e;
       }
-      return { type: "FeatureCollection", features: [] };
+      return { type: "FeatureCollection", features: [] } as SportsVenueGeoJSON;
     } finally {
       inflight.delete(cacheKey);
     }

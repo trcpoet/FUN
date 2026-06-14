@@ -15,6 +15,7 @@ import { gamesToGeoJSON } from "../types/mapGeoJSON";
 import { fetchSportsVenuesWithProgress } from "../lib/sportsVenues";
 import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
 import type { VenueClusterPoint } from "../lib/sportsVenueTypes";
+import { venueSelectionFromProperties } from "../lib/venueSelection";
 import { enrichVenueGeoJSON } from "../lib/venueClusterEngine";
 import { venueClusterIconImageExpression } from "../lib/venueSportIcon";
 import { openGamesNearPoint } from "../lib/gamesAtVenue";
@@ -31,7 +32,9 @@ import * as MapCfg from "../map/mapConfig";
 import { loadMapboxGl } from "../lib/mapboxCached";
 import { registerGameSportImages } from "../map/registerGameSportImages";
 import { getGameMapboxIconId } from "../map/gameSportIcons";
-import { Avatar3DOverlay } from "./Avatar3DOverlay";
+const Avatar3DOverlay = React.lazy(() =>
+  import("./Avatar3DOverlay").then((m) => ({ default: m.Avatar3DOverlay }))
+);
 import { GameEventPopup } from "./GameEventPopup";
 import { VenueInfoPopup } from "./VenueInfoPopup";
 import { ColocatedGamesPin } from "./ColocatedGamesPin";
@@ -102,6 +105,36 @@ const MAP_STYLE_URL =
   (import.meta.env.VITE_MAPBOX_STYLE_URL as string | undefined)?.trim() ||
   "mapbox://styles/trcpoet/cmn1l2br1003e01s52y4q9uzt";
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?w=100&h=100&fit=crop";
+
+/** Effective tier when 3D mode is off. */
+function effectiveCinematicTier(enable3D: boolean, tier: MapCfg.CinematicTier): MapCfg.CinematicTier {
+  return enable3D ? tier : "off";
+}
+
+/** Terrain when cinematic tier is on. Atmosphere/fog comes from Studio only. */
+function applyCinematicBasemap(
+  map: import("mapbox-gl").Map,
+  tier: MapCfg.CinematicTier
+): void {
+  if (tier === "off") {
+    try {
+      map.setTerrain(null);
+    } catch (_) {}
+    return;
+  }
+
+  try {
+    if (!map.getSource("fun-terrain")) {
+      map.addSource("fun-terrain", {
+        type: "raster-dem",
+        url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+        tileSize: 512,
+        maxzoom: 14,
+      });
+    }
+    map.setTerrain({ source: "fun-terrain", exaggeration: 1.2 });
+  } catch (_) {}
+}
 
 // Straight-line distance in meters between two lng/lat points, accounting for Earth's curve.
 function haversineDistanceMeters(
@@ -252,10 +285,18 @@ export function MapboxMap(props: MapboxMapProps) {
   const [mapLoaded, setMapLoaded] = useState(false); // true once Mapbox finishes loading
   const [mapError, setMapError] = useState<string | null>(null); // shown if the map fails to load
   const [eventPopup, setEventPopup] = useState<{ game: GameRow; point: { x: number; y: number } } | null>(null); // open game card
-  const [venuePopupPoint, setVenuePopupPoint] = useState<{ x: number; y: number } | null>(null); // screen pos of venue card
+  /** Map pixel position (legacy — used only if create-game needs viewport anchor). */
+  const [venuePopupPoint, setVenuePopupPoint] = useState<{ x: number; y: number } | null>(null);
   const [bumpGameId, setBumpGameId] = useState<string | null>(null); // game id currently playing the tap-pulse
   const [colocatedModalGames, setColocatedModalGames] = useState<GameRow[] | null>(null); // games stacked at one spot
   const isMobile = useIsMobile();
+  const cinematicTier = useMemo(() => MapCfg.getCinematicTier(isMobile), [isMobile]);
+  const cinematicTierRef = useRef(cinematicTier);
+  cinematicTierRef.current = cinematicTier;
+  const enable3DRef = useRef(enable3D);
+  enable3DRef.current = enable3D;
+  const [mapIdle, setMapIdle] = useState(false);
+  const introPitchDoneRef = useRef(false);
   // Timestamps of the last venue/game tap — used to suppress the map's generic click handler right after.
   const venueInteractionTsRef = useRef(0);
   const gameInteractionTsRef = useRef(0);
@@ -486,7 +527,7 @@ export function MapboxMap(props: MapboxMapProps) {
           style: styleAtInit,
           center: coordsAtInit ? [coordsAtInit.lng, coordsAtInit.lat] : [-98, 40],
           zoom: 15,
-          pitch: enable3D ? 50 : 0,
+          pitch: 0,
           antialias: true,
         });
       } catch (err) {
@@ -516,43 +557,37 @@ export function MapboxMap(props: MapboxMapProps) {
         }
       }, 20000);
 
-      // Once the basemap finishes loading: enable terrain (3D), disable dbl-click zoom, add fog.
+      // Once the basemap finishes loading: terrain/fog by tier, disable dbl-click zoom.
       map.on("load", () => {
         window.clearTimeout(loadTimeoutId);
         if (cancelled || mapRef.current !== map) return;
         setMapLoaded(true);
         setMapError(null);
-        if (enable3D) {
-          try {
-            if (!map!.getSource("fun-terrain")) {
-              map!.addSource("fun-terrain", {
-                type: "raster-dem",
-                url: "mapbox://mapbox.mapbox-terrain-dem-v1",
-                tileSize: 512,
-                maxzoom: 14,
-              });
-            }
-            map!.setTerrain({ source: "fun-terrain", exaggeration: 1.2 });
-          } catch (_) {}
-        }
+        const tier = effectiveCinematicTier(enable3DRef.current, cinematicTierRef.current);
+        applyCinematicBasemap(map!, tier);
         try {
           map!.doubleClickZoom?.disable();
         } catch (_) {}
-        try {
-          map!.setFog({
-            color: "rgb(10, 15, 28)",
-            "high-color": "rgb(20, 30, 48)",
-            "horizon-blend": 0.08,
-            "space-color": "rgb(5, 8, 15)",
-            "star-intensity": 0.15,
-          });
-        } catch (_) {}
+
+        map!.once("idle", () => {
+          if (cancelled || mapRef.current !== map) return;
+          setMapIdle(true);
+          const idleTier = effectiveCinematicTier(enable3DRef.current, cinematicTierRef.current);
+          if (!introPitchDoneRef.current && idleTier !== "off") {
+            introPitchDoneRef.current = true;
+            map!.easeTo({
+              pitch: MapCfg.getCinematicIntroPitch(idleTier),
+              duration: MapCfg.CINEMATIC_INTRO_PITCH_DURATION_MS,
+              easing: MapCfg.easeOutQuad,
+            });
+          }
+        });
       });
 
       map.on("error", (e) => {
         const msg = e.error?.message ?? "";
         // Tile/sprite/source failures are routine — never tear down the whole map for them.
-        if (e.sourceId) return;
+        if ((e as { sourceId?: string }).sourceId) return;
         if (/access token|unauthorized|401|403/i.test(msg)) {
           setMapError(msg || "Mapbox authentication failed");
         }
@@ -568,6 +603,8 @@ export function MapboxMap(props: MapboxMapProps) {
       cancelled = true;
       gameLayersInitedRef.current = false;
       initialUserFlyDoneRef.current = false;
+      introPitchDoneRef.current = false;
+      setMapIdle(false);
       setMapLoaded(false);
       // Clear pulsating note markers before tearing down the map.
       for (const entry of noteMarkerEntriesRef.current.values()) {
@@ -608,8 +645,15 @@ export function MapboxMap(props: MapboxMapProps) {
       removeVenueGlLayers(map);
       venueClustersRef.current = [];
       gameLayersInitedRef.current = false;
+      const tier = effectiveCinematicTier(enable3DRef.current, cinematicTierRef.current);
+      applyCinematicBasemap(map, tier);
       setBasemapStyleEpoch((n) => n + 1);
       setMapLoaded(true);
+      setMapIdle(false);
+      map.once("idle", () => {
+        if (cancelled || mapRef.current !== map) return;
+        setMapIdle(true);
+      });
     };
 
     const onStyleLoad = () => {
@@ -640,6 +684,13 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [MAPBOX_TOKEN, activeStyleUrl]);
 
+  // Re-apply terrain/fog when device tier or 3D mode changes (no pitch animation).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    applyCinematicBasemap(map, effectiveCinematicTier(enable3D, cinematicTier));
+  }, [mapLoaded, enable3D, cinematicTier]);
+
   // One-time fly to user when coords first become available (avoid fighting search / sport camera)
   useEffect(() => {
     const map = mapRef.current;
@@ -649,9 +700,8 @@ export function MapboxMap(props: MapboxMapProps) {
     map.flyTo({
       center: [userCoords.lng, userCoords.lat],
       zoom: 16,
-      pitch: enable3D ? 50 : 0,
     });
-  }, [mapLoaded, userCoords, enable3D]);
+  }, [mapLoaded, userCoords]);
 
   // Search / sport-driven camera: fly to a point, or fit all given points in view.
   useEffect(() => {
@@ -668,7 +718,6 @@ export function MapboxMap(props: MapboxMapProps) {
         m.flyTo({
           center: [req.lng, req.lat],
           zoom: req.zoom ?? 13,
-          pitch: enable3D ? 50 : 0,
           duration: 1400,
         });
         return;
@@ -682,7 +731,6 @@ export function MapboxMap(props: MapboxMapProps) {
         m.flyTo({
           center: coords[0],
           zoom: 14,
-          pitch: enable3D ? 50 : 0,
           duration: 1200,
         });
         return;
@@ -696,7 +744,7 @@ export function MapboxMap(props: MapboxMapProps) {
         duration: 1200,
       });
     });
-  }, [mapLoaded, mapCameraRequest, enable3D]);
+  }, [mapLoaded, mapCameraRequest]);
 
   // Center on user when "Center on me" is pressed (works without auth; uses browser geolocation)
   useEffect(() => {
@@ -707,7 +755,6 @@ export function MapboxMap(props: MapboxMapProps) {
       map.flyTo({
         center: [lng, lat],
         zoom: 17,
-        pitch: enable3D ? 50 : 0,
       });
     };
 
@@ -723,22 +770,9 @@ export function MapboxMap(props: MapboxMapProps) {
       () => {},
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
-  }, [mapLoaded, centerOnUserTrigger, userCoords, enable3D]);
+  }, [mapLoaded, centerOnUserTrigger, userCoords]);
 
-  /** Map pixel → viewport for `position: fixed` venue card (layout after ref is attached). */
-  const [venueAnchorClient, setVenueAnchorClient] = useState<{ x: number; y: number } | null>(null);
-  // Convert the venue's position inside the map into a whole-page coordinate so a
-  // fixed-position popup can sit exactly over it.
-  useLayoutEffect(() => {
-    if (!venuePopupPoint || !containerRef.current) {
-      setVenueAnchorClient(null);
-      return;
-    }
-    const r = containerRef.current.getBoundingClientRect(); // map's position on the page
-    setVenueAnchorClient({ x: r.left + venuePopupPoint.x, y: r.top + venuePopupPoint.y });
-  }, [venuePopupPoint]);
-
-  // —— Venue selection: center map on venue (offset so popup fits above), then project anchor ——
+  // —— Venue selection: center map on venue when sheet opens ——
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
@@ -749,28 +783,27 @@ export function MapboxMap(props: MapboxMapProps) {
     }
 
     const { lng, lat } = selectedVenue.center;
-    setVenuePopupPoint(null); // hide the card until the camera settles
 
-    // Once the camera stops, project the venue back to a screen pixel to anchor the popup.
     const onMoveEnd = () => {
       setVenuePopupPoint(map.project([lng, lat]));
     };
 
-    // Center on the venue (offset downward so the popup has room above it).
+    const tier = effectiveCinematicTier(enable3D, cinematicTier);
+
     map.easeTo({
       center: [lng, lat],
-      zoom: Math.max(map.getZoom(), 16),
-      pitch: enable3D ? 50 : 0,
-      bearing: map.getBearing(),
-      offset: [0, 120],
-      duration: 480,
+      zoom: Math.max(map.getZoom(), 17),
+      pitch: MapCfg.getCinematicVenuePitch(tier),
+      bearing: MapCfg.getCinematicVenueBearing(tier),
+      offset: isMobile ? [0, 80] : [0, 0],
+      duration: MapCfg.CINEMATIC_VENUE_EASE_DURATION_MS,
     });
-    map.once("moveend", onMoveEnd);
 
+    map.once("moveend", onMoveEnd);
     return () => {
       map.off("moveend", onMoveEnd);
     };
-  }, [mapLoaded, selectedVenue?.id, selectedVenue?.center.lng, selectedVenue?.center.lat, enable3D]);
+  }, [mapLoaded, selectedVenue?.id, selectedVenue?.center.lng, selectedVenue?.center.lat, enable3D, cinematicTier, isMobile]);
 
   // —— Open game modal from carousel (center + delayed popup) ——
   useEffect(() => {
@@ -1771,8 +1804,9 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [mapLoaded, onMapDoubleClick, isMobile, onSelectVenue]);
 
-  /** 3D overlay only when we have a real GLB URL (Ready Player Me). Never treat 2D profile image URLs as GLB. */
-  const use3DOverlay = enable3D && !!userCoords && !!avatarGlbUrl && !use2DAvatar;
+  /** 3D overlay: full tier only, deferred until first idle (lighter boot). */
+  const use3DOverlay =
+    cinematicTier === "full" && enable3D && !!userCoords && !!avatarGlbUrl && !use2DAvatar && mapIdle;
 
   // —— 2D user marker when not using 3D overlay ———
   // Builds the "you are here" avatar (rings + photo + star rating) as an HTML marker.
@@ -2011,13 +2045,9 @@ export function MapboxMap(props: MapboxMapProps) {
         const selectVenueFromCluster = (cluster: VenueClusterPoint) => {
           venueInteractionTsRef.current = Date.now();
           setEventPopup(null);
-          onSelectVenue({
-            id: cluster.properties.id,
-            name: cluster.properties.name,
-            sport: cluster.properties.sport,
-            leisure: cluster.properties.leisure,
-            center: { lng: cluster.lng, lat: cluster.lat },
-          });
+          onSelectVenue(
+            venueSelectionFromProperties(cluster.properties, { lng: cluster.lng, lat: cluster.lat })
+          );
         };
 
         if (venueGlLayersReady(mapInstance)) {
@@ -2433,34 +2463,27 @@ export function MapboxMap(props: MapboxMapProps) {
         </div>
       )}
 
-      {/* Venue info card with nearby games + "create game here" action. */}
-      {selectedVenue && venuePopupPoint && venueAnchorClient && mapLoaded && (
-        <div
-          className="fixed inset-0 z-[999] pointer-events-auto"
-          onClick={() => {
+      {/* Centered venue modal: action-first, with in-app OSM/Wikidata details (ℹ️). */}
+      {selectedVenue && mapLoaded && (
+        <VenueInfoPopup
+          venue={selectedVenue}
+          open
+          openGamesNearbyCount={openGamesNearbyCount}
+          gamesNearby={gamesAtSelectedVenue}
+          joinedGameIds={joinedSet}
+          viewerCoords={userCoords}
+          onJoinGame={onJoinGame}
+          onOpenChat={onOpenMessagesForGame}
+          onClose={() => {
             onSelectVenue(null);
             setVenuePopupPoint(null);
           }}
-        >
-          <VenueInfoPopup
-            key={`${selectedVenue.center.lat}-${selectedVenue.center.lng}`}
-            venue={selectedVenue}
-            anchorClient={venueAnchorClient}
-            openGamesNearbyCount={openGamesNearbyCount}
-            gamesNearby={gamesAtSelectedVenue}
-            joinedGameIds={joinedSet}
-            viewerCoords={userCoords}
-            onJoinGame={onJoinGame}
-            onOpenChat={onOpenMessagesForGame}
-            onCreateGame={(venue) => {
-              onCreateGameAtVenue?.(venue, venuePopupPoint ?? undefined);
-            }}
-            onClose={() => {
-              onSelectVenue(null);
-              setVenuePopupPoint(null);
-            }}
-          />
-        </div>
+          onCreateGame={(venue) => {
+            onCreateGameAtVenue?.(venue, venuePopupPoint ?? undefined);
+            onSelectVenue(null);
+            setVenuePopupPoint(null);
+          }}
+        />
       )}
 
       {/* Chooser modal listing all games stacked at one location. */}
@@ -2492,11 +2515,13 @@ export function MapboxMap(props: MapboxMapProps) {
 
       {/* 3D Ready Player Me avatar overlay (only when 3D mode + a real GLB URL are present). */}
       {mapLoaded && use3DOverlay && userCoords && mapRef.current && avatarGlbUrl && (
-        <Avatar3DOverlay
-          map={mapRef.current}
-          userCoords={userCoords}
-          glbUrl={avatarGlbUrl}
-        />
+        <React.Suspense fallback={null}>
+          <Avatar3DOverlay
+            map={mapRef.current}
+            userCoords={userCoords}
+            glbUrl={avatarGlbUrl}
+          />
+        </React.Suspense>
       )}
     </div>
   );

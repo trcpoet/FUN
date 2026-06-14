@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
+import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "./api/lib/osmVenueTags";
 /** Same order as `api/overpass.ts` — Vite's http-proxy often 504s on slow upstreams. */
 const UPSTREAMS = [
   "https://overpass-api.de/api/interpreter",
@@ -21,7 +22,7 @@ type OsmEl = {
   lat?: number;
   lon?: number;
   center?: { lat?: number; lon?: number };
-  tags?: { name?: string; sport?: string; leisure?: string };
+  tags?: OsmVenueTags;
 };
 
 function bboxQuery(bboxStr: string): string {
@@ -110,20 +111,13 @@ export function overpassDevProxy(): Plugin {
                 const lat = el.lat ?? el.center?.lat;
                 const lon = el.lon ?? el.center?.lon;
                 if (lat == null || lon == null || el.type == null || el.id == null) continue;
-                const id = `${el.type}/${el.id}`;
+                const row = buildOsmVenueRow(el.type, el.id, lat, lon, el.tags, now);
                 features.push({
                   type: "Feature",
                   geometry: { type: "Point", coordinates: [lon, lat] },
-                  properties: {
-                    id,
-                    name: el.tags?.name,
-                    sport: el.tags?.sport,
-                    leisure: el.tags?.leisure,
-                    osm_type: el.type,
-                    osm_id: el.id,
-                  },
+                  properties: osmVenueRowToGeoProperties(row.id, row.osm_type, row.osm_id, row),
                 });
-                rows.push({ id, lat, lng: lon, name: el.tags?.name ?? null, sport: el.tags?.sport ?? null, leisure: el.tags?.leisure ?? null, osm_type: el.type, osm_id: el.id, imported_at: now });
+                rows.push(row);
               }
             } catch (err) {
               console.error("[Overpass proxy] failed:", err);

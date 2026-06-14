@@ -393,7 +393,7 @@ export default function Profile() {
                 {athleteProfile.availability && (
                   <div className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Availability</span>
-                    <span className="text-sm font-black text-white italic uppercase">{athleteProfile.availability.replaceAll("_", " ")}</span>
+                    <span className="text-sm font-black text-white italic uppercase">{athleteProfile.availability.replace(/_/g, " ")}</span>
                   </div>
                 )}
                 {athleteProfile.snapshot?.intensity && (

@@ -22,7 +22,10 @@ import type {
   NotificationRow,
   StatusCommentRow,
   FeedMediaPostRow,
+  OsmSportsVenueRow,
 } from "./supabase";
+import type { VenueSelection } from "../app/components/mapboxMapTypes";
+import { venueSelectionFromDbRow } from "../app/lib/venueSelection";
 import { cachedAsync, cacheClear } from "./requestCache";
 import { getAuthUserDeduped } from "./authDedup";
 
@@ -1296,4 +1299,48 @@ export async function fetchDiscoveredAthletes(params: {
 export function avatarIdToGlbUrl(avatarId: string | null, quality: "low" | "medium" | "high" = "low"): string | null {
   if (!avatarId?.trim()) return null;
   return `https://models.readyplayer.me/${avatarId.trim()}.glb?quality=${quality}`;
+}
+
+// —— Venues ——
+
+export type VenueEnrichment = {
+  heroImageUrl: string | null;
+  label: string | null;
+  description: string | null;
+};
+
+const OSM_VENUE_SELECT =
+  "id, lat, lng, name, sport, leisure, osm_type, osm_id, surface, lit, access, opening_hours, website, operator, wikidata, hero_image_url, wikidata_label, wikidata_description";
+
+export async function fetchVenueById(
+  id: string
+): Promise<{ data: VenueSelection | null; error: Error | null }> {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { data, error } = await supabase
+    .from("osm_sports_venues")
+    .select(OSM_VENUE_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) return { data: null, error: new Error(error.message) };
+  if (!data) return { data: null, error: null };
+  return { data: venueSelectionFromDbRow(data as OsmSportsVenueRow), error: null };
+}
+
+export async function fetchVenueEnrichment(
+  venueId: string
+): Promise<{ data: VenueEnrichment | null; error: Error | null }> {
+  try {
+    const res = await fetch("/api/venue-enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: venueId }),
+    });
+    if (!res.ok) {
+      return { data: null, error: new Error(`Enrichment failed (${res.status})`) };
+    }
+    const json = (await res.json()) as VenueEnrichment;
+    return { data: json, error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error(String(e)) };
+  }
 }

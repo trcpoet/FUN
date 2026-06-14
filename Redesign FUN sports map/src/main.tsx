@@ -6,6 +6,7 @@ import { RequireAuth } from "./app/components/RequireAuth";
 import { RequireOnboarding } from "./app/components/RequireOnboarding";
 import { PublicOnly } from "./app/components/PublicOnly";
 import "./styles/index.css";
+import { FunOrbitLoader } from "./app/components/FunOrbitLoader";
 
 const App = lazy(() => import("./app/App.tsx"));
 const Login = lazy(() => import("./app/pages/Login.tsx"));
@@ -17,14 +18,7 @@ const Feed = lazy(() => import("./app/pages/Feed.tsx"));
 const RedeemInvite = lazy(() => import("./app/pages/RedeemInvite.tsx"));
 
 function RouteFallback() {
-  return (
-    <div className="flex h-screen w-full items-center justify-center bg-[#0A0F1C]">
-      <div className="flex flex-col items-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
-        <p className="text-sm font-medium text-slate-400">Loading FUN…</p>
-      </div>
-    </div>
-  );
+  return <FunOrbitLoader />;
 }
 
 type RouteErrorBoundaryProps = { children: React.ReactNode };

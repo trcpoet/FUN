@@ -4,7 +4,8 @@ import { getMyNotifications, markNotificationRead, subscribeToNotifications } fr
 import type { NotificationRow } from "../lib/supabase";
 import { getAuthUserDeduped } from "../lib/authDedup";
 
-export function useNotifications(options?: { limit?: number }) {
+export function useNotifications(options?: { limit?: number; enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const [list, setList] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,12 +22,12 @@ export function useNotifications(options?: { limit?: number }) {
   }, [limit]);
 
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
+    if (!supabase || !enabled) {
+      if (!enabled) setLoading(false);
       return;
     }
     refetch();
-  }, [refetch]);
+  }, [refetch, enabled]);
 
   useEffect(() => {
     if (!supabase) return;

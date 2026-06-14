@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import path from 'path'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -46,9 +46,29 @@ function phantomRestartGuard(): Plugin {
   }
 }
 
-export default defineConfig({
+function supabasePreconnect(env: Record<string, string>): Plugin {
+  return {
+    name: 'fun-supabase-preconnect',
+    transformIndexHtml(html) {
+      const raw = env.VITE_SUPABASE_URL?.trim()
+      if (!raw) return html
+      try {
+        const origin = new URL(raw).origin
+        const tags = `<link rel="preconnect" href="${origin}" crossorigin />\n    <link rel="dns-prefetch" href="${origin}" />`
+        return html.replace('</head>', `    ${tags}\n  </head>`)
+      } catch {
+        return html
+      }
+    },
+  }
+}
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, __dirname, '')
+  return {
   plugins: [
     phantomRestartGuard(),
+    supabasePreconnect(env),
     // Dev-only: same behavior as `api/overpass.ts` (multi-mirror). Vite `server.proxy` often 504s on slow Overpass.
     overpassDevProxy(),
     // The React and Tailwind plugins are both required for Make, even if
@@ -103,9 +123,18 @@ export default defineConfig({
       'react-day-picker',
       'react-easy-crop',
       'tailwind-merge',
-      'three',
-      'three/examples/jsm/loaders/GLTFLoader.js',
     ],
+  },
+
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/mapbox-gl")) return "mapbox";
+          if (id.includes("node_modules/three")) return "three";
+        },
+      },
+    },
   },
 
   server: {
@@ -123,4 +152,5 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+  }
 })

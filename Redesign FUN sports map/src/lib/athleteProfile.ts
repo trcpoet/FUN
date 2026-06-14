@@ -232,13 +232,14 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
         .filter((x): x is Record<string, unknown> => x != null && typeof x === "object")
         .map((s) => ({
           sport: asStr(s.sport) ?? "",
-          level:
+          level: (
             s.level === "casual" ||
             s.level === "intermediate" ||
             s.level === "advanced" ||
             s.level === "competitive"
               ? s.level
-              : null,
+              : null
+          ) as SportSkillEntry["level"],
           primary: s.primary === true,
         }))
         .filter((s) => s.sport.length > 0)

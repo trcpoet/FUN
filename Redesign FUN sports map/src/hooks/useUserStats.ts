@@ -3,7 +3,8 @@ import { supabase } from "../lib/supabase";
 import { getMyStats } from "../lib/api";
 import type { UserStatsRow } from "../lib/supabase";
 
-export function useUserStats() {
+export function useUserStats(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const [stats, setStats] = useState<UserStatsRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,12 +20,12 @@ export function useUserStats() {
   }, []);
 
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
+    if (!supabase || !enabled) {
+      if (!enabled) setLoading(false);
       return;
     }
     refetch();
-  }, [refetch]);
+  }, [refetch, enabled]);
 
   return { stats, loading, error, refetch };
 }

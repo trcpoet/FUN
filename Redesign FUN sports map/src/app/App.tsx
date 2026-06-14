@@ -3,6 +3,9 @@ import { Loader2 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import type { MapCameraRequest, VenueSelection } from "./components/mapboxMapTypes";
 import { prefetchMapboxGl } from "./lib/mapboxCached";
+import { FunOrbitLoader } from "./components/FunOrbitLoader";
+import { useAuth } from "./contexts/AuthContext";
+import { useIdleReady } from "../hooks/useIdleReady";
 
 const MapboxMap = React.lazy(() =>
   import("./components/MapboxMap").then((m) => ({ default: m.MapboxMap }))
@@ -52,6 +55,9 @@ const FAR_SPORT_ZOOM = 11.5;
 const EXTENDED_GAMES_RADIUS_KM = 120;
 
 export default function App() {
+  const { user } = useAuth();
+  const currentUserId = user?.id ?? null;
+  const secondaryReady = useIdleReady();
   const { coords: userCoords, error: locationError } = useGeolocation();
   // For this experiment: keep the app usable even if location is blocked.
   // (Browsers control permission prompts; we can't force "Allow", but we can fall back.)
@@ -109,8 +115,8 @@ export default function App() {
     gamesLat: gamesFetchLat,
     gamesLng: gamesFetchLng,
     gamesRadiusKm,
-    profilesLat: userCoords?.lat ?? null,
-    profilesLng: userCoords?.lng ?? null,
+    profilesLat: userCoords?.lat ?? effectiveUserCoords.lat,
+    profilesLng: userCoords?.lng ?? effectiveUserCoords.lng,
     athletesRadiusKm: appliedFilters.athletesRadiusKm,
   });
   const [venuesFetchLoading, setVenuesFetchLoading] = useState(false);
@@ -163,12 +169,11 @@ export default function App() {
       setVenueIntentReady(true);
     }
   }, [favoriteSport, venueIntentReady]);
-  const { stats } = useUserStats();
+  const { stats } = useUserStats({ enabled: secondaryReady });
   const navigate = useNavigate();
   const location = useLocation();
-  const { notifications, markRead } = useNotifications({ limit: 10 });
+  const { notifications, markRead } = useNotifications({ limit: 10, enabled: secondaryReady });
   const messagesUnreadCount = useTotalUnreadMessages();
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [locationVisibility, setLocationVisibility] = useState<LocationVisibilityMode>(() => readLocationVisibility());
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
   const [selectedVenue, setSelectedVenue] = useState<VenueSelection | null>(null);
@@ -193,10 +198,11 @@ export default function App() {
   const [liveNowOpen, setLiveNowOpen] = useState(false);
   const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
 
-  // Notes: fetch nearby whenever the map's "games center" changes.
+  // Notes: fetch nearby whenever the map's "games center" changes (deferred until idle).
   useEffect(() => {
+    if (!secondaryReady) return;
     void refetchNotes();
-  }, [refetchNotes]);
+  }, [refetchNotes, secondaryReady]);
 
   // Deep link from Feed → map game focus.
   useEffect(() => {
@@ -259,28 +265,10 @@ export default function App() {
     prefetchMapboxGl();
   }, []);
 
-  useEffect(() => {
-    if (!supabase) return;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN") {
-        setCurrentUserId(session?.user.id ?? null);
-      } else if (event === "SIGNED_OUT") {
-        setCurrentUserId(null);
-      }
-    });
-    void supabase.auth.getSession().then(({ data: { session } }) => {
-      setCurrentUserId(session?.user.id ?? null);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
   const ensureSession = async (): Promise<boolean> => {
     if (currentUserId) return true;
     const { data: { session } } = await supabase!.auth.getSession();
-    if (session?.user) {
-      setCurrentUserId(session.user.id);
-      return true;
-    }
+    if (session?.user) return true;
     navigate("/login");
     return false;
   };
@@ -296,8 +284,9 @@ export default function App() {
   }, [currentUserId]);
 
   useEffect(() => {
+    if (!secondaryReady) return;
     void reloadJoinedGameIds();
-  }, [reloadJoinedGameIds]);
+  }, [reloadJoinedGameIds, secondaryReady]);
 
   const handlePickGeocode = (f: ForwardGeocodeFeature) => {
     setMapSearchLocation({ lat: f.center[1], lng: f.center[0] });
@@ -563,16 +552,7 @@ export default function App() {
             }}
           />
         ) : null}
-      <Suspense
-        fallback={
-          <div className="flex h-full w-full items-center justify-center bg-[#0A0F1C]">
-            <div className="flex flex-col items-center gap-4">
-              <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-              <p className="text-sm font-medium text-slate-400">Loading map…</p>
-            </div>
-          </div>
-        }
-      >
+      <Suspense fallback={<FunOrbitLoader tagline="Loading map…" className="absolute inset-0" />}>
         <MapboxMap
           userCoords={effectiveUserCoords}
           games={mapGames}
@@ -603,10 +583,13 @@ export default function App() {
             const name = prettyLabel(venue.name);
             const sport = prettyLabel(venue.sport);
             const leisure = prettyLabel(venue.leisure);
-            setCreateGameLocationLabel(
+            const locationParts = [
               name ??
-                (sport && leisure ? `${sport} ${leisure}` : sport ?? leisure ?? "Sports venue")
-            );
+                (sport && leisure ? `${sport} ${leisure}` : sport ?? leisure ?? "Sports venue"),
+              prettyLabel(venue.website),
+              venue.opening_hours?.trim() || null,
+            ].filter(Boolean);
+            setCreateGameLocationLabel(locationParts.join(" · "));
             setCreateGameOpen(true);
           }}
           centerOnUserTrigger={centerOnUserTrigger}

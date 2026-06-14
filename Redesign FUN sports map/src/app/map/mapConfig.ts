@@ -208,3 +208,54 @@ export const PLAYER_MARKERS_MIN_ZOOM = 5.0;
 
 /** Throttle ms for visibility recalculation on move/zoom */
 export const MAP_VISIBILITY_THROTTLE_MS = 80;
+
+// —— Cinematic 3D map tiers (device / motion) ———————————————————
+
+export type CinematicTier = "off" | "lite" | "full";
+
+/** Device tier: same cinematic stack on mobile + desktop; off only for reduced motion. */
+export function getCinematicTier(_isMobile: boolean): CinematicTier {
+  if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    return "off";
+  }
+  return "full";
+}
+
+/** Intro camera tilt after first tiles paint (idle). */
+export function getCinematicIntroPitch(tier: CinematicTier): number {
+  if (tier === "full") return 62;
+  if (tier === "lite") return 45;
+  return 0;
+}
+
+/** Venue tap: “land on the court” pitch. */
+export function getCinematicVenuePitch(tier: CinematicTier): number {
+  if (tier === "full") return 65;
+  if (tier === "lite") return 45;
+  return 0;
+}
+
+/** Slight orbit on desktop venue select. */
+export function getCinematicVenueBearing(tier: CinematicTier): number {
+  return tier === "full" ? 15 : 0;
+}
+
+export const CINEMATIC_INTRO_PITCH_DURATION_MS = 1800;
+export const CINEMATIC_VENUE_EASE_DURATION_MS = 900;
+
+/** ease-out quad — used for intro pitch tilt. */
+export function easeOutQuad(t: number): number {
+  return t * (2 - t);
+}
+
+/**
+ * Atmosphere lives in Mapbox Studio (Global → Atmosphere). Do not call setFog() in code —
+ * mixing both makes the horizon look muddy.
+ */
+export const STUDIO_ATMOSPHERE_HINT = {
+  "low-color": "#0a0f1c",
+  "high-color": "#141e30",
+  "space-color": "#05080f",
+  "horizon-blend": 0.08,
+  "star-intensity": 0.15,
+} as const;

@@ -15,6 +15,7 @@
  *   dynamic import, so mapbox-gl stays out of the entry chunk but there is a
  *   single statically-analyzable interop point in both dev and build.
  */
+import "mapbox-gl/dist/mapbox-gl.css";
 import mapboxgl from "mapbox-gl";
 
 export type MapboxGl = typeof mapboxgl;

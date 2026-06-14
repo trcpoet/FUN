@@ -5,6 +5,8 @@
  *
  * Run on a schedule (e.g. Vercel Cron) or locally via scripts/import-osm-venues.mjs
  */
+import { buildOsmVenueRow, type OsmVenueTags } from "./lib/osmVenueTags";
+
 export const config = { runtime: "edge" };
 
 const UPSTREAMS = [
@@ -59,29 +61,19 @@ type OsmEl = {
   lat?: number;
   lon?: number;
   center?: { lat?: number; lon?: number };
-  tags?: { name?: string; sport?: string; leisure?: string };
+  tags?: OsmVenueTags;
 };
 
 function elementsToRows(elements: unknown[]): Record<string, unknown>[] {
   const rows: Record<string, unknown>[] = [];
+  const now = new Date().toISOString();
   for (const raw of elements) {
     const el = raw as OsmEl;
     const lat = el.lat ?? el.center?.lat;
     const lon = el.lon ?? el.center?.lon;
     if (lat == null || lon == null) continue;
     if (el.type == null || el.id == null) continue;
-    const id = `${el.type}/${el.id}`;
-    rows.push({
-      id,
-      lat,
-      lng: lon,
-      name: el.tags?.name ?? null,
-      sport: el.tags?.sport ?? null,
-      leisure: el.tags?.leisure ?? null,
-      osm_type: el.type,
-      osm_id: el.id,
-      imported_at: new Date().toISOString(),
-    });
+    rows.push(buildOsmVenueRow(el.type, el.id, lat, lon, el.tags, now));
   }
   return rows;
 }

@@ -15,6 +15,13 @@ export type SportsVenueProperties = {
   surface?: string;
   lit?: string;
   access?: string;
+  opening_hours?: string;
+  website?: string;
+  operator?: string;
+  wikidata?: string;
+  hero_image_url?: string;
+  wikidata_label?: string;
+  wikidata_description?: string;
 };
 
 export type VenueDotProperties = {

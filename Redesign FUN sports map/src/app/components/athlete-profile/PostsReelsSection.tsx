@@ -146,7 +146,7 @@ export function PostsReelsSection({
                   : "text-slate-500 hover:text-white hover:bg-white/[0.05]"
               )}
             >
-              {React.cloneElement(t.icon as React.ReactElement, { className: "size-4" })}
+              {React.cloneElement(t.icon as React.ReactElement<{ className?: string }>, { className: "size-4" })}
               <span className="text-[10px] font-black uppercase tracking-widest hidden sm:inline">
                 {t.id}
               </span>

@@ -229,3 +229,26 @@ export type GameParticipantRow = {
   joined_at: string;
   confirmed_result: boolean;
 };
+
+export type OsmSportsVenueRow = {
+  id: string;
+  lat: number;
+  lng: number;
+  name: string | null;
+  sport: string | null;
+  leisure: string | null;
+  osm_type: string;
+  osm_id: number;
+  imported_at: string;
+  surface: string | null;
+  lit: string | null;
+  access: string | null;
+  opening_hours: string | null;
+  website: string | null;
+  operator: string | null;
+  wikidata: string | null;
+  hero_image_url: string | null;
+  wikidata_label: string | null;
+  wikidata_description: string | null;
+  enriched_at: string | null;
+};

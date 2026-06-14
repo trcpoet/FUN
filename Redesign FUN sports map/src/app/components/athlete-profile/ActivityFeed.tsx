@@ -1,5 +1,5 @@
 import type { ActivityPost } from "../../../lib/athleteProfile";
-import { MessageCircle, Heart, Pin, Share2, MoreHorizontal } from "lucide-react";
+import { MessageCircle, Heart, Pin, Share2, MoreHorizontal, PenSquare } from "lucide-react";
 import { cn } from "../ui/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Badge } from "../ui/badge";
