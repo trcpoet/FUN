@@ -2,7 +2,7 @@
  * Server-side Overpass proxy: browsers cannot call overpass-api.de / mirrors (no CORS).
  * Vercel Edge forwards POST body to public Overpass endpoints.
  */
-import { promiseAny } from "./lib/promiseAny";
+import { promiseAny } from "../server/lib/promiseAny";
 
 export const config = { runtime: "edge" };
 

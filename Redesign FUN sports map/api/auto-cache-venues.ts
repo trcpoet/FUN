@@ -6,8 +6,8 @@
  * First user in any area pays the Overpass cost (~2-5s).
  * Every subsequent user in that area gets an instant DB read.
  */
-import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "./lib/osmVenueTags";
-import { promiseAny } from "./lib/promiseAny";
+import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "../server/lib/osmVenueTags";
+import { promiseAny } from "../server/lib/promiseAny";
 
 export const config = { runtime: "edge" };
 
