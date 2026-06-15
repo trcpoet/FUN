@@ -6,6 +6,7 @@
  * Run on a schedule (e.g. Vercel Cron) or locally via scripts/import-osm-venues.mjs
  */
 import { buildOsmVenueRow, type OsmVenueTags } from "./lib/osmVenueTags";
+import { promiseAny } from "./lib/promiseAny";
 
 export const config = { runtime: "edge" };
 
@@ -30,7 +31,7 @@ function bboxQuery(bboxStr: string): string {
 async function fetchOverpassJson(body: string): Promise<{ elements?: unknown[] } | null> {
   const controllers = UPSTREAMS.map(() => new AbortController());
   try {
-    const text = await Promise.any(
+    const text = await promiseAny(
       UPSTREAMS.map((url, i) =>
         fetch(url, {
           method: "POST",
