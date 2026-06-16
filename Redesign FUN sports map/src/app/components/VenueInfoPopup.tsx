@@ -265,11 +265,12 @@ export function VenueInfoPopup({
                       e.stopPropagation();
                       setView("details");
                     }}
-                    className={ICON_BTN}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-300 transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/15 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
                     aria-label="Venue info"
                     title="Venue info"
                   >
-                    <Info className="w-5 h-5" />
+                    <Info className="w-4 h-4" aria-hidden />
+                    Details
                   </button>
                   <button
                     type="button"
@@ -363,6 +364,38 @@ export function VenueInfoPopup({
                     No open games here yet — start one below.
                   </p>
                 )}
+
+                {hours.length > 0 || websiteHref ? (
+                  <div className="mt-3 flex flex-col gap-2 border-t border-white/10 pt-3">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium">At a glance</p>
+                    {hours.length > 0 ? (
+                      <div className="flex items-start gap-2 text-sm text-slate-300">
+                        <Clock className="w-4 h-4 shrink-0 text-slate-500 mt-0.5" aria-hidden />
+                        <span className="min-w-0 break-words">{hours.join(" · ")}</span>
+                      </div>
+                    ) : null}
+                    {websiteHref ? (
+                      <a
+                        href={websiteHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex w-fit items-center gap-2 text-sm text-slate-300 transition-colors hover:text-white"
+                      >
+                        <Globe className="w-4 h-4 shrink-0 text-emerald-400" aria-hidden />
+                        Visit website
+                        <ExternalLink className="w-3.5 h-3.5 opacity-60" aria-hidden />
+                      </a>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setView("details")}
+                      className="inline-flex w-fit items-center gap-1 text-sm font-medium text-emerald-400 transition-colors hover:text-emerald-300 cursor-pointer"
+                    >
+                      More details
+                      <ChevronRight className="w-4 h-4" aria-hidden />
+                    </button>
+                  </div>
+                ) : null}
               </div>
 
               {/* Footer actions */}
