@@ -7,6 +7,7 @@ import {
   AVAILABILITY_OPTIONS,
   emptyAthleteProfile,
 } from "../../../lib/athleteProfile";
+import { AGE_RANGE_OPTIONS, MATCH_TYPE_OPTIONS } from "../../../lib/gamePreferenceOptions";
 import { SPORT_OPTIONS } from "../../../lib/sports";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -477,6 +478,56 @@ export function ProfileEditSheet({
                       <div className="space-y-2 px-1">
                         <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Athlete Manifesto</Label>
                         <Textarea value={draft.bio ?? ""} onChange={(e) => setDraft((d) => ({ ...d, bio: e.target.value || null }))} placeholder="Explosive winger. Competitive runs only." rows={3} className="rounded-2xl bg-white/[0.03] border-white/5 text-white font-medium italic resize-none" />
+                      </div>
+                    </div>
+                    <div className="space-y-3 px-1 pt-2 border-t border-white/5">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Game matching</Label>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">Powers your map filter defaults and helps match you to games. Optional.</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Age bracket</Label>
+                          <Select
+                            value={draft.gameMatchPreferences?.ageRange ?? "Any"}
+                            onValueChange={(v) =>
+                              setDraft((d) => ({
+                                ...d,
+                                gameMatchPreferences: { ...d.gameMatchPreferences, ageRange: v === "Any" ? null : v },
+                              }))
+                            }
+                          >
+                            <SelectTrigger className="h-12 rounded-2xl bg-white/[0.03] border-white/5 text-white text-[11px] font-bold">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#0D1117] border-white/10 rounded-2xl">
+                              {AGE_RANGE_OPTIONS.map((o) => (
+                                <SelectItem key={o} value={o} className="text-[11px] font-bold">{o}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Match type</Label>
+                          <Select
+                            value={draft.gameMatchPreferences?.matchType ?? "Any"}
+                            onValueChange={(v) =>
+                              setDraft((d) => ({
+                                ...d,
+                                gameMatchPreferences: { ...d.gameMatchPreferences, matchType: v === "Any" ? null : v },
+                              }))
+                            }
+                          >
+                            <SelectTrigger className="h-12 rounded-2xl bg-white/[0.03] border-white/5 text-white text-[11px] font-bold">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#0D1117] border-white/10 rounded-2xl">
+                              {["Any", ...MATCH_TYPE_OPTIONS].map((o) => (
+                                <SelectItem key={o} value={o} className="text-[11px] font-bold">{o}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                     </div>
                   </div>

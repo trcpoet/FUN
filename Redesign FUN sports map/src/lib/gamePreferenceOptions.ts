@@ -52,6 +52,50 @@ export function visibilityEnumToLabel(value: GameVisibility | null | undefined):
   }
 }
 
+/** True when a preference value means "no constraint" (null/empty/"Any"). */
+export function isAnyPreference(v: string | null | undefined): boolean {
+  const s = (v ?? "").trim();
+  return s === "" || s.toLowerCase() === "any";
+}
+
+/** Inclusive [minAge, maxAge] for each canonical AGE_RANGE_OPTIONS bucket (en-dash labels). */
+const AGE_BUCKET_RANGES: Record<string, [number, number]> = {
+  "13–17": [13, 17],
+  "18–24": [18, 24],
+  "25–34": [25, 34],
+  "35–44": [35, 44],
+  "45+": [45, 200],
+};
+
+/** Legacy/malformed labels (old hyphen buckets) → canonical en-dash bucket. */
+const AGE_ALIASES: Record<string, string> = {
+  "18-25": "18–24",
+  "26-35": "25–34",
+  "36-45": "35–44",
+  "46+": "45+",
+  "13-17": "13–17",
+  "18-24": "18–24",
+  "25-34": "25–34",
+  "35-44": "35–44",
+};
+
+/** Canonical bucket label, "Any", or null when unrecognised (caller treats null as pass). */
+export function normalizeAgeRange(v: string | null | undefined): string | null {
+  const s = (v ?? "").trim();
+  if (s === "" || s.toLowerCase() === "any") return "Any";
+  if (AGE_BUCKET_RANGES[s]) return s;
+  if (AGE_ALIASES[s]) return AGE_ALIASES[s];
+  return null;
+}
+
+/** Two age buckets overlap if they share any age. Unknown buckets => inclusive pass. */
+export function ageRangesOverlap(a: string, b: string): boolean {
+  const ra = AGE_BUCKET_RANGES[normalizeAgeRange(a) ?? ""];
+  const rb = AGE_BUCKET_RANGES[normalizeAgeRange(b) ?? ""];
+  if (!ra || !rb) return true;
+  return ra[0] <= rb[1] && rb[0] <= ra[1];
+}
+
 /** Allowed game durations (minutes). Used by sliders + the DB check_constraint. */
 export const MIN_DURATION_MIN = 15;
 export const MAX_DURATION_MIN = 480;

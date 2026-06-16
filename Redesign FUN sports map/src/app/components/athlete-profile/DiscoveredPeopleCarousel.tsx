@@ -14,6 +14,7 @@ import {
 } from "../ui/carousel";
 import { cn } from "../ui/utils";
 import { readFollowedIds, writeFollowedIds } from "../../../lib/localFollows";
+import { followUser, unfollowUser } from "../../../lib/api";
 
 function requestGeo(): Promise<{ lat: number; lng: number } | null> {
   return new Promise((resolve) => {
@@ -73,13 +74,15 @@ export function DiscoveredPeopleCarousel({ expanded, onClose, excludeUserId, pri
   }, [expanded, load]);
 
   const toggleFollow = (id: string) => {
+    const willFollow = !followed.has(id);
     setFollowed((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (willFollow) next.add(id);
+      else next.delete(id);
       writeFollowedIds(next);
       return next;
     });
+    void (willFollow ? followUser(id) : unfollowUser(id));
   };
 
   return (

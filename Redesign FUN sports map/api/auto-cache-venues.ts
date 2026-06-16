@@ -6,7 +6,8 @@
  * First user in any area pays the Overpass cost (~2-5s).
  * Every subsequent user in that area gets an instant DB read.
  */
-import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "./lib/osmVenueTags";
+import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "../server/lib/osmVenueTags";
+import { promiseAny } from "../server/lib/promiseAny";
 
 export const config = { runtime: "edge" };
 
@@ -35,7 +36,7 @@ async function fetchOverpassJson(body: string): Promise<{ elements?: unknown[] }
     controllers.forEach((c) => c.abort());
   }, hardTimeoutMs);
   try {
-    const text = await Promise.any(
+    const text = await promiseAny(
       UPSTREAMS.map((url, i) =>
         fetch(url, {
           method: "POST",
@@ -127,20 +128,33 @@ export default async function handler(request: Request): Promise<Response> {
 
   const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
   const json = await fetchOverpassJson(bboxQuery(bboxStr));
-  const elements = json?.elements ?? [];
+  if (!json) {
+    return new Response(
+      JSON.stringify({ success: false, error: "Overpass upstream unavailable", type: "FeatureCollection", features: [] }),
+      { status: 504, headers: { "Content-Type": "application/json" } }
+    );
+  }
+  const elements = json.elements ?? [];
   const { features, rows } = elementsToFeatures(elements);
 
-  // Save to DB in the background — don't block the response
+  // Persist to DB without blocking the GeoJSON response.
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (supabaseUrl && serviceKey && rows.length > 0) {
-    const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(supabaseUrl, serviceKey);
-    const CHUNK = 400;
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      const chunk = rows.slice(i, i + CHUNK);
-      await supabase.from("osm_sports_venues").upsert(chunk, { onConflict: "id" });
-    }
+    void (async () => {
+      try {
+        const { createClient } = await import("@supabase/supabase-js");
+        const supabase = createClient(supabaseUrl, serviceKey);
+        const CHUNK = 400;
+        for (let i = 0; i < rows.length; i += CHUNK) {
+          const chunk = rows.slice(i, i + CHUNK);
+          const { error } = await supabase.from("osm_sports_venues").upsert(chunk, { onConflict: "id" });
+          if (error) console.error("[auto-cache-venues] upsert failed", error.message);
+        }
+      } catch (err) {
+        console.error("[auto-cache-venues] background upsert error", err);
+      }
+    })();
   }
 
   return new Response(

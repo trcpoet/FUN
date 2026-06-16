@@ -1998,14 +1998,14 @@ export function MapboxMap(props: MapboxMapProps) {
   // `centerOnUserTrigger` is bumped by the recenter button even when coords don't change,
   // so venues can be refreshed on demand.
   const venueFetchDataKey = debouncedVenueFetchCenter
-    ? `${debouncedVenueFetchCenter.lat.toFixed(4)},${debouncedVenueFetchCenter.lng.toFixed(4)},${venueSearchRadiusKm},${centerOnUserTrigger ?? 0}`
+    ? `${debouncedVenueFetchCenter.lat.toFixed(2)},${debouncedVenueFetchCenter.lng.toFixed(2)},${venueSearchRadiusKm},${centerOnUserTrigger ?? 0}`
     : null;
   // Render key: includes sport sig — drives the effect to re-run on filter changes.
   const venueFetchKey = venueFetchDataKey ? `${venueFetchDataKey},${venueSportSig}` : null;
 
   // —— Sports venue fetch + render pipeline ——
-  // Fetches OSM sports venues around the (debounced) center, clusters them off-thread,
-  // and draws the footprint polygons + pulsing center dots, wiring up hover/click handlers.
+  // Fetches OSM sports venues around the (debounced) center, enriches for sport icons,
+  // and draws Mapbox GL cluster layers + pulsing dots.
   useEffect(() => {
     const map = mapRef.current;
     // Bail (and clear the loading flag) if we have nothing to fetch for.
@@ -2168,6 +2168,7 @@ export function MapboxMap(props: MapboxMapProps) {
                 "icon-pitch-alignment": "viewport",
                 "icon-rotation-alignment": "viewport",
               },
+              minzoom: 10,
             },
             beforeGames
           );
@@ -2281,11 +2282,41 @@ export function MapboxMap(props: MapboxMapProps) {
     };
 
     let cancelled = false;
-    let venueKickoffStarted = false; // ensures the fetch only starts once
-    let idleFallbackId: number | undefined; // timer that starts the fetch even if "idle" never fires
-    const venueFetchAbort = new AbortController(); // lets us cancel the network request on cleanup
+    let venueKickoffStarted = false;
+    let idleFallbackId: number | undefined;
+    const venueFetchAbort = new AbortController();
 
-    // Starts the venue fetch/render. Called once the map goes idle (or after a 2.5s fallback).
+    const applyVenueFetchResult = (
+      geojson: import("../lib/sportsVenueTypes").SportsVenueGeoJSON,
+      error?: string
+    ) => {
+      addVenueMarkers(geojson, () => {
+        if (cancelled) return;
+        finishLoading();
+        if (geojson.features.length === 0) {
+          if (error) {
+            setMapUxHint("Could not load venues — check your connection and try again");
+            if (import.meta.env.DEV) console.warn("[FUN] venue fetch:", error);
+          } else {
+            setMapUxHint("No sports venues here — try zooming in or widening your search radius");
+          }
+        } else {
+          setMapUxHint((hint) =>
+            hint && (hint.includes("venues") || hint.includes("venue")) ? null : hint
+          );
+        }
+      });
+    };
+
+    const finishLoading = () => {
+      const done = () => onVenuesFetchLoadingChangeRef.current?.(false);
+      if (typeof requestAnimationFrame !== "undefined") {
+        requestAnimationFrame(() => requestAnimationFrame(done));
+      } else {
+        window.setTimeout(done, 0);
+      }
+    };
+
     const kickoffVenueFetch = () => {
       if (cancelled || venueKickoffStarted) return;
       if (map.getZoom() < MapCfg.VENUE_FETCH_MIN_ZOOM) return;
@@ -2297,17 +2328,9 @@ export function MapboxMap(props: MapboxMapProps) {
       }
       map.off("idle", kickoffVenueFetch);
       map.off("zoomend", onVenueZoomForFetch);
+      if (isMobile) map.off("moveend", kickoffVenueFetch);
 
-      onVenuesFetchLoadingChangeRef.current?.(true); // show the loading indicator
-      // Hides the loading indicator after the next couple of frames (so the paint lands first).
-      const finishLoading = () => {
-        const done = () => onVenuesFetchLoadingChangeRef.current?.(false);
-        if (typeof requestAnimationFrame !== "undefined") {
-          requestAnimationFrame(() => requestAnimationFrame(done));
-        } else {
-          window.setTimeout(done, 0);
-        }
-      };
+      onVenuesFetchLoadingChangeRef.current?.(true);
 
       fetchSportsVenuesWithProgress(
         debouncedVenueFetchCenter.lat,
@@ -2322,29 +2345,20 @@ export function MapboxMap(props: MapboxMapProps) {
                 resolve();
                 return;
               }
-              addVenueMarkers(geojson, () => {
-                if (cancelled) {
-                  resolve();
-                  return;
-                }
-                finishLoading();
-                resolve();
-              });
+              addVenueMarkers(geojson, () => resolve());
             }),
         }
       )
-        .then((geojson) => {
+        .then((result) => {
           if (cancelled) return;
-          addVenueMarkers(geojson, () => {
-            if (cancelled) return;
-            finishLoading();
-          });
+          applyVenueFetchResult(result.geojson, result.error);
         })
         .catch((err: unknown) => {
           if (cancelled) return;
           const name = err instanceof Error ? err.name : "";
-          if (name === "AbortError") return; // expected when we cancel — not a real error
+          if (name === "AbortError") return;
           onVenuesFetchLoadingChangeRef.current?.(false);
+          setMapUxHint("Could not load venues — check your connection and try again");
         });
     };
 
@@ -2356,18 +2370,19 @@ export function MapboxMap(props: MapboxMapProps) {
 
     map.on("idle", kickoffVenueFetch);
     map.on("zoomend", onVenueZoomForFetch);
+    if (isMobile) map.on("moveend", kickoffVenueFetch);
     idleFallbackId = window.setTimeout(kickoffVenueFetch, 2500);
     if (map.isStyleLoaded()) {
       kickoffVenueFetch();
     }
 
-    // Cleanup: cancel any in-flight fetch and detach the idle/fallback triggers.
     return () => {
       cancelled = true;
       venueFetchAbort.abort();
       if (idleFallbackId !== undefined) clearTimeout(idleFallbackId);
       map.off("idle", kickoffVenueFetch);
       map.off("zoomend", onVenueZoomForFetch);
+      if (isMobile) map.off("moveend", kickoffVenueFetch);
       onVenuesFetchLoadingChangeRef.current?.(false);
     };
   }, [
@@ -2382,6 +2397,7 @@ export function MapboxMap(props: MapboxMapProps) {
     pauseVenueFetch,
     venueFetchEnabled,
     centerOnUserTrigger,
+    isMobile,
   ]);
 
   // Games happening at (within 120m of) the selected venue — shown inside the venue card.

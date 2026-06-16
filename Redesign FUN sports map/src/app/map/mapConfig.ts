@@ -142,16 +142,19 @@ export const VENUE_DOT_PULSE_HZ_SMOOTHING = 6;
 export const VENUE_AREA_RADIUS_METERS = 42;
 
 /** Mapbox venue clustering — above this zoom, individual venue points emit. */
-export const VENUE_CLUSTER_MAX_ZOOM = 14;
+export const VENUE_CLUSTER_MAX_ZOOM = 16;
 
 /** Pixel radius for venue clustering when zoomed out. */
-export const VENUE_CLUSTER_RADIUS_PX = 52;
+export const VENUE_CLUSTER_RADIUS_PX = 40;
 
 /** Base `icon-size` for venue sport symbols on the map. */
 export const VENUE_ICON_LAYOUT_BASE = 0.72;
 
-/** Defer venue network fetch below this zoom (experiment / density tier). */
-export const VENUE_FETCH_MIN_ZOOM = 11;
+/** Defer venue network fetch below this zoom (aligned with neighborhood-scale dots). */
+export const VENUE_FETCH_MIN_ZOOM = 9;
+
+/** Re-fetch only when the debounced center moves farther than this (km) — avoids touch-pan abort storms. */
+export const VENUE_FETCH_CENTER_ABORT_KM = 0.75;
 
 // —— Zoom / bounds: when is “near me” meaningful? ——————————————
 

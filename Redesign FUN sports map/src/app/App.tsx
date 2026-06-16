@@ -36,7 +36,10 @@ import { visibilityEnumToLabel } from "../lib/gamePreferenceOptions";
 import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow, MapNoteRow } from "../lib/supabase";
 import { filterGamesVisibleOnMap, isGameInLiveWindow } from "../lib/mapGameTimer";
+import { gameMatchesFilters, countMatchingGames, deriveDefaultFiltersFromProfile, gameVisibleToViewer } from "./lib/gameFilters";
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
+import { readFollowedIds, writeFollowedIds } from "../lib/localFollows";
+import { updateMyPresence, migrateLocalFollowsToDb } from "../lib/api";
 import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
 import { VenueSportPrompt } from "./components/VenueSportPrompt";
@@ -53,6 +56,28 @@ const DEFAULT_AVATAR_IMAGE =
 const LOCATION_SEARCH_ZOOM = 12.5;
 const FAR_SPORT_ZOOM = 11.5;
 const EXTENDED_GAMES_RADIUS_KM = 120;
+
+const APPLIED_FILTERS_KEY = "fun_applied_f_v1";
+const FILTERS_SEEDED_KEY = "fun_applied_filters_seeded_v1";
+
+function readPersistedFilters(): FiltersState | null {
+  try {
+    const raw = localStorage.getItem(APPLIED_FILTERS_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Partial<FiltersState>;
+    return { ...DEFAULT_FILTERS, ...p, sports: Array.isArray(p.sports) ? p.sports : [] };
+  } catch {
+    return null;
+  }
+}
+
+function persistAppliedFilters(f: FiltersState) {
+  try {
+    localStorage.setItem(APPLIED_FILTERS_KEY, JSON.stringify(f));
+  } catch {
+    /* ignore */
+  }
+}
 
 export default function App() {
   const { user } = useAuth();
@@ -75,7 +100,6 @@ export default function App() {
   const [mapSearchLocation, setMapSearchLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [mapSearchLocationName, setMapSearchLocationName] = useState<string | null>(null);
   const [sportFocus, setSportFocus] = useState<{ sport: string } | null>(null);
-  const [gamesRadiusKm, setGamesRadiusKm] = useState(DEFAULT_FILTERS.gamesRadiusKm);
   const [mapCameraRequest, setMapCameraRequest] = useState<MapCameraRequest | null>(null);
   const mapCameraIdRef = useRef(0);
   const sportCameraSigRef = useRef("");
@@ -90,9 +114,15 @@ export default function App() {
       ? userCoords.lng
       : mapSearchLocation?.lng ?? effectiveUserCoords.lng;
 
-  const [appliedFilters, setAppliedFilters] = useState<FiltersState>(DEFAULT_FILTERS);
-  const [filtersDraft, setFiltersDraft] = useState<FiltersState>(DEFAULT_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<FiltersState>(() => readPersistedFilters() ?? DEFAULT_FILTERS);
+  const [filtersDraft, setFiltersDraft] = useState<FiltersState>(() => readPersistedFilters() ?? DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // sportFocus may auto-extend the games radius to 120km when a searched sport has 0 nearby games.
+  // One-shot override per sportFocus session; user Apply always wins (single source of truth = appliedFilters).
+  const [sportExtendRadius, setSportExtendRadius] = useState<number | null>(null);
+  const sportExtendSessionRef = useRef<string | null>(null);
+  const effectiveGamesRadiusKm = sportExtendRadius ?? appliedFilters.gamesRadiusKm;
 
   const refetchNotes = useCallback(async () => {
     const { data } = await fetchNotesNearby({
@@ -114,7 +144,7 @@ export default function App() {
   } = useNearbyMapQueries({
     gamesLat: gamesFetchLat,
     gamesLng: gamesFetchLng,
-    gamesRadiusKm,
+    gamesRadiusKm: effectiveGamesRadiusKm,
     profilesLat: userCoords?.lat ?? effectiveUserCoords.lat,
     profilesLng: userCoords?.lng ?? effectiveUserCoords.lng,
     athletesRadiusKm: appliedFilters.athletesRadiusKm,
@@ -151,6 +181,37 @@ export default function App() {
   const showMapLoadingBanner = venuesFetchLoading || filterApplySync;
 
   const { avatarId, avatarUrl, athleteProfile } = useMyProfile();
+
+  // Seed filter defaults from the user's profile prefs once (skill/age/matchType), filling only unset
+  // fields. Guarded by localStorage so user Apply / persisted filters always win afterwards.
+  const filtersSeededRef = useRef(false);
+  useEffect(() => {
+    if (filtersSeededRef.current) return;
+    if (typeof localStorage === "undefined") return;
+    if (localStorage.getItem(FILTERS_SEEDED_KEY)) return;
+    if (localStorage.getItem(APPLIED_FILTERS_KEY)) {
+      filtersSeededRef.current = true; // persisted override already exists; never seed over it
+      return;
+    }
+    const seed = deriveDefaultFiltersFromProfile(athleteProfile);
+    if (Object.keys(seed).length === 0) return; // wait until profile prefs load
+    filtersSeededRef.current = true;
+    localStorage.setItem(FILTERS_SEEDED_KEY, "1");
+    setAppliedFilters((prev) => {
+      const next = { ...prev };
+      if (next.skillLevel === "Any" && seed.skillLevel) next.skillLevel = seed.skillLevel;
+      if (next.ageRange === "Any" && seed.ageRange) next.ageRange = seed.ageRange;
+      if (next.matchType === "Any" && seed.matchType) next.matchType = seed.matchType;
+      persistAppliedFilters(next);
+      return next;
+    });
+    setFiltersDraft((prev) => ({
+      ...prev,
+      skillLevel: prev.skillLevel === "Any" && seed.skillLevel ? seed.skillLevel : prev.skillLevel,
+      ageRange: prev.ageRange === "Any" && seed.ageRange ? seed.ageRange : prev.ageRange,
+      matchType: prev.matchType === "Any" && seed.matchType ? seed.matchType : prev.matchType,
+    }));
+  }, [athleteProfile]);
   const favoriteSport = athleteProfile.favoriteSport?.trim() ?? null;
 
   const [venueSportIntent, setVenueSportIntent] = useState<VenueSportIntent | null>(null);
@@ -175,6 +236,10 @@ export default function App() {
   const { notifications, markRead } = useNotifications({ limit: 10, enabled: secondaryReady });
   const messagesUnreadCount = useTotalUnreadMessages();
   const [locationVisibility, setLocationVisibility] = useState<LocationVisibilityMode>(() => readLocationVisibility());
+  // DB-backed follows (seeded from any legacy localStorage set for instant first paint).
+  const [followedIds, setFollowedIds] = useState<Set<string>>(() => readFollowedIds());
+  const presenceHeartbeatAtRef = useRef(0);
+  const [ghostNoticeDismissed, setGhostNoticeDismissed] = useState(false);
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
   const [selectedVenue, setSelectedVenue] = useState<VenueSelection | null>(null);
   const [gamePopupRequest, setGamePopupRequest] = useState<{ nonce: number; gameId: string } | null>(null);
@@ -252,14 +317,44 @@ export default function App() {
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
   }, [mapNotes, location.pathname, location.search, navigate, refetchNotes]);
 
-  // Sync user location to DB so avatar shows up on map
+  // Presence heartbeat: sync location + chosen visibility mode (throttled 30s).
+  // Mode changes fire an immediate update via onLocationVisibilityChange.
   useEffect(() => {
-    if (!supabase || !userCoords) return;
-    void supabase.rpc("update_my_location", {
-      p_lat: userCoords.lat,
-      p_lng: userCoords.lng,
-    });
-  }, [userCoords]);
+    if (!userCoords || !currentUserId) return;
+    const now = Date.now();
+    if (now - presenceHeartbeatAtRef.current < 30_000) return;
+    presenceHeartbeatAtRef.current = now;
+    void updateMyPresence({ lat: userCoords.lat, lng: userCoords.lng, mode: locationVisibility });
+  }, [userCoords, currentUserId, locationVisibility]);
+
+  // Load DB-backed follows and one-time migrate any legacy localStorage follows.
+  useEffect(() => {
+    if (!currentUserId) return;
+    let cancelled = false;
+    void (async () => {
+      const merged = await migrateLocalFollowsToDb(readFollowedIds());
+      if (cancelled) return;
+      setFollowedIds(merged);
+      writeFollowedIds(merged);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId]);
+
+  // Set + persist presence mode and push it to the server immediately (used by the
+  // visibility toggle and the ghost banner; the GPS heartbeat above re-asserts it).
+  const applyVisibilityMode = useCallback(
+    (mode: LocationVisibilityMode) => {
+      setLocationVisibility(mode);
+      writeLocationVisibility(mode);
+      if (userCoords && currentUserId) {
+        presenceHeartbeatAtRef.current = Date.now();
+        void updateMyPresence({ lat: userCoords.lat, lng: userCoords.lng, mode });
+      }
+    },
+    [userCoords, currentUserId]
+  );
 
   useEffect(() => {
     prefetchMapboxGl();
@@ -323,7 +418,8 @@ export default function App() {
     setMapSearchLocation(null);
     setMapSearchLocationName(null);
     setSportFocus(null);
-    setGamesRadiusKm(DEFAULT_FILTERS.gamesRadiusKm);
+    setSportExtendRadius(null);
+    sportExtendSessionRef.current = null;
   };
 
   const handleCenterOnUser = () => {
@@ -453,20 +549,27 @@ export default function App() {
   });
 
   useEffect(() => {
-    if (!sportFocus || !userCoords) return;
-    if (nearbyLoading) return;
+    // New sport-focus session (incl. clearing): drop any prior auto-extend & re-arm the one-shot.
+    setSportExtendRadius(null);
+    sportExtendSessionRef.current = null;
+  }, [sportFocus?.sport]);
+
+  useEffect(() => {
+    if (!sportFocus || !userCoords || nearbyLoading) return;
+    if (sportExtendSessionRef.current === sportFocus.sport) return; // already resolved this session
     const matching = gamesMatchingSport(games, sportFocus.sport);
-    if (matching.length === 0 && gamesRadiusKm < EXTENDED_GAMES_RADIUS_KM) {
-      setGamesRadiusKm(EXTENDED_GAMES_RADIUS_KM);
+    if (matching.length === 0 && effectiveGamesRadiusKm < EXTENDED_GAMES_RADIUS_KM) {
+      sportExtendSessionRef.current = sportFocus.sport;
+      setSportExtendRadius(EXTENDED_GAMES_RADIUS_KM);
     }
-  }, [sportFocus, games, nearbyLoading, gamesRadiusKm, userCoords]);
+  }, [sportFocus, games, nearbyLoading, effectiveGamesRadiusKm, userCoords]);
 
   useEffect(() => {
     if (!sportFocus || !userCoords || nearbyLoading) return;
     const matching = gamesMatchingSport(games, sportFocus.sport);
     if (matching.length === 0) {
       if (
-        gamesRadiusKm >= EXTENDED_GAMES_RADIUS_KM &&
+        effectiveGamesRadiusKm >= EXTENDED_GAMES_RADIUS_KM &&
         emptySportToastSportRef.current !== sportFocus.sport
       ) {
         emptySportToastSportRef.current = sportFocus.sport;
@@ -477,7 +580,7 @@ export default function App() {
     const sig = `${sportFocus.sport}:${matching
       .map((g) => g.id)
       .sort()
-      .join(",")}:${gamesRadiusKm}:${minD.toFixed(3)}`;
+      .join(",")}:${effectiveGamesRadiusKm}:${minD.toFixed(3)}`;
     if (sportCameraSigRef.current === sig) return;
     sportCameraSigRef.current = sig;
 
@@ -498,17 +601,43 @@ export default function App() {
       coordinates.push([userCoords.lng, userCoords.lat]);
       setMapCameraRequest({ id, kind: "fitBounds", coordinates });
     }
-  }, [sportFocus, games, nearbyLoading, gamesRadiusKm, userCoords]);
+  }, [sportFocus, games, nearbyLoading, effectiveGamesRadiusKm, userCoords]);
 
   const displayGames = useMemo(() => {
     let list = filterGamesVisibleOnMap(games, Date.now());
+    // Precedence = intersection: TopUI search (sportFocus) AND applied filters must both pass.
     if (sportFocus) list = gamesMatchingSport(list, sportFocus.sport);
-    if (appliedFilters.sports.length > 0) {
-      const allow = new Set(appliedFilters.sports);
-      list = list.filter((g) => allow.has(g.sport));
-    }
+    list = list.filter((g) => gameMatchesFilters(g, appliedFilters)); // sports + skill + age + matchType
+    list = list.filter((g) => gameVisibleToViewer(g, currentUserId, followedIds)); // System C: friends/invite-only pins
     return list;
-  }, [games, sportFocus, appliedFilters.sports, mapMinuteEpoch]);
+  }, [games, sportFocus, appliedFilters, mapMinuteEpoch, currentUserId, followedIds]);
+
+  // Live preview for the FiltersModal footer — uses the draft, not appliedFilters.
+  const filtersPreviewCount = useMemo(
+    () => countMatchingGames(filterGamesVisibleOnMap(games, Date.now()), filtersDraft),
+    [games, filtersDraft, mapMinuteEpoch]
+  );
+
+  // Summary text for the active-filter pill (non-default applied filters only).
+  const activeFilterSummary = useMemo(() => {
+    const f = appliedFilters;
+    const parts: string[] = [];
+    if (f.sports.length) parts.push(f.sports.join(", "));
+    if (effectiveGamesRadiusKm !== DEFAULT_FILTERS.gamesRadiusKm) parts.push(`${effectiveGamesRadiusKm} km`);
+    if (f.skillLevel && f.skillLevel !== "Any") parts.push(f.skillLevel);
+    if (f.ageRange && f.ageRange !== "Any") parts.push(f.ageRange);
+    if (f.matchType && f.matchType !== "Any") parts.push(f.matchType);
+    return parts.length ? parts.join(" · ") : null;
+  }, [appliedFilters, effectiveGamesRadiusKm]);
+
+  // Empty-state banner when filters hide every game (vs genuinely none fetched). Re-shows when filters change.
+  const [emptyBannerDismissedSig, setEmptyBannerDismissedSig] = useState<string | null>(null);
+  const filtersSig = useMemo(
+    () => JSON.stringify([appliedFilters, effectiveGamesRadiusKm]),
+    [appliedFilters, effectiveGamesRadiusKm]
+  );
+  const showEmptyFiltersBanner =
+    displayGames.length === 0 && games.length > 0 && emptyBannerDismissedSig !== filtersSig;
 
   const liveStripGames = useMemo(() => {
     const now = Date.now();
@@ -659,6 +788,16 @@ export default function App() {
         onLiveNowToggle={() => setLiveNowOpen((v) => !v)}
         onCenterOnUser={handleCenterOnUser}
         onOpenFilters={() => setFiltersOpen(true)}
+        activeFilterSummary={activeFilterSummary}
+        onClearFilters={() => {
+          setFiltersDraft(DEFAULT_FILTERS);
+          setAppliedFilters(DEFAULT_FILTERS);
+          setSportExtendRadius(null);
+          sportExtendSessionRef.current = sportFocus?.sport ?? null;
+          persistAppliedFilters(DEFAULT_FILTERS);
+          setFilterApplySync(true);
+          filterApplyStartedAtRef.current = Date.now();
+        }}
         onOpenMessages={() => {
           setMessengerFocus(null);
           setMessagesOpen(true);
@@ -671,10 +810,7 @@ export default function App() {
         onMarkNotificationRead={(id) => void markRead(id)}
         onOpenNotifications={() => navigate("/feed?tab=notifications")}
         locationVisibility={locationVisibility}
-        onLocationVisibilityChange={(mode) => {
-          setLocationVisibility(mode);
-          writeLocationVisibility(mode);
-        }}
+        onLocationVisibilityChange={applyVisibilityMode}
         onOpenProfile={() => navigate("/profile")}
         userAvatarUrl={avatarUrl ?? null}
         favoriteSport={favoriteSport}
@@ -712,6 +848,68 @@ export default function App() {
       />
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
+        {locationVisibility === "ghost" && !ghostNoticeDismissed && (
+          <div className="pointer-events-auto mx-3 mb-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-[#0A0F1C]/95 px-4 py-2.5 text-xs text-slate-200 shadow-[var(--shadow-control)] backdrop-blur-xl">
+            <span aria-hidden>👻</span>
+            <span className="flex-1">
+              You're in <span className="font-semibold text-slate-100">Ghost</span> mode — hidden from others. Filters still apply.
+            </span>
+            <button
+              type="button"
+              className="min-h-[32px] rounded-full border border-primary/40 bg-primary/10 px-3 text-[11px] font-semibold text-primary"
+              onClick={() => applyVisibilityMode("public")}
+            >
+              Go Public
+            </button>
+            <button
+              type="button"
+              aria-label="Dismiss ghost notice"
+              className="min-h-[32px] px-1.5 font-bold text-slate-400"
+              onClick={() => setGhostNoticeDismissed(true)}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {showEmptyFiltersBanner && (
+          <div className="pointer-events-auto mx-3 mb-2 rounded-2xl border border-amber-400/30 bg-[#0A0F1C]/95 px-4 py-3 text-sm text-slate-100 shadow-[var(--shadow-control)] backdrop-blur-xl">
+            <p className="mb-2">No games match your filters. Widen the radius or clear advanced filters.</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="min-h-[36px] rounded-full border border-white/15 px-3 text-xs font-medium"
+                onClick={() => {
+                  const next = { ...appliedFilters, gamesRadiusKm: 25 };
+                  setAppliedFilters(next);
+                  setFiltersDraft(next);
+                  setSportExtendRadius(null);
+                  persistAppliedFilters(next);
+                }}
+              >
+                Widen to 25 km
+              </button>
+              <button
+                type="button"
+                className="min-h-[36px] rounded-full border border-white/15 px-3 text-xs font-medium"
+                onClick={() => {
+                  const next = { ...appliedFilters, skillLevel: "Any", ageRange: "Any", matchType: "Any" };
+                  setAppliedFilters(next);
+                  setFiltersDraft(next);
+                  persistAppliedFilters(next);
+                }}
+              >
+                Clear advanced
+              </button>
+              <button
+                type="button"
+                className="min-h-[36px] rounded-full px-3 text-xs text-slate-400"
+                onClick={() => setEmptyBannerDismissedSig(filtersSig)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         <BottomCarousel
           games={liveNowOpen ? liveStripGames : displayGames}
           selectedGame={selectedGame}
@@ -789,11 +987,24 @@ export default function App() {
         onOpenChange={setFiltersOpen}
         value={filtersDraft}
         onChange={setFiltersDraft}
+        previewGameCount={filtersPreviewCount}
         onApply={() => {
           setAppliedFilters(filtersDraft);
+          setSportExtendRadius(null);
+          if (sportFocus) sportExtendSessionRef.current = sportFocus.sport; // user overrode; don't re-extend
+          persistAppliedFilters(filtersDraft);
           setFilterApplySync(true);
           filterApplyStartedAtRef.current = Date.now();
           setFiltersOpen(false);
+        }}
+        onClear={() => {
+          setFiltersDraft(DEFAULT_FILTERS);
+          setAppliedFilters(DEFAULT_FILTERS);
+          setSportExtendRadius(null);
+          sportExtendSessionRef.current = sportFocus?.sport ?? null;
+          persistAppliedFilters(DEFAULT_FILTERS);
+          setFilterApplySync(true);
+          filterApplyStartedAtRef.current = Date.now();
         }}
       />
 

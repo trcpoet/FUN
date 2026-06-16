@@ -44,3 +44,5 @@ __pycache__/
 Redesign FUN sports map/.env
 Redesign FUN sports map/.claude/
 Redesign FUN sports map/supabase/.temp/
+
+.vercel

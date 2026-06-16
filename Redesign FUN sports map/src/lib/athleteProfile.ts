@@ -161,6 +161,12 @@ export type AthleteProfilePayload = {
   playedWithAvatarUrls?: string[];
   /** Optional dual loadouts for athletic build tab. */
   athleticLoadouts?: AthleticLoadouts;
+  /** Preferences that seed map filters & game-match eligibility. Same labels as gamePreferenceOptions. */
+  gameMatchPreferences?: {
+    ageRange?: string | null; // AGE_RANGE_OPTIONS label
+    matchType?: string | null; // MATCH_TYPE_OPTIONS label (user's participation)
+    skillLevel?: string | null; // LEVEL_OPTIONS label; if unset, derived from sportsSkills
+  };
 };
 
 export function emptyAthleteProfile(): AthleteProfilePayload {
@@ -190,6 +196,7 @@ export function emptyAthleteProfile(): AthleteProfilePayload {
     playedWithCount: null,
     playedWithAvatarUrls: [],
     athleticLoadouts: undefined,
+    gameMatchPreferences: undefined,
   };
 }
 
@@ -377,6 +384,18 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
       }
     : undefined;
 
+  const gmpRaw =
+    o.gameMatchPreferences && typeof o.gameMatchPreferences === "object"
+      ? (o.gameMatchPreferences as Record<string, unknown>)
+      : null;
+  const gameMatchPreferences = gmpRaw
+    ? {
+        ageRange: asStr(gmpRaw.ageRange),
+        matchType: asStr(gmpRaw.matchType),
+        skillLevel: asStr(gmpRaw.skillLevel),
+      }
+    : undefined;
+
   const availability = asStr(o.availability);
   const allowedAvail = AVAILABILITY_OPTIONS.map((a) => a.value) as string[];
 
@@ -428,6 +447,7 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
     playedWithCount: asNum(o.playedWithCount),
     playedWithAvatarUrls: Array.isArray(o.playedWithAvatarUrls) ? asStrArray(o.playedWithAvatarUrls) : [],
     athleticLoadouts: athleticLoadouts?.match || athleticLoadouts?.training ? athleticLoadouts : undefined,
+    gameMatchPreferences,
   };
 }
 
@@ -464,6 +484,10 @@ export function mergeAthleteProfile(
             training: patch.athleticLoadouts.training ?? base.athleticLoadouts?.training,
           }
         : base.athleticLoadouts,
+    gameMatchPreferences:
+      patch.gameMatchPreferences !== undefined
+        ? { ...base.gameMatchPreferences, ...patch.gameMatchPreferences }
+        : base.gameMatchPreferences,
   };
 }
 

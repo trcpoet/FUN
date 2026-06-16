@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
-import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "./api/lib/osmVenueTags";
+import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "./server/lib/osmVenueTags";
 /** Same order as `api/overpass.ts` — Vite's http-proxy often 504s on slow upstreams. */
 const UPSTREAMS = [
   "https://overpass-api.de/api/interpreter",

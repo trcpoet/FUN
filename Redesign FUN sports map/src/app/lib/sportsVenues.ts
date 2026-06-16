@@ -11,6 +11,16 @@ import { dbRowToVenueProperties } from "./venueSelection";
 
 export type { SportsVenueProperties, SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 
+export type VenueFetchSource = "db" | "overpass" | "cache";
+
+export type VenueFetchResult = {
+  geojson: SportsVenueGeoJSON;
+  source?: VenueFetchSource;
+  error?: string;
+};
+
+const EMPTY_GEOJSON: SportsVenueGeoJSON = { type: "FeatureCollection", features: [] };
+
 /** Auto-cache endpoint: fetches from Overpass server-side and persists to DB. Returns GeoJSON directly. */
 const AUTO_CACHE_PATH = "/api/auto-cache-venues";
 
@@ -63,6 +73,14 @@ function isMissingVenuesTableError(error: { code?: string; message?: string; det
     blob.includes("does not exist") ||
     blob.includes("schema cache")
   );
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    const err = new Error("Aborted");
+    err.name = "AbortError";
+    throw err;
+  }
 }
 
 type CacheEntry = { geojson: SportsVenueGeoJSON; ts: number };
@@ -163,12 +181,13 @@ export function bboxFromCenterRadius(
   };
 }
 
+type OverpassNetworkResult = { geojson: SportsVenueGeoJSON; error?: string };
 
 async function fetchOverpassNetwork(
   bboxStr: string,
   _sportRegex: string | null,
   signal?: AbortSignal
-): Promise<SportsVenueGeoJSON> {
+): Promise<OverpassNetworkResult> {
   const [minLat, minLng, maxLat, maxLng] = bboxStr.split(",").map(Number);
   const controller = new AbortController();
   const timeoutMs = 18_000;
@@ -186,17 +205,29 @@ async function fetchOverpassNetwork(
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
     });
-    if (!res.ok) return { type: "FeatureCollection", features: [] };
+    if (!res.ok) {
+      let message = `Venue fetch failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        /* ignore */
+      }
+      return { geojson: EMPTY_GEOJSON, error: message };
+    }
     try {
-      return (await res.json()) as SportsVenueGeoJSON;
+      const geojson = (await res.json()) as SportsVenueGeoJSON;
+      return { geojson };
     } catch {
-      return { type: "FeatureCollection", features: [] };
+      return { geojson: EMPTY_GEOJSON, error: "Invalid venue response" };
     }
   } catch (e) {
     if (e && typeof e === "object" && "name" in e && (e as { name?: string }).name === "AbortError") {
-      return { type: "FeatureCollection", features: [] };
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      throw err;
     }
-    return { type: "FeatureCollection", features: [] };
+    return { geojson: EMPTY_GEOJSON, error: "Venue network request failed" };
   } finally {
     clearTimeout(timeout);
   }
@@ -211,9 +242,10 @@ export async function fetchSportsVenuesFromDb(
   options?: { signal?: AbortSignal; sportFilter?: string[] }
 ): Promise<SportsVenueGeoJSON | null> {
   if (!supabase || venuesDbReadDisabled) return null;
+  throwIfAborted(options?.signal);
   const { minLat, minLng, maxLat, maxLng } = bbox;
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("osm_sports_venues")
     .select(
       "id, lat, lng, name, sport, leisure, osm_type, osm_id, surface, lit, access, opening_hours, website, operator, wikidata, hero_image_url, wikidata_label, wikidata_description"
@@ -223,6 +255,13 @@ export async function fetchSportsVenuesFromDb(
     .gte("lng", minLng)
     .lte("lng", maxLng)
     .limit(8000);
+
+  if (options?.signal) {
+    query = query.abortSignal(options.signal);
+  }
+
+  const { data, error } = await query;
+  throwIfAborted(options?.signal);
   if (error) {
     if (isMissingVenuesTableError(error)) {
       venuesDbReadDisabled = true;
@@ -238,10 +277,10 @@ export async function fetchSportsVenuesFromDb(
 
   const features: SportsVenueFeature[] = [];
   for (const row of data) {
+    throwIfAborted(options?.signal);
     const typed = row as OsmSportsVenueRow;
     const leisure = typed.leisure ?? "";
     const sport = typed.sport ?? "";
-    // Apply sport filter only to pitches; sports_centres always pass through
     if (sportTokens && leisure === "pitch") {
       const rowSports = sport.toLowerCase().split(";").map((s) => s.trim());
       if (!sportTokens.some((t) => rowSports.includes(t))) continue;
@@ -267,7 +306,7 @@ export async function fetchSportsVenuesFromOverpass(
     maxLat: number;
   },
   options?: { signal?: AbortSignal; sportFilter?: string[] }
-): Promise<SportsVenueGeoJSON> {
+): Promise<VenueFetchResult> {
   const { minLat, minLng, maxLat, maxLng } = bbox;
   const sportRegex = buildPitchSportRegex(options?.sportFilter ?? []);
   const sportSig = sportRegex ?? "all";
@@ -279,34 +318,49 @@ export async function fetchSportsVenuesFromOverpass(
 
   const hit = memoryCache.get(cacheKey);
   if (hit && now - hit.ts < CACHE_TTL_MS) {
-    return { type: "FeatureCollection", features: hit.geojson.features };
+    return { geojson: { type: "FeatureCollection", features: hit.geojson.features }, source: "cache" };
   }
 
   const pending = inflight.get(cacheKey);
-  if (pending) return pending;
+  if (pending) {
+    const geojson = await pending;
+    return { geojson, source: "overpass" };
+  }
 
   const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
 
-  const work = (async () => {
+  const work = (async (): Promise<SportsVenueGeoJSON> => {
     try {
-      const collection = await fetchOverpassNetwork(bboxStr, sportRegex, options?.signal);
-      const entry: CacheEntry = { geojson: collection, ts: Date.now() };
+      const { geojson, error } = await fetchOverpassNetwork(bboxStr, sportRegex, options?.signal);
+      if (error && geojson.features.length === 0) {
+        throw new Error(error);
+      }
+      const entry: CacheEntry = { geojson, ts: Date.now() };
       memoryCache.set(cacheKey, entry);
       pruneMemory();
       persistSession();
-      return collection;
+      return geojson;
     } catch (e) {
       if (e && typeof e === "object" && "name" in e && (e as { name: string }).name === "AbortError") {
         throw e;
       }
-      return { type: "FeatureCollection", features: [] } as SportsVenueGeoJSON;
+      return EMPTY_GEOJSON;
     } finally {
       inflight.delete(cacheKey);
     }
   })();
 
   inflight.set(cacheKey, work);
-  return work;
+  try {
+    const geojson = await work;
+    return { geojson, source: "overpass" };
+  } catch (e) {
+    if (e && typeof e === "object" && "name" in e && (e as { name: string }).name === "AbortError") {
+      throw e;
+    }
+    const message = e instanceof Error ? e.message : "Venue fetch failed";
+    return { geojson: EMPTY_GEOJSON, source: "overpass", error: message };
+  }
 }
 
 /**
@@ -315,10 +369,10 @@ export async function fetchSportsVenuesFromOverpass(
 export async function fetchSportsVenues(
   bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number },
   options?: { signal?: AbortSignal; sportFilter?: string[] }
-): Promise<SportsVenueGeoJSON> {
+): Promise<VenueFetchResult> {
   const fromDb = await fetchSportsVenuesFromDb(bbox, options);
   if (fromDb && fromDb.features.length > 0) {
-    return fromDb;
+    return { geojson: fromDb, source: "db" };
   }
   return fetchSportsVenuesFromOverpass(bbox, options);
 }
@@ -342,11 +396,11 @@ export async function fetchSportsVenuesWithProgress(
     /** Runs after the inner bbox returns; await so the full Overpass request starts after the first paint/cluster work. */
     onNearRing?: (geojson: SportsVenueGeoJSON) => void | Promise<void>;
   }
-): Promise<SportsVenueGeoJSON> {
+): Promise<VenueFetchResult> {
   const fullBbox = bboxFromCenterRadius(centerLat, centerLng, radiusKm);
   const fromDb = await fetchSportsVenuesFromDb(fullBbox, options);
   if (fromDb && fromDb.features.length > 0) {
-    return fromDb;
+    return { geojson: fromDb, source: "db" };
   }
 
   if (radiusKm <= PROGRESSIVE_NEAR_RADIUS_KM) {
@@ -355,10 +409,26 @@ export async function fetchSportsVenuesWithProgress(
 
   const nearKm = Math.min(PROGRESSIVE_NEAR_RADIUS_KM, radiusKm);
   const innerBbox = bboxFromCenterRadius(centerLat, centerLng, nearKm);
-  const nearGeo = await fetchSportsVenuesFromOverpass(innerBbox, options);
+  const nearResult = await fetchSportsVenuesFromOverpass(innerBbox, options);
   if (options?.onNearRing) {
-    await Promise.resolve(options.onNearRing(nearGeo));
+    await Promise.resolve(options.onNearRing(nearResult.geojson));
   }
 
-  return fetchSportsVenuesFromOverpass(fullBbox, options);
+  const fullResult = await fetchSportsVenuesFromOverpass(fullBbox, options);
+  if (fullResult.geojson.features.length > 0) {
+    return fullResult;
+  }
+
+  // One retry: smaller near ring only (helps slow mobile networks).
+  if (!fullResult.error && nearResult.geojson.features.length > 0) {
+    return nearResult;
+  }
+
+  if (fullResult.error && nearResult.geojson.features.length === 0) {
+    const retry = await fetchSportsVenuesFromOverpass(innerBbox, options);
+    if (retry.geojson.features.length > 0) return retry;
+    return { geojson: EMPTY_GEOJSON, source: "overpass", error: fullResult.error };
+  }
+
+  return fullResult;
 }

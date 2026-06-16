@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useAuth } from "../contexts/AuthContext";
-import { getPublicProfileById } from "../../lib/api";
+import { getPublicProfileById, followUser, unfollowUser } from "../../lib/api";
 import type { AthleteProfilePayload } from "../../lib/athleteProfile";
 import { useIsMobile } from "../components/ui/use-mobile";
 import { ProfileHubHero, ProfileHubHeader, PostsReelsSection } from "../components/athlete-profile";
@@ -176,6 +176,7 @@ export default function PublicProfile() {
                     if (!userId) return;
                     const res = toggleFollowing(userId);
                     setFollowing(res.next);
+                    void (res.next ? followUser(userId) : unfollowUser(userId));
                   }}
                 >
                   {following ? "Following" : "Follow Athlete"}

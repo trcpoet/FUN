@@ -69,6 +69,10 @@ export type TopNavigationProps = {
   onLiveNowToggle?: () => void;
   onCenterOnUser?: () => void;
   onOpenFilters?: () => void;
+  /** Summary of active map filters; renders a clearable pill when set. */
+  activeFilterSummary?: string | null;
+  /** Clears all applied filters (pill ×). */
+  onClearFilters?: () => void;
   /** Open game chat inbox (threads for joined games). */
   onOpenMessages?: () => void;
   /** Satellite basemap toggle (optional). */
@@ -135,6 +139,8 @@ export const TopNavigation = (props: TopNavigationProps) => {
     onLiveNowToggle,
     onCenterOnUser,
     onOpenFilters,
+    activeFilterSummary = null,
+    onClearFilters,
     onOpenMessages,
     satelliteOn = false,
     onToggleSatellite,
@@ -409,6 +415,18 @@ export const TopNavigation = (props: TopNavigationProps) => {
             </AnimatePresence>
           </div>
 
+          {activeFilterSummary && (
+            <button
+              type="button"
+              onClick={onClearFilters}
+              aria-label="Clear all filters"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-primary/40 bg-[#0A0F1C]/90 px-3 text-xs font-medium text-slate-100 shadow-[var(--shadow-control)] backdrop-blur-xl"
+            >
+              <span className="max-w-[40vw] truncate">{activeFilterSummary}</span>
+              <X className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+            </button>
+          )}
+
           {/* Filter button */}
           <motion.button
             whileTap={{ scale: 0.95 }}
@@ -524,7 +542,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   ? "Ghost"
                   : locationVisibility === "close_friends"
                     ? "Squad"
-                    : "Live"}
+                    : "Public"}
               </span>
             </button>
           </div>

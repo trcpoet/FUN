@@ -16,6 +16,7 @@ import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { LEVEL_OPTIONS, AGE_RANGE_OPTIONS, MATCH_TYPE_OPTIONS } from "../../lib/gamePreferenceOptions";
 
 export type FiltersState = {
   /** Filter map pins to these sports (empty = all). Also filters OSM venues by pitch sport tags. */
@@ -23,8 +24,12 @@ export type FiltersState = {
   gamesRadiusKm: number;
   venueRadiusKm: number;
   athletesRadiusKm: number;
-  skillLevel?: string;
-  ageRange?: string;
+  /** Skill filter — canonical LEVEL_OPTIONS label; "Any" = no constraint. */
+  skillLevel: string;
+  /** Age filter — canonical AGE_RANGE_OPTIONS label; "Any" = no constraint. */
+  ageRange: string;
+  /** Match-type filter — "Any" or a MATCH_TYPE_OPTIONS label (maps to create-game matchType). */
+  matchType: string;
 };
 
 export const DEFAULT_FILTERS: FiltersState = {
@@ -34,6 +39,7 @@ export const DEFAULT_FILTERS: FiltersState = {
   athletesRadiusKm: 10,
   skillLevel: "Any",
   ageRange: "Any",
+  matchType: "Any",
 };
 
 type FiltersModalProps = {
@@ -43,6 +49,10 @@ type FiltersModalProps = {
   onChange: (next: FiltersState) => void;
   onApply?: () => void;
   onClear?: () => void;
+  /** Live preview count of games matching the current draft (computed by App). */
+  previewGameCount?: number;
+  /** Optional venue preview; omitted = games-only footer. */
+  previewVenueCount?: number;
 };
 
 function RadiusSliderRow(props: {
@@ -158,7 +168,16 @@ function SportsFilterRow(props: {
 }
 
 export function FiltersModal(props: FiltersModalProps) {
-  const { open, onOpenChange, value = DEFAULT_FILTERS, onChange, onApply, onClear } = props;
+  const {
+    open,
+    onOpenChange,
+    value = DEFAULT_FILTERS,
+    onChange,
+    onApply,
+    onClear,
+    previewGameCount,
+    previewVenueCount,
+  } = props;
 
   const update = (patch: Partial<FiltersState>) => {
     onChange({ ...value, ...patch });
@@ -224,10 +243,11 @@ export function FiltersModal(props: FiltersModalProps) {
                         <SelectValue placeholder="Any" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Any">Any</SelectItem>
-                        <SelectItem value="Beginner">Beginner</SelectItem>
-                        <SelectItem value="Intermediate">Intermediate</SelectItem>
-                        <SelectItem value="Advanced">Advanced</SelectItem>
+                        {LEVEL_OPTIONS.map((opt) => (
+                          <SelectItem key={opt} value={opt}>
+                            {opt}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -238,19 +258,47 @@ export function FiltersModal(props: FiltersModalProps) {
                         <SelectValue placeholder="Any" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Any">Any</SelectItem>
-                        <SelectItem value="18-25">18 - 25</SelectItem>
-                        <SelectItem value="26-35">26 - 35</SelectItem>
-                        <SelectItem value="36-45">36 - 45</SelectItem>
-                        <SelectItem value="46+">46+</SelectItem>
+                        {AGE_RANGE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt} value={opt}>
+                            {opt}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Match type</Label>
+                  <Select value={value.matchType || "Any"} onValueChange={(v) => update({ matchType: v })}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Any" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {["Any", ...MATCH_TYPE_OPTIONS].map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </AccordionContent>
             </AccordionItem>
           </Accordion>
         </div>
+
+        {previewGameCount != null && (
+          <p className="px-1 pt-1 text-xs text-muted-foreground" aria-live="polite">
+            <span className="font-medium text-foreground/90">{previewGameCount}</span> games
+            {previewVenueCount != null && (
+              <>
+                {" "}
+                · <span className="font-medium text-foreground/90">{previewVenueCount}</span> venues
+              </>
+            )}{" "}
+            match
+          </p>
+        )}
 
         <DialogFooter className="mt-4 flex items-center justify-between gap-3 pt-2">
           <Button type="button" variant="outline" size="sm" onClick={handleClear}>

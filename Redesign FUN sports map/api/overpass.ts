@@ -2,6 +2,8 @@
  * Server-side Overpass proxy: browsers cannot call overpass-api.de / mirrors (no CORS).
  * Vercel Edge forwards POST body to public Overpass endpoints.
  */
+import { promiseAny } from "../server/lib/promiseAny";
+
 export const config = { runtime: "edge" };
 
 const UPSTREAMS = [
@@ -36,7 +38,7 @@ export default async function handler(request: Request): Promise<Response> {
   const postFirstOk = async (): Promise<string | null> => {
     const controllers = UPSTREAMS.map(() => new AbortController());
     try {
-      const text = await Promise.any(
+      const text = await promiseAny(
         UPSTREAMS.map((url, i) =>
           fetch(url, {
             method: "POST",
