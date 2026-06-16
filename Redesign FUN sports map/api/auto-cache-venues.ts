@@ -8,6 +8,7 @@
  */
 import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "../server/lib/osmVenueTags";
 import { promiseAny } from "../server/lib/promiseAny";
+import { validateBbox, rateLimit } from "../server/lib/apiGuards";
 
 export const config = { runtime: "edge" };
 
@@ -101,6 +102,15 @@ export default async function handler(request: Request): Promise<Response> {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
+  // Public read, but cap per-IP burst so one client can't hammer the Overpass upstream.
+  const limited = rateLimit(request, { key: "auto-cache", limit: 30, windowMs: 60_000 });
+  if (!limited.ok) {
+    return new Response(JSON.stringify({ error: "Too many requests" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": String(limited.retryAfter) },
+    });
+  }
+
   let body: { minLat?: number; minLng?: number; maxLat?: number; maxLng?: number };
   try {
     body = (await request.json()) as typeof body;
@@ -111,20 +121,14 @@ export default async function handler(request: Request): Promise<Response> {
     });
   }
 
-  const { minLat, minLng, maxLat, maxLng } = body;
-  if (
-    typeof minLat !== "number" ||
-    typeof minLng !== "number" ||
-    typeof maxLat !== "number" ||
-    typeof maxLng !== "number" ||
-    minLat >= maxLat ||
-    minLng >= maxLng
-  ) {
-    return new Response(JSON.stringify({ error: "Invalid bbox" }), {
+  const v = validateBbox(body);
+  if (!v.ok) {
+    return new Response(JSON.stringify({ error: v.error }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
   }
+  const { minLat, minLng, maxLat, maxLng } = v.bbox;
 
   const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
   const json = await fetchOverpassJson(bboxQuery(bboxStr));

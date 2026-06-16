@@ -1,17 +1,14 @@
 /**
- * Server-side Overpass proxy: browsers cannot call overpass-api.de / mirrors (no CORS).
- * Vercel Edge forwards POST body to public Overpass endpoints.
+ * RETIRED. The runtime venue path is /api/auto-cache-venues (Overpass fetch + DB cache).
+ * This route used to be an open, unauthenticated Overpass proxy (CORS `*`) — an abuse
+ * vector with no remaining client callers — so it now returns 410 Gone. Kept as a
+ * tombstone to make the retirement explicit and avoid a silent 404.
  */
-import { promiseAny } from "../server/lib/promiseAny";
+import { apiResponse } from "../server/lib/apiGuards";
 
 export const config = { runtime: "edge" };
 
-const UPSTREAMS = [
-  "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
-];
-
-/** Public read proxy; no credentials — `*` is valid and avoids reflecting untrusted `Origin`. */
+/** Public, credential-free; `*` avoids reflecting an untrusted Origin on the 410 body. */
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -19,67 +16,14 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Max-Age": "86400",
 };
 
-export default async function handler(request: Request): Promise<Response> {
+export default function handler(request: Request): Response {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
-
-  if (request.method !== "POST") {
-    return new Response("Method Not Allowed", {
-      status: 405,
-      headers: CORS_HEADERS,
-    });
-  }
-
-  const body = await request.text();
-  const extra = CORS_HEADERS;
-
-  /** Race mirrors: return first 200; cancel slower requests to save upstream load. */
-  const postFirstOk = async (): Promise<string | null> => {
-    const controllers = UPSTREAMS.map(() => new AbortController());
-    try {
-      const text = await promiseAny(
-        UPSTREAMS.map((url, i) =>
-          fetch(url, {
-            method: "POST",
-            body,
-            headers: { "Content-Type": "text/plain" },
-            signal: controllers[i].signal,
-          }).then(async (res) => {
-            if (res.status === 429 || !res.ok) {
-              throw new Error(`upstream ${res.status}`);
-            }
-            const t = await res.text();
-            controllers.forEach((c, j) => {
-              if (j !== i) c.abort();
-            });
-            return t;
-          })
-        )
-      );
-      return text;
-    } catch {
-      return null;
-    }
-  };
-
-  const text = await postFirstOk();
-  if (text != null) {
-    return new Response(text, {
-      status: 200,
-      headers: {
-        ...extra,
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
-      },
-    });
-  }
-
-  return new Response(JSON.stringify({ elements: [] }), {
-    status: 200,
-    headers: {
-      ...extra,
-      "Content-Type": "application/json; charset=utf-8",
-    },
-  });
+  return apiResponse.error(
+    "GONE",
+    "This endpoint has been retired. Venue data is served via /api/auto-cache-venues.",
+    410,
+    { headers: CORS_HEADERS },
+  );
 }

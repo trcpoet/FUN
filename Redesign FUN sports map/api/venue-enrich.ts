@@ -2,6 +2,8 @@
  * Lazy Wikidata/Wikimedia enrichment for venue sheets.
  * POST JSON: { id: "way/12345" }
  */
+import { rateLimit, apiResponse } from "../server/lib/apiGuards";
+
 export const config = { runtime: "edge" };
 
 const CACHE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -82,34 +84,33 @@ function isCacheFresh(row: VenueRow): boolean {
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
+    return apiResponse.error("METHOD_NOT_ALLOWED", "Method Not Allowed", 405);
+  }
+
+  const limited = rateLimit(request, { key: "venue-enrich", limit: 30, windowMs: 60_000 });
+  if (!limited.ok) {
+    return apiResponse.error("RATE_LIMITED", "Too many requests", 429, {
+      headers: { "Retry-After": String(limited.retryAfter) },
+    });
   }
 
   let body: { id?: string };
   try {
     body = (await request.json()) as typeof body;
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return apiResponse.error("INVALID_JSON", "Invalid JSON", 400);
   }
 
+  // Venue ids are OSM element refs, e.g. "way/12345" — reject anything else.
   const id = body.id?.trim();
-  if (!id) {
-    return new Response(JSON.stringify({ error: "Missing id" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+  if (!id || !/^(node|way|relation)\/\d+$/.test(id)) {
+    return apiResponse.error("INVALID_ID", "Invalid venue id", 400);
   }
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) {
-    return new Response(JSON.stringify({ error: "Missing Supabase config" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return apiResponse.error("CONFIG", "Server misconfigured", 500);
   }
 
   const { createClient } = await import("@supabase/supabase-js");
@@ -122,10 +123,8 @@ export default async function handler(request: Request): Promise<Response> {
     .maybeSingle();
 
   if (readError) {
-    return new Response(JSON.stringify({ error: readError.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    console.error("[venue-enrich] read failed", readError.message);
+    return apiResponse.error("DB_ERROR", "Lookup failed", 500);
   }
 
   if (!row) {
