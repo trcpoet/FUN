@@ -8,6 +8,7 @@
 import { supabase } from "./supabase";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
 import { searchPeople } from "./searchPeople";
+import type { LocationVisibilityMode } from "./locationVisibility";
 import type {
   GameRow,
   GameVisibility,
@@ -853,6 +854,97 @@ export async function getProfilesNearby(
     limit_count: limit,
   });
   return { data: (data as ProfileNearbyRow[]) ?? null, error: error ? new Error(error.message) : null };
+}
+
+// ---------------------------------------------------------------------------
+// Presence (System A) — who sees YOU on the map. Persists to profile_locations
+// via the update_my_presence RPC (own row only, enforced server-side).
+// ---------------------------------------------------------------------------
+export async function updateMyPresence(params: {
+  lat: number;
+  lng: number;
+  mode: LocationVisibilityMode;
+}): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { lat, lng, mode } = params;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { error: new Error("Invalid coordinates") };
+  }
+  if (mode !== "ghost" && mode !== "close_friends" && mode !== "public") {
+    return { error: new Error("Invalid visibility mode") };
+  }
+  const { error } = await supabase.rpc("update_my_presence", {
+    p_lat: lat,
+    p_lng: lng,
+    p_mode: mode,
+  });
+  return { error: error ? new Error(error.message) : null };
+}
+
+// ---------------------------------------------------------------------------
+// Follows (DB-backed social graph in user_follows). Replaces localFollows.ts.
+// ---------------------------------------------------------------------------
+/** IDs the current user follows (one direction: follower = me). */
+export async function fetchMyFollowedIds(): Promise<{ data: Set<string>; error: Error | null }> {
+  if (!supabase) return { data: new Set(), error: new Error("Supabase not configured") };
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: new Set(), error: null };
+  const { data, error } = await supabase
+    .from("user_follows")
+    .select("followed_id")
+    .eq("follower_id", user.id);
+  if (error) return { data: new Set(), error: new Error(error.message) };
+  return { data: new Set((data ?? []).map((r) => r.followed_id as string)), error: null };
+}
+
+export async function followUser(userId: string): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  if (!userId) return { error: new Error("Missing userId") };
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: new Error("Not signed in") };
+  if (user.id === userId) return { error: new Error("Cannot follow yourself") };
+  const { error } = await supabase
+    .from("user_follows")
+    .upsert(
+      { follower_id: user.id, followed_id: userId },
+      { onConflict: "follower_id,followed_id", ignoreDuplicates: true }
+    );
+  return { error: error ? new Error(error.message) : null };
+}
+
+export async function unfollowUser(userId: string): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: new Error("Not signed in") };
+  const { error } = await supabase
+    .from("user_follows")
+    .delete()
+    .eq("follower_id", user.id)
+    .eq("followed_id", userId);
+  return { error: error ? new Error(error.message) : null };
+}
+
+/**
+ * One-time merge of any legacy localStorage follows into user_follows, then
+ * return the authoritative DB set. Safe to call on every login (idempotent).
+ */
+export async function migrateLocalFollowsToDb(localIds: Set<string>): Promise<Set<string>> {
+  if (!supabase) return localIds;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return localIds;
+  const toInsert = [...localIds]
+    .filter((id) => id && id !== user.id)
+    .map((id) => ({ follower_id: user.id, followed_id: id }));
+  if (toInsert.length > 0) {
+    await supabase
+      .from("user_follows")
+      .upsert(toInsert, { onConflict: "follower_id,followed_id", ignoreDuplicates: true });
+  }
+  const { data } = await supabase
+    .from("user_follows")
+    .select("followed_id")
+    .eq("follower_id", user.id);
+  return new Set((data ?? []).map((r) => r.followed_id as string));
 }
 
 /** Full profile row when `athlete_profile` migration has been applied. */

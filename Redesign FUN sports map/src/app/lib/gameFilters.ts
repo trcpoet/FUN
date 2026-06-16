@@ -68,6 +68,34 @@ export function countMatchingGames(games: GameRow[], filters: FiltersState): num
   return n;
 }
 
+/**
+ * Map visibility (System C) — who may SEE a game pin. Mirrors the server's
+ * `is_eligible_to_join_game` for display purposes:
+ *   - `public` (or missing/legacy) → shown to everyone.
+ *   - host → always sees their own game.
+ *   - `friends_only` → shown if the viewer follows the host. The client only
+ *     knows its own-direction follows (`followedIds`); the server enforces the
+ *     full either-direction-follow / approved-invite rule when actually joining.
+ *   - `invite_only` → not publicly discoverable; only the host sees it on the
+ *     map (approved invites aren't known client-side; the redeem-link flow
+ *     handles access separately).
+ * Inclusive by default: a null/unknown visibility is treated as `public` so
+ * legacy games are never hidden.
+ */
+export function gameVisibleToViewer(
+  game: GameRow,
+  currentUserId: string | null,
+  followedIds: Set<string>
+): boolean {
+  const vis = game.visibility ?? "public";
+  if (vis === "public") return true;
+  const host = game.created_by ?? null;
+  if (host && currentUserId && host === currentUserId) return true;
+  if (vis === "friends_only") return !!host && followedIds.has(host);
+  // invite_only: host-only on the map.
+  return false;
+}
+
 /** SportSkillEntry.level (casual/intermediate/advanced/competitive) → filter LEVEL_OPTIONS label. */
 export function mapSportSkillLevelToFilterLevel(
   level: "casual" | "intermediate" | "advanced" | "competitive" | null | undefined

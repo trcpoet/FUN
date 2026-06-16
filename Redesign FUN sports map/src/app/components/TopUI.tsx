@@ -542,7 +542,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   ? "Ghost"
                   : locationVisibility === "close_friends"
                     ? "Squad"
-                    : "Live"}
+                    : "Public"}
               </span>
             </button>
           </div>

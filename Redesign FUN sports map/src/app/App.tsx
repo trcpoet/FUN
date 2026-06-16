@@ -36,8 +36,10 @@ import { visibilityEnumToLabel } from "../lib/gamePreferenceOptions";
 import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow, MapNoteRow } from "../lib/supabase";
 import { filterGamesVisibleOnMap, isGameInLiveWindow } from "../lib/mapGameTimer";
-import { gameMatchesFilters, countMatchingGames, deriveDefaultFiltersFromProfile } from "./lib/gameFilters";
+import { gameMatchesFilters, countMatchingGames, deriveDefaultFiltersFromProfile, gameVisibleToViewer } from "./lib/gameFilters";
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
+import { readFollowedIds, writeFollowedIds } from "../lib/localFollows";
+import { updateMyPresence, migrateLocalFollowsToDb } from "../lib/api";
 import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
 import { VenueSportPrompt } from "./components/VenueSportPrompt";
@@ -234,6 +236,10 @@ export default function App() {
   const { notifications, markRead } = useNotifications({ limit: 10, enabled: secondaryReady });
   const messagesUnreadCount = useTotalUnreadMessages();
   const [locationVisibility, setLocationVisibility] = useState<LocationVisibilityMode>(() => readLocationVisibility());
+  // DB-backed follows (seeded from any legacy localStorage set for instant first paint).
+  const [followedIds, setFollowedIds] = useState<Set<string>>(() => readFollowedIds());
+  const presenceHeartbeatAtRef = useRef(0);
+  const [ghostNoticeDismissed, setGhostNoticeDismissed] = useState(false);
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
   const [selectedVenue, setSelectedVenue] = useState<VenueSelection | null>(null);
   const [gamePopupRequest, setGamePopupRequest] = useState<{ nonce: number; gameId: string } | null>(null);
@@ -311,14 +317,44 @@ export default function App() {
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
   }, [mapNotes, location.pathname, location.search, navigate, refetchNotes]);
 
-  // Sync user location to DB so avatar shows up on map
+  // Presence heartbeat: sync location + chosen visibility mode (throttled 30s).
+  // Mode changes fire an immediate update via onLocationVisibilityChange.
   useEffect(() => {
-    if (!supabase || !userCoords) return;
-    void supabase.rpc("update_my_location", {
-      p_lat: userCoords.lat,
-      p_lng: userCoords.lng,
-    });
-  }, [userCoords]);
+    if (!userCoords || !currentUserId) return;
+    const now = Date.now();
+    if (now - presenceHeartbeatAtRef.current < 30_000) return;
+    presenceHeartbeatAtRef.current = now;
+    void updateMyPresence({ lat: userCoords.lat, lng: userCoords.lng, mode: locationVisibility });
+  }, [userCoords, currentUserId, locationVisibility]);
+
+  // Load DB-backed follows and one-time migrate any legacy localStorage follows.
+  useEffect(() => {
+    if (!currentUserId) return;
+    let cancelled = false;
+    void (async () => {
+      const merged = await migrateLocalFollowsToDb(readFollowedIds());
+      if (cancelled) return;
+      setFollowedIds(merged);
+      writeFollowedIds(merged);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId]);
+
+  // Set + persist presence mode and push it to the server immediately (used by the
+  // visibility toggle and the ghost banner; the GPS heartbeat above re-asserts it).
+  const applyVisibilityMode = useCallback(
+    (mode: LocationVisibilityMode) => {
+      setLocationVisibility(mode);
+      writeLocationVisibility(mode);
+      if (userCoords && currentUserId) {
+        presenceHeartbeatAtRef.current = Date.now();
+        void updateMyPresence({ lat: userCoords.lat, lng: userCoords.lng, mode });
+      }
+    },
+    [userCoords, currentUserId]
+  );
 
   useEffect(() => {
     prefetchMapboxGl();
@@ -572,8 +608,9 @@ export default function App() {
     // Precedence = intersection: TopUI search (sportFocus) AND applied filters must both pass.
     if (sportFocus) list = gamesMatchingSport(list, sportFocus.sport);
     list = list.filter((g) => gameMatchesFilters(g, appliedFilters)); // sports + skill + age + matchType
+    list = list.filter((g) => gameVisibleToViewer(g, currentUserId, followedIds)); // System C: friends/invite-only pins
     return list;
-  }, [games, sportFocus, appliedFilters, mapMinuteEpoch]);
+  }, [games, sportFocus, appliedFilters, mapMinuteEpoch, currentUserId, followedIds]);
 
   // Live preview for the FiltersModal footer — uses the draft, not appliedFilters.
   const filtersPreviewCount = useMemo(
@@ -773,10 +810,7 @@ export default function App() {
         onMarkNotificationRead={(id) => void markRead(id)}
         onOpenNotifications={() => navigate("/feed?tab=notifications")}
         locationVisibility={locationVisibility}
-        onLocationVisibilityChange={(mode) => {
-          setLocationVisibility(mode);
-          writeLocationVisibility(mode);
-        }}
+        onLocationVisibilityChange={applyVisibilityMode}
         onOpenProfile={() => navigate("/profile")}
         userAvatarUrl={avatarUrl ?? null}
         favoriteSport={favoriteSport}
@@ -814,6 +848,29 @@ export default function App() {
       />
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
+        {locationVisibility === "ghost" && !ghostNoticeDismissed && (
+          <div className="pointer-events-auto mx-3 mb-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-[#0A0F1C]/95 px-4 py-2.5 text-xs text-slate-200 shadow-[var(--shadow-control)] backdrop-blur-xl">
+            <span aria-hidden>👻</span>
+            <span className="flex-1">
+              You're in <span className="font-semibold text-slate-100">Ghost</span> mode — hidden from others. Filters still apply.
+            </span>
+            <button
+              type="button"
+              className="min-h-[32px] rounded-full border border-primary/40 bg-primary/10 px-3 text-[11px] font-semibold text-primary"
+              onClick={() => applyVisibilityMode("public")}
+            >
+              Go Public
+            </button>
+            <button
+              type="button"
+              aria-label="Dismiss ghost notice"
+              className="min-h-[32px] px-1.5 font-bold text-slate-400"
+              onClick={() => setGhostNoticeDismissed(true)}
+            >
+              ×
+            </button>
+          </div>
+        )}
         {showEmptyFiltersBanner && (
           <div className="pointer-events-auto mx-3 mb-2 rounded-2xl border border-amber-400/30 bg-[#0A0F1C]/95 px-4 py-3 text-sm text-slate-100 shadow-[var(--shadow-control)] backdrop-blur-xl">
             <p className="mb-2">No games match your filters. Widen the radius or clear advanced filters.</p>
