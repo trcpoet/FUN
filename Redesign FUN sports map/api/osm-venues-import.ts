@@ -7,6 +7,7 @@
  */
 import { buildOsmVenueRow, type OsmVenueTags } from "../server/lib/osmVenueTags";
 import { promiseAny } from "../server/lib/promiseAny";
+import { validateBbox, apiResponse } from "../server/lib/apiGuards";
 
 export const config = { runtime: "edge" };
 
@@ -81,25 +82,19 @@ function elementsToRows(elements: unknown[]): Record<string, unknown>[] {
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
+    return apiResponse.error("METHOD_NOT_ALLOWED", "Method Not Allowed", 405);
   }
 
   const secret = process.env.OSM_IMPORT_SECRET;
   const auth = request.headers.get("authorization");
   if (!secret || auth !== `Bearer ${secret}`) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+    return apiResponse.error("UNAUTHORIZED", "Unauthorized", 401);
   }
 
   const url = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) {
-    return new Response(JSON.stringify({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return apiResponse.error("CONFIG", "Server misconfigured", 500);
   }
 
   let body: {
@@ -111,26 +106,14 @@ export default async function handler(request: Request): Promise<Response> {
   try {
     body = (await request.json()) as typeof body;
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return apiResponse.error("INVALID_JSON", "Invalid JSON", 400);
   }
 
-  const { minLat, minLng, maxLat, maxLng } = body;
-  if (
-    typeof minLat !== "number" ||
-    typeof minLng !== "number" ||
-    typeof maxLat !== "number" ||
-    typeof maxLng !== "number" ||
-    minLat >= maxLat ||
-    minLng >= maxLng
-  ) {
-    return new Response(JSON.stringify({ error: "Invalid bbox" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+  const v = validateBbox(body);
+  if (!v.ok) {
+    return apiResponse.error("INVALID_BBOX", v.error, 400);
   }
+  const { minLat, minLng, maxLat, maxLng } = v.bbox;
 
   const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
   const json = await fetchOverpassJson(bboxQuery(bboxStr));
@@ -146,10 +129,8 @@ export default async function handler(request: Request): Promise<Response> {
     const chunk = rows.slice(i, i + CHUNK);
     const { error } = await supabase.from("osm_sports_venues").upsert(chunk, { onConflict: "id" });
     if (error) {
-      return new Response(JSON.stringify({ error: error.message, upserted }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+      console.error("[osm-venues-import] upsert failed", error.message);
+      return apiResponse.error("DB_ERROR", "Upsert failed", 500);
     }
     upserted += chunk.length;
   }
