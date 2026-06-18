@@ -43,7 +43,7 @@ import { readFollowedIds, writeFollowedIds } from "../lib/localFollows";
 import { updateMyPresence, migrateLocalFollowsToDb } from "../lib/api";
 import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
-import { VenueSportPrompt } from "./components/VenueSportPrompt";
+import { MapToast } from "./components/MapToast";
 import {
   readStoredVenueSportIntent,
   venueIntentToSportFilter,
@@ -226,10 +226,10 @@ export default function App() {
       return;
     }
     const stored = readStoredVenueSportIntent();
-    if (stored !== undefined) {
-      setVenueSportIntent(stored);
-      setVenueIntentReady(true);
-    }
+    // No favorite + nothing stored → default to all sports so venues load
+    // immediately instead of gating behind a "What do you want to play?" prompt.
+    setVenueSportIntent(stored !== undefined ? stored : null);
+    setVenueIntentReady(true);
   }, [favoriteSport, venueIntentReady]);
   const { stats } = useUserStats({ enabled: secondaryReady });
   const navigate = useNavigate();
@@ -668,8 +668,6 @@ export default function App() {
     setVenueIntentReady(true);
   }, []);
 
-  const showVenueSportPrompt = !venueIntentReady;
-
   const avatarGlbUrl = avatarIdToGlbUrl(avatarId);
 
   return (
@@ -779,17 +777,109 @@ export default function App() {
         </div>
       )}
 
-      {locationError && userCoords == null && (
-        <div className="absolute top-20 left-4 right-4 z-50 rounded-lg bg-amber-900/80 text-amber-200 text-sm px-3 py-2">
-          Location: {locationError}. Using a default location for now — allow location for accurate nearby games.
-        </div>
-      )}
+      {/* Top-left status column — compact, dismissible map notices (distinct from
+          the bell/Alerts dropdown and transient sonner toasts). */}
+      <div className="pointer-events-none absolute left-4 top-24 z-[45] flex w-[min(18rem,72vw)] flex-col gap-2">
+        {locationError && userCoords == null && (
+          <MapToast variant="warning">
+            Location: {locationError}. Using a default location for now — allow location for accurate nearby games.
+          </MapToast>
+        )}
 
-      {gamesError && (
-        <div className="absolute top-20 left-4 right-4 z-50 rounded-lg bg-slate-800/95 text-slate-200 text-sm px-3 py-2 border border-slate-600">
-          <strong>Database setup needed:</strong> Run the SQL from <code className="bg-slate-700 px-1 rounded">supabase/schema.sql</code> in your Supabase project (SQL Editor → New query → paste → Run). Then refresh.
-        </div>
-      )}
+        {gamesError && (
+          <MapToast variant="warning">
+            <strong className="font-semibold text-slate-100">Database setup needed:</strong> Run the SQL from{" "}
+            <code className="rounded bg-slate-700/80 px-1">supabase/schema.sql</code> in your Supabase project, then refresh.
+          </MapToast>
+        )}
+
+        {locationVisibility === "ghost" && !ghostNoticeDismissed && (
+          <MapToast
+            icon={<span>👻</span>}
+            onDismiss={() => setGhostNoticeDismissed(true)}
+            actions={
+              <button
+                type="button"
+                className="min-h-[32px] rounded-full border border-primary/40 bg-primary/10 px-3 text-[11px] font-semibold text-primary"
+                onClick={() => applyVisibilityMode("public")}
+              >
+                Go Public
+              </button>
+            }
+          >
+            You're in <span className="font-semibold text-slate-100">Ghost</span> mode — hidden from others. Filters still apply.
+          </MapToast>
+        )}
+
+        {showNoGamesBanner && (
+          <MapToast
+            onDismiss={() => setNoGamesBannerDismissed(true)}
+            actions={
+              <button
+                type="button"
+                className="min-h-[32px] cursor-pointer rounded-full bg-primary px-3 text-[11px] font-semibold text-slate-950 transition-colors hover:bg-primary/90"
+                onClick={() => {
+                  if (userCoords) {
+                    setCreateGameCoords({ lat: userCoords.lat, lng: userCoords.lng });
+                    setCreateGameAnchorPoint(null);
+                    setCreateGameLocationLabel(null);
+                  }
+                  setCreateGameOpen(true);
+                }}
+              >
+                Create game
+              </button>
+            }
+          >
+            <p className="font-semibold text-slate-100">No games nearby yet</p>
+            <p className="text-slate-400">Be the first to host one here.</p>
+          </MapToast>
+        )}
+
+        {showEmptyFiltersBanner && (
+          <MapToast
+            variant="warning"
+            actions={
+              <>
+                <button
+                  type="button"
+                  className="min-h-[32px] rounded-full border border-white/15 px-3 text-[11px] font-medium"
+                  onClick={() => {
+                    const next = { ...appliedFilters, gamesRadiusKm: 25 };
+                    setAppliedFilters(next);
+                    setFiltersDraft(next);
+                    setSportExtendRadius(null);
+                    persistAppliedFilters(next);
+                  }}
+                >
+                  Widen to 25 km
+                </button>
+                <button
+                  type="button"
+                  className="min-h-[32px] rounded-full border border-white/15 px-3 text-[11px] font-medium"
+                  onClick={() => {
+                    const next = { ...appliedFilters, skillLevel: "Any", ageRange: "Any", matchType: "Any" };
+                    setAppliedFilters(next);
+                    setFiltersDraft(next);
+                    persistAppliedFilters(next);
+                  }}
+                >
+                  Clear advanced
+                </button>
+                <button
+                  type="button"
+                  className="min-h-[32px] rounded-full px-3 text-[11px] text-slate-400"
+                  onClick={() => setEmptyBannerDismissedSig(filtersSig)}
+                >
+                  Dismiss
+                </button>
+              </>
+            }
+          >
+            No games match your filters. Widen the radius or clear advanced filters.
+          </MapToast>
+        )}
+      </div>
 
       {satelliteOn && (
         <div
@@ -859,105 +949,7 @@ export default function App() {
         onVenueSportIntentChange={handleVenueSportIntentChange}
       />
 
-      <VenueSportPrompt
-        open={showVenueSportPrompt}
-        onPick={(sport) => handleVenueSportIntentChange(sport)}
-        onPickAll={() => handleVenueSportIntentChange(null)}
-      />
-
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
-        {locationVisibility === "ghost" && !ghostNoticeDismissed && (
-          <div className="pointer-events-auto mx-3 mb-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-[#0A0F1C]/95 px-4 py-2.5 text-xs text-slate-200 shadow-[var(--shadow-control)] backdrop-blur-xl">
-            <span aria-hidden>👻</span>
-            <span className="flex-1">
-              You're in <span className="font-semibold text-slate-100">Ghost</span> mode — hidden from others. Filters still apply.
-            </span>
-            <button
-              type="button"
-              className="min-h-[32px] rounded-full border border-primary/40 bg-primary/10 px-3 text-[11px] font-semibold text-primary"
-              onClick={() => applyVisibilityMode("public")}
-            >
-              Go Public
-            </button>
-            <button
-              type="button"
-              aria-label="Dismiss ghost notice"
-              className="min-h-[32px] px-1.5 font-bold text-slate-400"
-              onClick={() => setGhostNoticeDismissed(true)}
-            >
-              ×
-            </button>
-          </div>
-        )}
-        {showNoGamesBanner && (
-          <div className="pointer-events-auto mx-3 mb-2 flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0A0F1C]/95 px-4 py-3 text-sm text-slate-100 shadow-[var(--shadow-control)] backdrop-blur-xl">
-            <div className="flex-1">
-              <p className="font-medium text-slate-100">No games nearby yet</p>
-              <p className="text-xs text-slate-400">Be the first to host one here.</p>
-            </div>
-            <button
-              type="button"
-              className="min-h-[36px] cursor-pointer rounded-full bg-primary px-4 text-xs font-semibold text-slate-950 transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-              onClick={() => {
-                if (userCoords) {
-                  setCreateGameCoords({ lat: userCoords.lat, lng: userCoords.lng });
-                  setCreateGameAnchorPoint(null);
-                  setCreateGameLocationLabel(null);
-                }
-                setCreateGameOpen(true);
-              }}
-            >
-              Create game
-            </button>
-            <button
-              type="button"
-              aria-label="Dismiss"
-              className="min-h-[36px] min-w-[36px] cursor-pointer rounded-full px-1.5 font-bold text-slate-400 transition-colors hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-              onClick={() => setNoGamesBannerDismissed(true)}
-            >
-              ×
-            </button>
-          </div>
-        )}
-        {showEmptyFiltersBanner && (
-          <div className="pointer-events-auto mx-3 mb-2 rounded-2xl border border-amber-400/30 bg-[#0A0F1C]/95 px-4 py-3 text-sm text-slate-100 shadow-[var(--shadow-control)] backdrop-blur-xl">
-            <p className="mb-2">No games match your filters. Widen the radius or clear advanced filters.</p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="min-h-[36px] rounded-full border border-white/15 px-3 text-xs font-medium"
-                onClick={() => {
-                  const next = { ...appliedFilters, gamesRadiusKm: 25 };
-                  setAppliedFilters(next);
-                  setFiltersDraft(next);
-                  setSportExtendRadius(null);
-                  persistAppliedFilters(next);
-                }}
-              >
-                Widen to 25 km
-              </button>
-              <button
-                type="button"
-                className="min-h-[36px] rounded-full border border-white/15 px-3 text-xs font-medium"
-                onClick={() => {
-                  const next = { ...appliedFilters, skillLevel: "Any", ageRange: "Any", matchType: "Any" };
-                  setAppliedFilters(next);
-                  setFiltersDraft(next);
-                  persistAppliedFilters(next);
-                }}
-              >
-                Clear advanced
-              </button>
-              <button
-                type="button"
-                className="min-h-[36px] rounded-full px-3 text-xs text-slate-400"
-                onClick={() => setEmptyBannerDismissedSig(filtersSig)}
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
         <BottomCarousel
           games={liveNowOpen ? liveStripGames : displayGames}
           selectedGame={selectedGame}

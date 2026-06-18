@@ -212,6 +212,14 @@ export const PLAYER_MARKERS_MIN_ZOOM = 5.0;
 /** Throttle ms for visibility recalculation on move/zoom */
 export const MAP_VISIBILITY_THROTTLE_MS = 80;
 
+// —— Press-and-hold to open Create Game ————————————————————————
+/** How long (ms) to hold an empty spot before Create Game opens. */
+export const MAP_LONG_PRESS_MS = 800;
+/** Drag past this many px during a hold and the gesture hands off to map pan. */
+export const MAP_LONG_PRESS_MOVE_CANCEL_PX = 12;
+/** Diameter (px) of the progress ring drawn at the contact point. */
+export const MAP_LONG_PRESS_RING_SIZE_PX = 56;
+
 // —— Cinematic 3D map tiers (device / motion) ———————————————————
 
 export type CinematicTier = "off" | "lite" | "full";
