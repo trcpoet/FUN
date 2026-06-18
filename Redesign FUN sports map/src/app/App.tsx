@@ -15,6 +15,7 @@ import { BottomCarousel } from "./components/BottomCarousel";
 import { GameMessengerSheet } from "./components/GameMessengerSheet";
 import type { MessengerThreadFocus, PlanRematchPayload } from "./components/GameMessengerSheet";
 import { CreateGameModal, type CreateGamePrefill } from "./components/CreateGameModal";
+import { toast } from "sonner";
 import { FiltersModal, type FiltersState, DEFAULT_FILTERS } from "./components/FiltersModal";
 import { useGeolocation } from "../hooks/useGeolocation";
 import { useNearbyMapQueries } from "../hooks/useNearbyMapQueries";
@@ -438,7 +439,7 @@ export default function App() {
     if (!ok) return;
     const result = await joinGame(gameId);
     if (result.error) {
-      alert(`Could not join game: ${result.error.message}`);
+      toast.error("Couldn't join game", { description: result.error.message });
       return;
     }
     await reloadJoinedGameIds();
@@ -573,6 +574,9 @@ export default function App() {
         emptySportToastSportRef.current !== sportFocus.sport
       ) {
         emptySportToastSportRef.current = sportFocus.sport;
+        toast(`No ${sportFocus.sport} games within ${EXTENDED_GAMES_RADIUS_KM} km yet`, {
+          description: "Be the first to host one.",
+        });
       }
       return;
     }
@@ -638,6 +642,10 @@ export default function App() {
   );
   const showEmptyFiltersBanner =
     displayGames.length === 0 && games.length > 0 && emptyBannerDismissedSig !== filtersSig;
+
+  // Genuinely-empty banner: nothing fetched nearby at all (distinct from filters hiding games).
+  const [noGamesBannerDismissed, setNoGamesBannerDismissed] = useState(false);
+  const showNoGamesBanner = !nearbyLoading && games.length === 0 && !noGamesBannerDismissed;
 
   const liveStripGames = useMemo(() => {
     const now = Date.now();
@@ -783,6 +791,16 @@ export default function App() {
         </div>
       )}
 
+      {satelliteOn && (
+        <div
+          className="pointer-events-none absolute left-1/2 top-[72px] z-40 -translate-x-1/2 rounded-full border border-white/12 bg-[#0A0F1C]/85 px-3 py-1 text-[11px] font-medium text-slate-200 shadow-[var(--shadow-control)] backdrop-blur-md"
+          role="status"
+          aria-live="polite"
+        >
+          Satellite view
+        </div>
+      )}
+
       <TopNavigation
         liveNowOpen={liveNowOpen}
         onLiveNowToggle={() => setLiveNowOpen((v) => !v)}
@@ -866,6 +884,36 @@ export default function App() {
               aria-label="Dismiss ghost notice"
               className="min-h-[32px] px-1.5 font-bold text-slate-400"
               onClick={() => setGhostNoticeDismissed(true)}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {showNoGamesBanner && (
+          <div className="pointer-events-auto mx-3 mb-2 flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0A0F1C]/95 px-4 py-3 text-sm text-slate-100 shadow-[var(--shadow-control)] backdrop-blur-xl">
+            <div className="flex-1">
+              <p className="font-medium text-slate-100">No games nearby yet</p>
+              <p className="text-xs text-slate-400">Be the first to host one here.</p>
+            </div>
+            <button
+              type="button"
+              className="min-h-[36px] cursor-pointer rounded-full bg-primary px-4 text-xs font-semibold text-slate-950 transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              onClick={() => {
+                if (userCoords) {
+                  setCreateGameCoords({ lat: userCoords.lat, lng: userCoords.lng });
+                  setCreateGameAnchorPoint(null);
+                  setCreateGameLocationLabel(null);
+                }
+                setCreateGameOpen(true);
+              }}
+            >
+              Create game
+            </button>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              className="min-h-[36px] min-w-[36px] cursor-pointer rounded-full px-1.5 font-bold text-slate-400 transition-colors hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              onClick={() => setNoGamesBannerDismissed(true)}
             >
               ×
             </button>

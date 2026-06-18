@@ -14,6 +14,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "../ui/utils";
 import { Badge } from "../ui/badge";
+import { toast } from "sonner";
 import {
   addNoteComment,
   addStatusComment,
@@ -308,9 +309,10 @@ export function GameFeedCard(props: {
     const err = await deleteHostedGame(item.id);
     setDeleteBusy(false);
     if (err) {
-      window.alert(err.message);
+      toast.error("Couldn't delete game", { description: err.message });
       return;
     }
+    toast.success("Game deleted");
     onInvalidate?.();
   };
 
