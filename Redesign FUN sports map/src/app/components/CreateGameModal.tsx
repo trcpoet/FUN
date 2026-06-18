@@ -68,11 +68,11 @@ export type CreateGamePrefill = {
 export type CreateGameModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Coords where user double-tapped (game location) */
+  /** Coords where user pressed-and-held (game location) */
   userCoords: { lat: number; lng: number } | null;
   /** Optional human-readable location label (e.g. selected venue name). */
   locationLabel?: string | null;
-  /** Viewport position to anchor the modal next to (e.g. double-tap point). If null, modal is centered. */
+  /** Viewport position to anchor the modal next to (e.g. press-and-hold point). If null, modal is centered. */
   anchorPoint: { x: number; y: number } | null;
   onSuccess: (gameId?: string | null) => void;
   ensureSession?: () => Promise<boolean>;
@@ -314,7 +314,7 @@ export function CreateGameModal({
   const handleSubmit = async () => {
     if (createKind !== "game") return;
     if (!supabase || !userCoords) {
-      setError("Location required. Double-tap a spot on the map.");
+      setError("Location required. Press and hold a spot on the map.");
       return;
     }
     if (ensureSession && !(await ensureSession())) {
@@ -404,7 +404,7 @@ export function CreateGameModal({
   const handleSubmitNote = async () => {
     if (createKind !== "note") return;
     if (!userCoords) {
-      setError("Location required. Double-tap a spot on the map.");
+      setError("Location required. Press and hold a spot on the map.");
       return;
     }
     if (ensureSession && !(await ensureSession())) {
@@ -559,7 +559,7 @@ export function CreateGameModal({
                 ? locationLabel.trim()
                 : userCoords
                   ? `${userCoords.lat.toFixed(5)}, ${userCoords.lng.toFixed(5)}`
-                  : "Double-tap map to set"}
+                  : "Press and hold map to set"}
             </p>
             {userCoords && anchorPoint && (
               <p className="text-slate-500 text-[11px] mt-1.5">
@@ -568,7 +568,7 @@ export function CreateGameModal({
             )}
             {userCoords && !anchorPoint && (
               <p className="text-slate-500 text-[11px] mt-1.5">
-                Using your current location. Close and double-tap the map to place elsewhere.
+                Using your current location. Close and press and hold the map to place elsewhere.
               </p>
             )}
           </div>

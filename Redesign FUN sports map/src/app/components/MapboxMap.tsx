@@ -41,6 +41,7 @@ import { ColocatedGamesPin } from "./ColocatedGamesPin";
 import { RandomLocationGamePin } from "./RandomLocationGamePin";
 import { ColocatedGamesModal } from "./ColocatedGamesModal";
 import { GameMapCountdownPill } from "./GameMapCountdownPill";
+import { MapLongPressIndicator } from "./MapLongPressIndicator";
 import { useIsMobile } from "./ui/use-mobile";
 
 /** Layer / source ids: games use GL clustering (geo-anchored, no DOM drift). */
@@ -202,7 +203,7 @@ type MapboxMapProps = {
   /** Your rating out of 5 (shown under your 2D map avatar). */
   userSportsmanship?: number | null;
   currentUserId?: string | null;
-  /** (lat, lng, viewportPoint) when user double-taps the map */
+  /** (lat, lng, viewportPoint) when user presses-and-holds the map to create a game */
   onMapDoubleClick?: (lat: number, lng: number, viewportPoint?: { x: number; y: number }) => void;
   /** Open Create Game from selected venue popup. */
   onCreateGameAtVenue?: (venue: VenueSelection, viewportPoint?: { x: number; y: number }) => void;
@@ -289,6 +290,11 @@ export function MapboxMap(props: MapboxMapProps) {
   const [venuePopupPoint, setVenuePopupPoint] = useState<{ x: number; y: number } | null>(null);
   const [bumpGameId, setBumpGameId] = useState<string | null>(null); // game id currently playing the tap-pulse
   const [colocatedModalGames, setColocatedModalGames] = useState<GameRow[] | null>(null); // games stacked at one spot
+  // Press-and-hold (long-press) Create Game: progress ring (0→1) drawn at the contact point.
+  const [longPress, setLongPress] = useState<{ x: number; y: number; progress: number } | null>(null);
+  // Latest create-game callback, read by the long-press effect so it never re-binds canvas listeners.
+  const onMapLongPressRef = useRef(onMapDoubleClick);
+  onMapLongPressRef.current = onMapDoubleClick;
   const isMobile = useIsMobile();
   const cinematicTier = useMemo(() => MapCfg.getCinematicTier(isMobile), [isMobile]);
   const cinematicTierRef = useRef(cinematicTier);
@@ -1706,52 +1712,16 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [mapLoaded, applyGameIconLayout]);
 
-  // Map click:
-  // - On desktop: close popup only.
-  // - On mobile: use single tap to center map and open Create Game modal.
+  // Map click on empty map: close any open popup/selection (both platforms).
+  // Create Game is now a press-and-hold gesture — see the long-press effect below.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-    const handler = (e: { lngLat: { lat: number; lng: number }; point: { x: number; y: number } }) => {
+    const handler = () => {
       // Avoid clearing venue selection immediately after venue marker/polygon clicks.
       if (Date.now() - venueInteractionTsRef.current < 250) return;
       // Also avoid clearing game popup immediately after clicking a game point/icon.
       if (Date.now() - gameInteractionTsRef.current < 250) return;
-
-      // Mobile: a single tap recenters and opens Create Game at that spot.
-      if (isMobile && onMapDoubleClick) {
-        setEventPopup(null);
-        setColocatedModalGames(null);
-        onSelectVenue(null);
-        setVenuePopupPoint(null);
-
-        const container = map.getContainer();
-        const rect = container.getBoundingClientRect();
-
-        // Use the tap's geographic location for the game,
-        // but recenter the map so the modal appears in a stable spot.
-        const tapLat = e.lngLat.lat;
-        const tapLng = e.lngLat.lng;
-
-        map.easeTo({
-          center: [tapLng, tapLat],
-          zoom: Math.max(map.getZoom(), MapCfg.GAME_INDIVIDUAL_MIN_ZOOM),
-          duration: 300,
-        });
-
-        // Anchor modal to viewport center so it never goes off-screen,
-        // regardless of where the tap happened.
-        const centerPoint = { x: rect.width / 2, y: rect.height / 2 };
-        const viewportPoint = {
-          x: rect.left + centerPoint.x,
-          y: rect.top + centerPoint.y,
-        };
-
-        onMapDoubleClick(tapLat, tapLng, viewportPoint);
-        return;
-      }
-
-      // Desktop: a normal click on empty map just closes any open popup/selection.
       setEventPopup(null);
       setColocatedModalGames(null);
       onSelectVenue(null);
@@ -1761,48 +1731,155 @@ export function MapboxMap(props: MapboxMapProps) {
     return () => {
       map.off("click", handler);
     };
-  }, [mapLoaded, isMobile, onMapDoubleClick, onSelectVenue]);
+  }, [mapLoaded, onSelectVenue]);
 
-  // Map double-click (desktop): use the geographic point under the cursor, not viewport center
-  // Double-clicking empty map opens Create Game at exactly where you clicked.
+  // Press-and-hold anywhere on empty map → Create Game at the contact point (desktop + mobile).
+  // Listeners attach to the Mapbox canvas (Mapbox owns canvas pointer events for pan/zoom).
+  // A ring fills over MAP_LONG_PRESS_MS; dragging past the move threshold hands the gesture
+  // back to Mapbox for panning. Presses on a game/venue GL feature, an HTML marker, or just
+  // after a venue/game tap are ignored.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || !onMapDoubleClick || isMobile) return;
+    if (!map || !mapLoaded) return;
+    const canvas = map.getCanvas();
 
-    const handler = (e: { lngLat: { lat: number; lng: number }; point: { x: number; y: number } }) => {
-      if (Date.now() - venueInteractionTsRef.current < 400) return; // ignore if a venue was just clicked
+    const blockLayers = [
+      L_GAME_ICON,
+      L_GAME_CLUSTERS,
+      L_VENUE_GL_CLUSTERS,
+      L_VENUE_GL_CLUSTER_ICON,
+      L_VENUE_DOTS,
+      L_VENUE_DOTS_PULSE,
+      L_VENUE_DOTS_PULSE_INNER,
+      L_VENUE_SPORT_ICON,
+    ].filter((id) => map.getLayer(id));
 
-      const container = map.getContainer();
-      const rect = container.getBoundingClientRect();
+    let active: {
+      pointerId: number;
+      startX: number;
+      startY: number;
+      point: { x: number; y: number };
+      lngLat: { lat: number; lng: number };
+      startedAt: number;
+      rafId: number;
+    } | null = null;
 
-      const tapLat = e.lngLat.lat;
-      const tapLng = e.lngLat.lng;
+    const stop = () => {
+      if (!active) return;
+      cancelAnimationFrame(active.rafId);
+      try {
+        canvas.releasePointerCapture(active.pointerId);
+      } catch {
+        /* pointer already released */
+      }
+      active = null;
+    };
 
+    const cancel = () => {
+      stop();
+      setLongPress(null);
+    };
+
+    const complete = () => {
+      if (!active) return;
+      const { point, lngLat } = active;
+      stop();
+      setLongPress(null);
+      // Clear popups/selection (same as the old double-click flow).
       setEventPopup(null);
       setColocatedModalGames(null);
       onSelectVenue(null);
       setVenuePopupPoint(null);
-
       map.easeTo({
-        center: [tapLng, tapLat],
+        center: [lngLat.lng, lngLat.lat],
         zoom: Math.max(map.getZoom(), MapCfg.GAME_INDIVIDUAL_MIN_ZOOM),
         duration: 300,
       });
+      const rect = map.getContainer().getBoundingClientRect();
+      const viewportPoint = { x: rect.left + point.x, y: rect.top + point.y };
+      onMapLongPressRef.current?.(lngLat.lat, lngLat.lng, viewportPoint);
+    };
 
-      // Screen position of the double-click (for modal placement)
-      const viewportPoint = {
-        x: rect.left + e.point.x,
-        y: rect.top + e.point.y,
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      if (!onMapLongPressRef.current) return;
+      // Skip just after a venue/game tap, or if the press landed on an HTML marker.
+      if (Date.now() - venueInteractionTsRef.current < 250) return;
+      if (Date.now() - gameInteractionTsRef.current < 250) return;
+      if (e.target !== canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      // Skip presses that land on a game/venue GL feature.
+      if (blockLayers.length && map.queryRenderedFeatures([x, y] as [number, number], { layers: blockLayers }).length > 0) {
+        return;
+      }
+
+      stop();
+      const ll = map.unproject([x, y] as [number, number]);
+      active = {
+        pointerId: e.pointerId,
+        startX: x,
+        startY: y,
+        point: { x, y },
+        lngLat: { lat: ll.lat, lng: ll.lng },
+        startedAt: performance.now(),
+        rafId: 0,
       };
 
-      onMapDoubleClick(tapLat, tapLng, viewportPoint);
+      const tick = (now: number) => {
+        if (!active) return;
+        const t = (now - active.startedAt) / MapCfg.MAP_LONG_PRESS_MS;
+        setLongPress({ x: active.point.x, y: active.point.y, progress: Math.min(1, t) });
+        if (t >= 1) {
+          complete();
+          return;
+        }
+        active.rafId = requestAnimationFrame(tick);
+      };
+      active.rafId = requestAnimationFrame(tick);
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        /* pointer capture unsupported — fine */
+      }
     };
 
-    map.on("dblclick", handler);
-    return () => {
-      map.off("dblclick", handler);
+    const onPointerMove = (e: PointerEvent) => {
+      if (!active || e.pointerId !== active.pointerId) return;
+      const rect = canvas.getBoundingClientRect();
+      const dx = e.clientX - rect.left - active.startX;
+      const dy = e.clientY - rect.top - active.startY;
+      // Real drag → user is panning; hand off to Mapbox (do not preventDefault).
+      if (dx * dx + dy * dy > MapCfg.MAP_LONG_PRESS_MOVE_CANCEL_PX ** 2) cancel();
     };
-  }, [mapLoaded, onMapDoubleClick, isMobile, onSelectVenue]);
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (!active || e.pointerId !== active.pointerId) return;
+      cancel(); // released before the ring filled
+    };
+
+    const onContextMenu = (e: Event) => {
+      if (active) e.preventDefault(); // suppress the long-press context menu while holding
+    };
+
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+    canvas.addEventListener("contextmenu", onContextMenu);
+
+    return () => {
+      cancel();
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("contextmenu", onContextMenu);
+    };
+  }, [mapLoaded, onSelectVenue]);
 
   /** 3D overlay: full tier only, deferred until first idle (lighter boot). */
   const use3DOverlay =
@@ -2434,6 +2511,10 @@ export function MapboxMap(props: MapboxMapProps) {
         className={`absolute inset-0 w-full h-full ${!mapLoaded ? "pointer-events-none" : ""}`}
         style={{ minHeight: "100%" }}
       />
+      {/* Press-and-hold progress ring at the contact point. */}
+      {longPress && (
+        <MapLongPressIndicator x={longPress.x} y={longPress.y} progress={longPress.progress} />
+      )}
       {/* "Zoom in to explore games" hint when games are hidden at low zoom. */}
       {mapUxHint && (
         <div

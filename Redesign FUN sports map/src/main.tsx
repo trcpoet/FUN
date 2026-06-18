@@ -7,6 +7,7 @@ import { RequireOnboarding } from "./app/components/RequireOnboarding";
 import { PublicOnly } from "./app/components/PublicOnly";
 import "./styles/index.css";
 import { FunOrbitLoader } from "./app/components/FunOrbitLoader";
+import { Toaster } from "./app/components/ui/sonner";
 
 const App = lazy(() => import("./app/App.tsx"));
 const Login = lazy(() => import("./app/pages/Login.tsx"));
@@ -104,5 +105,6 @@ createRoot(document.getElementById("root")!).render(
         </Suspense>
       </RouteErrorBoundary>
     </BrowserRouter>
+    <Toaster theme="dark" richColors position="top-center" />
   </AuthProvider>
 );
