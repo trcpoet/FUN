@@ -240,7 +240,6 @@ export default function App() {
   // DB-backed follows (seeded from any legacy localStorage set for instant first paint).
   const [followedIds, setFollowedIds] = useState<Set<string>>(() => readFollowedIds());
   const presenceHeartbeatAtRef = useRef(0);
-  const [ghostNoticeDismissed, setGhostNoticeDismissed] = useState(false);
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
   const [selectedVenue, setSelectedVenue] = useState<VenueSelection | null>(null);
   const [gamePopupRequest, setGamePopupRequest] = useState<{ nonce: number; gameId: string } | null>(null);
@@ -634,15 +633,6 @@ export default function App() {
     return parts.length ? parts.join(" · ") : null;
   }, [appliedFilters, effectiveGamesRadiusKm]);
 
-  // Empty-state banner when filters hide every game (vs genuinely none fetched). Re-shows when filters change.
-  const [emptyBannerDismissedSig, setEmptyBannerDismissedSig] = useState<string | null>(null);
-  const filtersSig = useMemo(
-    () => JSON.stringify([appliedFilters, effectiveGamesRadiusKm]),
-    [appliedFilters, effectiveGamesRadiusKm]
-  );
-  const showEmptyFiltersBanner =
-    displayGames.length === 0 && games.length > 0 && emptyBannerDismissedSig !== filtersSig;
-
   // Genuinely-empty banner: nothing fetched nearby at all (distinct from filters hiding games).
   const [noGamesBannerDismissed, setNoGamesBannerDismissed] = useState(false);
   const showNoGamesBanner = !nearbyLoading && games.length === 0 && !noGamesBannerDismissed;
@@ -793,24 +783,6 @@ export default function App() {
           </MapToast>
         )}
 
-        {locationVisibility === "ghost" && !ghostNoticeDismissed && (
-          <MapToast
-            icon={<span>👻</span>}
-            onDismiss={() => setGhostNoticeDismissed(true)}
-            actions={
-              <button
-                type="button"
-                className="min-h-[32px] rounded-full border border-primary/40 bg-primary/10 px-3 text-[11px] font-semibold text-primary"
-                onClick={() => applyVisibilityMode("public")}
-              >
-                Go Public
-              </button>
-            }
-          >
-            You're in <span className="font-semibold text-slate-100">Ghost</span> mode — hidden from others. Filters still apply.
-          </MapToast>
-        )}
-
         {showNoGamesBanner && (
           <MapToast
             onDismiss={() => setNoGamesBannerDismissed(true)}
@@ -836,49 +808,6 @@ export default function App() {
           </MapToast>
         )}
 
-        {showEmptyFiltersBanner && (
-          <MapToast
-            variant="warning"
-            actions={
-              <>
-                <button
-                  type="button"
-                  className="min-h-[32px] rounded-full border border-white/15 px-3 text-[11px] font-medium"
-                  onClick={() => {
-                    const next = { ...appliedFilters, gamesRadiusKm: 25 };
-                    setAppliedFilters(next);
-                    setFiltersDraft(next);
-                    setSportExtendRadius(null);
-                    persistAppliedFilters(next);
-                  }}
-                >
-                  Widen to 25 km
-                </button>
-                <button
-                  type="button"
-                  className="min-h-[32px] rounded-full border border-white/15 px-3 text-[11px] font-medium"
-                  onClick={() => {
-                    const next = { ...appliedFilters, skillLevel: "Any", ageRange: "Any", matchType: "Any" };
-                    setAppliedFilters(next);
-                    setFiltersDraft(next);
-                    persistAppliedFilters(next);
-                  }}
-                >
-                  Clear advanced
-                </button>
-                <button
-                  type="button"
-                  className="min-h-[32px] rounded-full px-3 text-[11px] text-slate-400"
-                  onClick={() => setEmptyBannerDismissedSig(filtersSig)}
-                >
-                  Dismiss
-                </button>
-              </>
-            }
-          >
-            No games match your filters. Widen the radius or clear advanced filters.
-          </MapToast>
-        )}
       </div>
 
       {satelliteOn && (
