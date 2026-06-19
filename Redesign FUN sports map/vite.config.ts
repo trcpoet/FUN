@@ -63,6 +63,33 @@ function supabasePreconnect(env: Record<string, string>): Plugin {
   }
 }
 
+// FCP fix: Vite emits the app + mapbox stylesheets as render-blocking
+// `<link rel="stylesheet">` in <head>. The browser refuses to paint ANYTHING —
+// including our fully inline-styled #root orbit loader — until those sheets
+// download + parse, which was the dominant cost in a 2.49s P75 desktop FCP.
+// The loader needs none of that CSS, so load every build stylesheet
+// non-blocking (media="print" → swap to "all" on load) with a <noscript>
+// fallback for no-JS clients. First paint then lands at ~TTFB; the real UI's
+// CSS (downloaded in parallel) is applied well before React renders past the
+// loader. Build-only — dev serves CSS via the JS graph, no <link> tags exist.
+function asyncCriticalCss(): Plugin {
+  return {
+    name: 'fun-async-critical-css',
+    apply: 'build',
+    enforce: 'post',
+    transformIndexHtml(html) {
+      return html.replace(/<link\b[^>]*\brel="stylesheet"[^>]*>/g, (tag) => {
+        if (/\bmedia=/.test(tag)) return tag // respect any explicit media query
+        const asyncTag = tag.replace(
+          /\s*\/?>$/,
+          ` media="print" onload="this.onload=null;this.media='all'">`,
+        )
+        return `${asyncTag}<noscript>${tag}</noscript>`
+      })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '')
   return {
@@ -75,6 +102,7 @@ export default defineConfig(({ mode }) => {
     // Tailwind is not being actively used – do not remove them
     react(),
     tailwindcss(),
+    asyncCriticalCss(),
   ],
   resolve: {
     alias: {
@@ -130,6 +158,15 @@ export default defineConfig(({ mode }) => {
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // Rollup's CommonJS interop shims (getDefaultExportFromCjs, etc.) live in
+          // a single virtual `\0commonjsHelpers.js` module shared by nearly every
+          // CJS dependency (sonner, etc.). Left unassigned, Rollup parked it INSIDE
+          // the 1.7MB mapbox chunk — so the eagerly-loaded entry statically imported
+          // mapbox just to grab a ~30-byte helper, forcing all of mapbox-gl to
+          // download on every route before React could mount. Pin the helpers to a
+          // tiny standalone chunk so mapbox-gl stays purely lazy (loaded only when
+          // the map mounts). No-op if the id ever stops matching.
+          if (id.includes("commonjsHelpers")) return "cjs-helpers";
           if (id.includes("node_modules/mapbox-gl")) return "mapbox";
           if (id.includes("node_modules/three")) return "three";
         },
