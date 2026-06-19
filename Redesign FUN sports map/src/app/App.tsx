@@ -17,7 +17,7 @@ import type { MessengerThreadFocus, PlanRematchPayload } from "./components/Game
 import { CreateGameModal, type CreateGamePrefill } from "./components/CreateGameModal";
 import { toast } from "sonner";
 import { FiltersModal, type FiltersState, DEFAULT_FILTERS } from "./components/FiltersModal";
-import { useGeolocation } from "../hooks/useGeolocation";
+import { useGeolocation, getLastKnownCoords } from "../hooks/useGeolocation";
 import { useNearbyMapQueries } from "../hooks/useNearbyMapQueries";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { useUnifiedSearch } from "../hooks/useUnifiedSearch";
@@ -87,7 +87,12 @@ export default function App() {
   const { coords: userCoords, error: locationError } = useGeolocation();
   // For this experiment: keep the app usable even if location is blocked.
   // (Browsers control permission prompts; we can't force "Allow", but we can fall back.)
-  const effectiveUserCoords = userCoords ?? { lat: 40.758, lng: -73.9855 }; // Times Square
+  // Seed the fallback from the user's last known location (persisted across mounts)
+  // so returning to the map (e.g. globe button) centers there immediately instead of
+  // flashing Times Square while live geolocation resolves. Read once on mount.
+  const lastKnownCoords = useMemo(() => getLastKnownCoords(), []);
+  const effectiveUserCoords =
+    userCoords ?? lastKnownCoords ?? { lat: 40.758, lng: -73.9855 }; // Times Square (first-ever visit only)
 
   /** Minute tick: drop expired untimed games from UI and refresh map countdown labels. */
   const [mapMinuteEpoch, setMapMinuteEpoch] = useState(0);
