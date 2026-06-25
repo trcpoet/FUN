@@ -8,6 +8,8 @@ import { PublicOnly } from "./app/components/PublicOnly";
 import "./styles/index.css";
 import { FunOrbitLoader } from "./app/components/FunOrbitLoader";
 import { Toaster } from "./app/components/ui/sonner";
+import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 const App = lazy(() => import("./app/App.tsx"));
 const Login = lazy(() => import("./app/pages/Login.tsx"));
@@ -106,5 +108,7 @@ createRoot(document.getElementById("root")!).render(
       </RouteErrorBoundary>
     </BrowserRouter>
     <Toaster theme="dark" richColors position="top-center" />
+    <Analytics />
+    <SpeedInsights />
   </AuthProvider>
 );
