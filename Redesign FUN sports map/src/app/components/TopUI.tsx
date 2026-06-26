@@ -69,9 +69,7 @@ export type TopNavigationProps = {
   onLiveNowToggle?: () => void;
   onCenterOnUser?: () => void;
   onOpenFilters?: () => void;
-  /** Summary of active map filters; renders a clearable pill when set. */
-  activeFilterSummary?: string | null;
-  /** Clears all applied filters (pill ×). */
+  /** Clears all applied filters. */
   onClearFilters?: () => void;
   /** Open game chat inbox (threads for joined games). */
   onOpenMessages?: () => void;
@@ -139,7 +137,6 @@ export const TopNavigation = (props: TopNavigationProps) => {
     onLiveNowToggle,
     onCenterOnUser,
     onOpenFilters,
-    activeFilterSummary = null,
     onClearFilters,
     onOpenMessages,
     satelliteOn = false,
@@ -194,9 +191,15 @@ export const TopNavigation = (props: TopNavigationProps) => {
 
   return (
     <div className="absolute top-0 left-0 right-0 z-50 pt-12 px-4 pb-4 bg-gradient-to-b from-[#0A0F1C]/90 via-[#0A0F1C]/50 to-transparent pointer-events-none">
-      <div className="flex flex-col items-end gap-2 pointer-events-auto">
-        {/* Row: search, profile, filter */}
-        <div ref={searchWrapRef} className="flex items-center justify-end gap-3 w-full">
+      <div className="flex flex-col items-end gap-2">
+        {/* Row: search, profile, filter — only this row goes full-width when search is open. */}
+        <div
+          ref={searchWrapRef}
+          className={cn(
+            "flex items-center justify-end gap-3 pointer-events-auto",
+            searchExpanded ? "w-full" : "w-fit",
+          )}
+        >
           <div className="flex items-center justify-end flex-1 min-w-0">
             <AnimatePresence mode="wait">
               {searchExpanded ? (
@@ -415,18 +418,6 @@ export const TopNavigation = (props: TopNavigationProps) => {
             </AnimatePresence>
           </div>
 
-          {activeFilterSummary && (
-            <button
-              type="button"
-              onClick={onClearFilters}
-              aria-label="Clear all filters"
-              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-primary/40 bg-[#0A0F1C]/90 px-3 text-xs font-medium text-slate-100 shadow-[var(--shadow-control)] backdrop-blur-xl"
-            >
-              <span className="max-w-[40vw] truncate">{activeFilterSummary}</span>
-              <X className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-            </button>
-          )}
-
           {/* Filter button */}
           <motion.button
             whileTap={{ scale: 0.95 }}
@@ -440,7 +431,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
         </div>
 
         {/* Row: Feed + Live (one cluster) → Visibility. Below: map tools column with labels. */}
-        <div className="flex flex-col items-end gap-2 w-full">
+        <div className="flex w-fit flex-col items-end gap-2 self-end pointer-events-auto">
           {/* Order: Feed (hero) → Live Now → Visibility (tertiary) */}
           <div className="relative flex flex-col items-end gap-2">
             {feedToolbarHintOpen ? (

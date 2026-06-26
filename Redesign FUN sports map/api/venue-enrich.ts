@@ -107,10 +107,14 @@ export default async function handler(request: Request): Promise<Response> {
     return apiResponse.error("INVALID_ID", "Invalid venue id", 400);
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) {
-    return apiResponse.error("CONFIG", "Server misconfigured", 500);
+    return apiResponse.error(
+      "CONFIG",
+      "Missing SUPABASE_SERVICE_ROLE_KEY in .env — add it (server-only, not VITE_) and restart npm run dev",
+      500,
+    );
   }
 
   const { createClient } = await import("@supabase/supabase-js");

@@ -626,18 +626,6 @@ export default function App() {
     [games, filtersDraft, mapMinuteEpoch]
   );
 
-  // Summary text for the active-filter pill (non-default applied filters only).
-  const activeFilterSummary = useMemo(() => {
-    const f = appliedFilters;
-    const parts: string[] = [];
-    if (f.sports.length) parts.push(f.sports.join(", "));
-    if (effectiveGamesRadiusKm !== DEFAULT_FILTERS.gamesRadiusKm) parts.push(`${effectiveGamesRadiusKm} km`);
-    if (f.skillLevel && f.skillLevel !== "Any") parts.push(f.skillLevel);
-    if (f.ageRange && f.ageRange !== "Any") parts.push(f.ageRange);
-    if (f.matchType && f.matchType !== "Any") parts.push(f.matchType);
-    return parts.length ? parts.join(" · ") : null;
-  }, [appliedFilters, effectiveGamesRadiusKm]);
-
   // Genuinely-empty banner: nothing fetched nearby at all (distinct from filters hiding games).
   const [noGamesBannerDismissed, setNoGamesBannerDismissed] = useState(false);
   const showNoGamesBanner = !nearbyLoading && games.length === 0 && !noGamesBannerDismissed;
@@ -830,7 +818,6 @@ export default function App() {
         onLiveNowToggle={() => setLiveNowOpen((v) => !v)}
         onCenterOnUser={handleCenterOnUser}
         onOpenFilters={() => setFiltersOpen(true)}
-        activeFilterSummary={activeFilterSummary}
         onClearFilters={() => {
           setFiltersDraft(DEFAULT_FILTERS);
           setAppliedFilters(DEFAULT_FILTERS);

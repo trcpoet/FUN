@@ -1,6 +1,18 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Plugin } from "vite";
+import { loadEnv, type Plugin } from "vite";
 import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "./server/lib/osmVenueTags";
+
+/** Vite middleware runs outside the client env graph — hydrate server-only .env keys here. */
+function applyServerEnv(mode: string, root: string): void {
+  const env = loadEnv(mode, root, "");
+  for (const key of ["SUPABASE_URL", "VITE_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"] as const) {
+    const value = env[key]?.trim();
+    if (value) process.env[key] = value;
+  }
+  if (!process.env.SUPABASE_URL?.trim() && process.env.VITE_SUPABASE_URL?.trim()) {
+    process.env.SUPABASE_URL = process.env.VITE_SUPABASE_URL.trim();
+  }
+}
 /** Same order as `api/overpass.ts` — Vite's http-proxy often 504s on slow upstreams. */
 const UPSTREAMS = [
   "https://overpass-api.de/api/interpreter",
@@ -14,6 +26,26 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
+}
+
+async function forwardToApiHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+  handler: (request: Request) => Promise<Response>,
+  body: string
+): Promise<void> {
+  const url = `http://${req.headers.host ?? "localhost"}${req.url ?? ""}`;
+  const request = new Request(url, {
+    method: req.method ?? "GET",
+    headers: req.headers as HeadersInit,
+    body: body || undefined,
+  });
+  const response = await handler(request);
+  res.statusCode = response.status;
+  response.headers.forEach((value, key) => {
+    res.setHeader(key, value);
+  });
+  res.end(await response.text());
 }
 
 type OsmEl = {
@@ -74,9 +106,16 @@ export function overpassDevProxy(): Plugin {
     name: "overpass-dev-proxy",
     enforce: "pre",
     configureServer(server) {
+      const { mode, root } = server.config;
+      applyServerEnv(mode, root);
       server.middlewares.use(
         async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
           const urlPath = req.url?.split("?")[0] ?? "";
+          const isApiRoute =
+            urlPath === "/api/overpass" ||
+            urlPath === "/api/auto-cache-venues" ||
+            urlPath === "/api/venue-enrich";
+          if (isApiRoute) applyServerEnv(mode, root);
 
           // Legacy direct Overpass proxy (kept for any other callers)
           if (urlPath === "/api/overpass") {
@@ -137,6 +176,23 @@ export function overpassDevProxy(): Plugin {
             res.setHeader("Content-Type", "application/json; charset=utf-8");
             res.statusCode = 200;
             res.end(JSON.stringify({ type: "FeatureCollection", features }));
+            return;
+          }
+
+          // Same handler as `api/venue-enrich.ts` — Wikidata hero image + description enrichment.
+          if (urlPath === "/api/venue-enrich") {
+            if (req.method === "OPTIONS") { res.statusCode = 204; res.end(); return; }
+            if (req.method !== "POST") { res.statusCode = 405; res.end(); return; }
+            try {
+              const body = await readBody(req);
+              const { default: handler } = await import("./api/venue-enrich");
+              await forwardToApiHandler(req, res, handler, body);
+            } catch (err) {
+              console.error("[venue-enrich proxy] failed:", err);
+              res.setHeader("Content-Type", "application/json");
+              res.statusCode = 500;
+              res.end(JSON.stringify({ success: false, error: { code: "PROXY_ERROR", message: "Dev proxy failed" } }));
+            }
             return;
           }
 
