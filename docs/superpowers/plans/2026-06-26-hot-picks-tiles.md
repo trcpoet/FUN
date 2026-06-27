@@ -171,3 +171,15 @@ git commit -m "feat(feed): Hot Picks expandable digest cards with map deep-links
 ## Self-review notes
 - **Spec coverage:** interaction C (expand-in-place) ✓; honest badges ✓; row→map deep-links ✓ (games existing, venues new); ≤5 games / scrollable venues ✓; empty + no-location states ✓; motion + reduced-motion ✓. Deferred (documented): `?hotPicks=` emphasis, "games grouped by venue" popularity signal.
 - **Type consistency:** `HotPickGame`/`HotPickVenue` produced in Task 1 consumed in Task 3; `focusVenueId` URL produced in Task 2 consumed in Task 3.
+
+---
+
+## Update — v2 (2026-06-27): dedicated pages instead of inline accordion
+
+Per user direction, the inline accordion (interaction C) was replaced with **dedicated full pages**, and Hot Picks moved **above** the Global network on Explore:
+
+- `Feed.tsx`: Hot Picks tiles render first; each tile navigates (`ArrowUpRight` affordance) to a page — `/feed/games`, `/feed/venues`. Accordion + on-Feed data fetching removed.
+- New lazy routes in `main.tsx`: `RecommendedGames` (`/feed/games`), `PopularVenues` (`/feed/venues`).
+- **`/feed/games`** — `getGamesNearby` → `rankLiveGameRows`: drops `ended`/`cancelled` games (the "not old games that have ended" requirement); ranks sport-overlap → distance → fullest → newest. Rich rows (spots, distance, LIVE badge).
+- **`/feed/venues`** — `fetchSportsVenuesFromDb` with a search radius that **expands on scroll** (IntersectionObserver sentinel) for perpetual infinite scroll; rows show venue info (sport/leisure, surface, access, hours, website).
+- `hotPicks.ts`: removed the `LiveFeedItem` game ranker; added `rankLiveGameRows(GameRow[])` + `isLiveGame` + `formatKm`; enriched `HotPickVenue` with display fields. Reused `distanceKmBetween` from `map/mapBounds`.
