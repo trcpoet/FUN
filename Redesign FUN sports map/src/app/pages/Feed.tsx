@@ -9,6 +9,7 @@ import {
   Users,
   Search,
   ChevronRight,
+  ChevronDown,
   MapPin,
   Flame,
   Loader2,
@@ -38,6 +39,10 @@ import {
 import LightRays from "../components/feed/LightRays";
 import { glassMessengerPage } from "../styles/glass";
 import { useAuth } from "../contexts/AuthContext";
+import { useMyProfile } from "../../hooks/useMyProfile";
+import { fetchSportsVenuesFromDb } from "../lib/sportsVenues";
+import { rankHotPickGames, rankHotPickVenues, type HotPickVenue } from "../lib/hotPicks";
+import { sportEmoji } from "../../lib/sportVisuals";
 
 function notificationLabel(n: { type: string; payload?: unknown }): string {
   const p = (n.payload ?? {}) as Record<string, unknown>;
@@ -210,6 +215,12 @@ function TabButton(props: {
   );
 }
 
+function fmtKm(km: number | null): string | null {
+  if (km == null) return null;
+  if (km < 1) return "<1 km";
+  return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+}
+
 export default function Feed() {
   const [tab, setTab] = useState<TabId>("discovery");
   const navigate = useNavigate();
@@ -217,6 +228,7 @@ export default function Feed() {
   const { user } = useAuth();
   const { notifications, markRead } = useNotifications({ limit: 12 });
   const { coords } = useGeolocation();
+  const { athleteProfile } = useMyProfile();
   const unreadCount = notifications.filter((n) => !n.is_read).length;
   const [unified, setUnified] = useState<UnifiedFeedItem[]>([]);
   const [unifiedLoading, setUnifiedLoading] = useState(false);
@@ -224,6 +236,10 @@ export default function Feed() {
   const [liveLoading, setLiveLoading] = useState(false);
   const [mediaPosts, setMediaPosts] = useState<FeedMediaPostRow[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [hotPick, setHotPick] = useState<"games" | "venues" | null>(null);
+  const [venues, setVenues] = useState<HotPickVenue[]>([]);
+  const [venuesLoading, setVenuesLoading] = useState(false);
+  const [venuesLoaded, setVenuesLoaded] = useState(false);
 
   const refreshFeeds = useCallback(() => {
     setMediaLoading(true);
@@ -257,6 +273,16 @@ export default function Feed() {
     [coords, unified, mediaPosts],
   );
 
+  const recommendedGames = useMemo(
+    () =>
+      rankHotPickGames(liveItems, {
+        center: coords,
+        primarySports: athleteProfile.primarySports ?? [],
+        limit: 5,
+      }),
+    [liveItems, coords, athleteProfile.primarySports],
+  );
+
   const globalStreamLoading = (coords ? unifiedLoading : false) || mediaLoading;
 
   useEffect(() => {
@@ -272,6 +298,33 @@ export default function Feed() {
   useEffect(() => {
     refreshFeeds();
   }, [refreshFeeds]);
+
+  // Lazily load nearby venues the first time the "Near you" card is expanded.
+  useEffect(() => {
+    if (hotPick !== "venues" || venuesLoaded || !coords) return;
+    let cancelled = false;
+    setVenuesLoading(true);
+    const d = 0.3; // ~33 km half-box; ranked + capped client-side
+    const bbox = {
+      minLat: coords.lat - d,
+      maxLat: coords.lat + d,
+      minLng: coords.lng - d,
+      maxLng: coords.lng + d,
+    };
+    void fetchSportsVenuesFromDb(bbox)
+      .then((fc) => {
+        if (!cancelled) setVenues(rankHotPickVenues(fc, { center: coords, limit: 30 }));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled) return;
+        setVenuesLoading(false);
+        setVenuesLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hotPick, venuesLoaded, coords]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-foreground selection:bg-primary selection:text-white">
@@ -453,35 +506,145 @@ export default function Feed() {
               </div>
               
               <div className="grid gap-4 sm:grid-cols-2">
-                <button className="group relative h-48 overflow-hidden rounded-[32px] border border-white/[0.08] bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-[0_20px_40px_-15px_rgba(225,29,72,0.15)]">
-                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity">
-                    <Compass className="size-24 -rotate-12" />
-                  </div>
-                  <div className="relative h-full flex flex-col justify-between">
-                    <div>
-                      <Badge className="bg-primary/20 text-primary border-none text-[9px] font-black uppercase tracking-[0.2em] mb-3">AI Choice</Badge>
-                      <h3 className="text-xl font-black italic tracking-tighter text-white uppercase leading-none">Recommended<br/>Games</h3>
+                {/* For you — recommended games */}
+                <div
+                  className={cn(
+                    "group relative overflow-hidden rounded-[32px] border bg-card transition-all",
+                    hotPick === "games"
+                      ? "border-primary/40 shadow-[0_20px_40px_-15px_rgba(225,29,72,0.18)]"
+                      : "border-white/[0.08] hover:border-primary/30",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setHotPick((p) => (p === "games" ? null : "games"))}
+                    aria-expanded={hotPick === "games"}
+                    className="relative h-44 w-full overflow-hidden p-6 text-left"
+                  >
+                    <div className="absolute top-0 right-0 p-4 opacity-10 transition-opacity group-hover:opacity-30">
+                      <Compass className="size-24 -rotate-12" />
                     </div>
-                    <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground group-hover:text-white transition-colors">
-                      Explore Personalized Runs <ChevronRight className="size-4 text-primary" />
+                    <div className="relative flex h-full flex-col justify-between">
+                      <div>
+                        <Badge className="mb-3 border-none bg-primary/20 text-[9px] font-black uppercase tracking-[0.2em] text-primary">For you</Badge>
+                        <h3 className="text-xl font-black italic uppercase leading-none tracking-tighter text-white">Recommended<br/>Games</h3>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-xs font-bold text-muted-foreground transition-colors group-hover:text-white">
+                        <span>{recommendedGames.length > 0 ? `${recommendedGames.length} near you` : "Explore games near you"}</span>
+                        <ChevronDown className={cn("size-4 text-primary transition-transform", hotPick === "games" && "rotate-180")} />
+                      </div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                  {hotPick === "games" && (
+                    <div className="border-t border-white/[0.06] p-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200">
+                      {recommendedGames.length === 0 ? (
+                        <p className="px-3 py-4 text-xs text-slate-500">
+                          {coords ? "No open games nearby." : "Turn on location to see games near you."}
+                        </p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {recommendedGames.map((g) => (
+                            <li key={g.id}>
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/?focusGameId=${encodeURIComponent(g.id)}`)}
+                                className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors hover:bg-white/[0.05]"
+                              >
+                                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-base">{sportEmoji(g.sport ?? "")}</span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-bold text-white">{g.title}</span>
+                                  {g.sport && <span className="block truncate text-[10px] uppercase tracking-widest text-muted-foreground">{g.sport}</span>}
+                                </span>
+                                {fmtKm(g.distanceKm) && (
+                                  <span className="shrink-0 text-[11px] font-bold tabular-nums text-muted-foreground">{fmtKm(g.distanceKm)}</span>
+                                )}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => navigate("/")}
+                        className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-2xl px-3 py-2 text-[10px] font-black uppercase tracking-widest text-primary transition-colors hover:bg-primary/10"
+                      >
+                        See all on map <ChevronRight className="size-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-                <button className="group relative h-48 overflow-hidden rounded-[32px] border border-white/[0.08] bg-card p-6 text-left transition-all hover:border-blue-500/40 hover:shadow-[0_20px_40px_-15px_rgba(37,99,235,0.15)]">
-                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity">
-                    <MapPin className="size-24 -rotate-12 text-blue-500" />
-                  </div>
-                  <div className="relative h-full flex flex-col justify-between">
-                    <div>
-                      <Badge className="bg-blue-500/20 text-blue-500 border-none text-[9px] font-black uppercase tracking-[0.2em] mb-3">Trending</Badge>
-                      <h3 className="text-xl font-black italic tracking-tighter text-white uppercase leading-none">Popular<br/>Venues</h3>
+                {/* Near you — venues */}
+                <div
+                  className={cn(
+                    "group relative overflow-hidden rounded-[32px] border bg-card transition-all",
+                    hotPick === "venues"
+                      ? "border-blue-500/40 shadow-[0_20px_40px_-15px_rgba(37,99,235,0.18)]"
+                      : "border-white/[0.08] hover:border-blue-500/30",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setHotPick((p) => (p === "venues" ? null : "venues"))}
+                    aria-expanded={hotPick === "venues"}
+                    className="relative h-44 w-full overflow-hidden p-6 text-left"
+                  >
+                    <div className="absolute top-0 right-0 p-4 opacity-10 transition-opacity group-hover:opacity-30">
+                      <MapPin className="size-24 -rotate-12 text-blue-500" />
                     </div>
-                    <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground group-hover:text-white transition-colors">
-                      See where the energy is <ChevronRight className="size-4 text-blue-500" />
+                    <div className="relative flex h-full flex-col justify-between">
+                      <div>
+                        <Badge className="mb-3 border-none bg-blue-500/20 text-[9px] font-black uppercase tracking-[0.2em] text-blue-500">Near you</Badge>
+                        <h3 className="text-xl font-black italic uppercase leading-none tracking-tighter text-white">Popular<br/>Venues</h3>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-xs font-bold text-muted-foreground transition-colors group-hover:text-white">
+                        <span>{venuesLoaded && venues.length > 0 ? `${venues.length} spots nearby` : "Find places to play"}</span>
+                        <ChevronDown className={cn("size-4 text-blue-500 transition-transform", hotPick === "venues" && "rotate-180")} />
+                      </div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                  {hotPick === "venues" && (
+                    <div className="border-t border-white/[0.06] p-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200">
+                      {!coords ? (
+                        <p className="px-3 py-4 text-xs text-slate-500">Turn on location to find venues near you.</p>
+                      ) : venuesLoading ? (
+                        <div className="flex items-center gap-2 px-3 py-4 text-xs text-slate-500">
+                          <Loader2 className="size-4 animate-spin" /> Finding venues…
+                        </div>
+                      ) : venues.length === 0 ? (
+                        <p className="px-3 py-4 text-xs text-slate-500">No venues nearby yet.</p>
+                      ) : (
+                        <ul className="max-h-[17rem] space-y-1 overflow-y-auto pr-1">
+                          {venues.map((v) => (
+                            <li key={v.id}>
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/?focusVenueId=${encodeURIComponent(v.id)}`)}
+                                className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors hover:bg-white/[0.05]"
+                              >
+                                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400"><MapPin className="size-4" /></span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-bold text-white">{v.name}</span>
+                                  {v.sport && <span className="block truncate text-[10px] uppercase tracking-widest text-muted-foreground">{v.sport}</span>}
+                                </span>
+                                {fmtKm(v.distanceKm) && (
+                                  <span className="shrink-0 text-[11px] font-bold tabular-nums text-muted-foreground">{fmtKm(v.distanceKm)}</span>
+                                )}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => navigate("/")}
+                        className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-2xl px-3 py-2 text-[10px] font-black uppercase tracking-widest text-blue-400 transition-colors hover:bg-blue-500/10"
+                      >
+                        See all on map <ChevronRight className="size-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </section>
           </div>
