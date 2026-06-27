@@ -30,7 +30,7 @@ import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
 import { useTotalUnreadMessages } from "../hooks/useTotalUnreadMessages";
 import { supabase } from "../lib/supabase";
-import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById } from "../lib/api";
+import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById, fetchVenueById } from "../lib/api";
 import { fetchMyDmInbox, getOrCreateDmThread } from "../lib/dmChat";
 import { fetchMyGameInbox, sendGameMessage } from "../lib/gameChat";
 import { visibilityEnumToLabel } from "../lib/gamePreferenceOptions";
@@ -321,6 +321,33 @@ export default function App() {
     params.delete("focusNoteId");
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
   }, [mapNotes, location.pathname, location.search, navigate, refetchNotes]);
+
+  // Deep link from Feed Hot Picks → map venue focus (centers + opens the venue popup).
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const vid = params.get("focusVenueId");
+    if (!vid) return;
+    const strip = () => {
+      params.delete("focusVenueId");
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" },
+        { replace: true },
+      );
+    };
+    void fetchVenueById(vid).then((r) => {
+      if (r.error || !r.data) {
+        strip();
+        return;
+      }
+      const venue = r.data;
+      // Ensure venues + notes fetch around the deep-linked point.
+      setMapSearchLocation({ lat: venue.center.lat, lng: venue.center.lng });
+      setMapSearchLocationName(venue.name?.trim() || "Venue");
+      handleCenterOnCoords({ lat: venue.center.lat, lng: venue.center.lng });
+      setSelectedVenue(venue);
+      strip();
+    });
+  }, [location.pathname, location.search, navigate]);
 
   // Presence heartbeat: sync location + chosen visibility mode (throttled 30s).
   // Mode changes fire an immediate update via onLocationVisibilityChange.
