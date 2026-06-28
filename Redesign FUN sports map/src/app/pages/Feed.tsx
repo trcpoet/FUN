@@ -253,10 +253,18 @@ export default function Feed() {
     });
   }, [coords?.lat, coords?.lng, user?.id]);
 
+  // Games live on the Recommended Games page; Explore/Feed stay social-only
+  // (notes, statuses, photos & reels). Filter games out of the network stream.
   const mergedGlobal = useMemo(
-    () => mergeGlobalNetworkChronological(coords ? unified : [], mediaPosts),
+    () =>
+      mergeGlobalNetworkChronological(
+        coords ? unified.filter((it) => it.kind !== "game") : [],
+        mediaPosts,
+      ),
     [coords, unified, mediaPosts],
   );
+
+  const liveNotes = useMemo(() => liveItems.filter((it) => it.kind === "note"), [liveItems]);
 
   const globalStreamLoading = (coords ? unifiedLoading : false) || mediaLoading;
 
@@ -326,7 +334,7 @@ export default function Feed() {
                   <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                     {tab === "activity"
-                      ? "Feed · Live games near you"
+                      ? "Feed · Map notes near you"
                       : "Explore · Global network"}
                   </span>
                 </div>
@@ -510,7 +518,7 @@ export default function Feed() {
                 ) : null}
               </div>
               <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">
-                Live games and map notes within 25 km — global stream is on Explore
+                Map notes within 25 km — games live on Recommended Games
               </p>
             </section>
 
@@ -520,43 +528,32 @@ export default function Feed() {
                   <MapPin className="size-4" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-black uppercase tracking-widest text-white">Live games near you</h2>
+                  <h2 className="text-sm font-black uppercase tracking-widest text-white">Map notes near you</h2>
                   <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
-                    Games & map notes · 25 km
+                    Map notes · 25 km
                   </p>
                 </div>
               </div>
               {!coords ? (
                 <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90">
-                  Turn on location to load nearby games and notes.
+                  Turn on location to load nearby map notes.
                 </div>
               ) : liveLoading ? (
                 <LiveSectionSkeleton />
-              ) : liveItems.length === 0 ? (
-                <p className="text-xs text-slate-500 px-1">No games or notes in range yet.</p>
+              ) : liveNotes.length === 0 ? (
+                <p className="text-xs text-slate-500 px-1">No map notes in range yet.</p>
               ) : (
                 <ul className="grid gap-6">
-                  {liveItems.map((it) =>
-                    it.kind === "note" ? (
-                      <li key={`feed-note:${it.id}`}>
-                        <NoteFeedCard
-                          item={it}
-                          currentUserId={user?.id ?? null}
-                          onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
-                          onInvalidate={refreshFeeds}
-                        />
-                      </li>
-                    ) : (
-                      <li key={`feed-game:${it.id}`}>
-                        <GameFeedCard
-                          item={it}
-                          currentUserId={user?.id ?? null}
-                          onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
-                          onInvalidate={refreshFeeds}
-                        />
-                      </li>
-                    ),
-                  )}
+                  {liveNotes.map((it) => (
+                    <li key={`feed-note:${it.id}`}>
+                      <NoteFeedCard
+                        item={it}
+                        currentUserId={user?.id ?? null}
+                        onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
+                        onInvalidate={refreshFeeds}
+                      />
+                    </li>
+                  ))}
                 </ul>
               )}
             </section>

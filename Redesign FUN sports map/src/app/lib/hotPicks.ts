@@ -25,26 +25,48 @@ function normSport(s: string | null | undefined): string {
 }
 
 const ENDED_STATUSES = new Set(["completed", "cancelled"]);
+const DEFAULT_DURATION_MIN = 90;
 
-/** A game still worth surfacing: not ended, not cancelled. */
-export function isLiveGame(g: GameRow): boolean {
-  if (g.ended_at) return false;
-  if (g.status && ENDED_STATUSES.has(g.status)) return false;
-  return true;
+function parseTime(v: string | null | undefined): number | null {
+  if (!v) return null;
+  const t = Date.parse(v);
+  return Number.isNaN(t) ? null : t;
 }
 
 /**
- * Live games near the viewer, best-first: primary-sport overlap, then nearest
- * (RPC-provided distance_km), then fullest, then newest. Ended/cancelled games
- * are dropped so the list is only things you can actually still join.
+ * Best-effort end timestamp (ms) for a game, tolerant of legacy rows created
+ * before `ended_at`/`ends_at` existed: falls back to start + duration, and
+ * finally to created_at + duration (assume it began when created).
  */
-export function rankLiveGameRows(
+export function gameEndTimeMs(g: GameRow): number | null {
+  const durMs = (g.duration_minutes ?? DEFAULT_DURATION_MIN) * 60_000;
+  return (
+    parseTime(g.ended_at) ??
+    parseTime(g.ends_at) ??
+    (parseTime(g.starts_at) != null ? (parseTime(g.starts_at) as number) + durMs : null) ??
+    (parseTime(g.created_at) != null ? (parseTime(g.created_at) as number) + durMs : null)
+  );
+}
+
+/** A game is "ended" if cancelled/completed, or its end time has passed. */
+export function isGameEnded(g: GameRow, nowMs: number = Date.now()): boolean {
+  if (g.status && ENDED_STATUSES.has(g.status)) return true;
+  if (g.status === "live") return false; // explicitly in progress right now
+  const end = gameEndTimeMs(g);
+  return end != null && end < nowMs;
+}
+
+export function isLiveGame(g: GameRow, nowMs: number = Date.now()): boolean {
+  return !isGameEnded(g, nowMs);
+}
+
+/** Rank games best-first: sport overlap, nearest, fullest, newest. No filtering. */
+export function rankGameRows(
   games: GameRow[],
   opts: { primarySports?: string[]; limit?: number } = {},
 ): GameRow[] {
   const prim = new Set((opts.primarySports ?? []).map(normSport).filter(Boolean));
-
-  const sorted = games.filter(isLiveGame).slice().sort((a, b) => {
+  const sorted = games.slice().sort((a, b) => {
     const am = prim.size > 0 && prim.has(normSport(a.sport)) ? 1 : 0;
     const bm = prim.size > 0 && prim.has(normSport(b.sport)) ? 1 : 0;
     return (
@@ -54,8 +76,25 @@ export function rankLiveGameRows(
       (b.created_at ?? "").localeCompare(a.created_at ?? "")
     );
   });
-
   return opts.limit != null ? sorted.slice(0, opts.limit) : sorted;
+}
+
+/**
+ * Split games into live (joinable now / upcoming) and ended (over), each
+ * ordered for display: live best-first, ended most-recently-ended first.
+ */
+export function splitGamesByLiveness(
+  games: GameRow[],
+  opts: { primarySports?: string[] } = {},
+): { live: GameRow[]; ended: GameRow[] } {
+  const now = Date.now();
+  const live: GameRow[] = [];
+  const ended: GameRow[] = [];
+  for (const g of games) (isGameEnded(g, now) ? ended : live).push(g);
+  return {
+    live: rankGameRows(live, opts),
+    ended: ended.slice().sort((a, b) => (gameEndTimeMs(b) ?? 0) - (gameEndTimeMs(a) ?? 0)),
+  };
 }
 
 function optStr(v: string | null | undefined): string | null {
