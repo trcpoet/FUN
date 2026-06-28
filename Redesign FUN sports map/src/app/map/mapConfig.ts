@@ -219,6 +219,8 @@ export const MAP_LONG_PRESS_MS = 800;
 export const MAP_LONG_PRESS_MOVE_CANCEL_PX = 12;
 /** Diameter (px) of the progress ring drawn at the contact point. */
 export const MAP_LONG_PRESS_RING_SIZE_PX = 56;
+/** After a long-press completes, ignore dblclick this long so a hold doesn't also double-tap. */
+export const MAP_DOUBLE_TAP_SUPPRESS_AFTER_LONG_PRESS_MS = 300;
 
 // —— Cinematic 3D map tiers (device / motion) ———————————————————
 

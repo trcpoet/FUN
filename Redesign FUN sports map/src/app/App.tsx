@@ -710,11 +710,16 @@ export default function App() {
           onSelectVenue={setSelectedVenue}
           mapCameraRequest={mapCameraRequest}
           gamePopupRequest={gamePopupRequest}
-          onMapDoubleClick={(lat, lng, viewportPoint) => {
+          onMapLongPress={(lat, lng, viewportPoint) => {
             setCreateGameCoords({ lat, lng });
             setCreateGameAnchorPoint(viewportPoint ?? null);
             setCreateGameLocationLabel(null);
             setCreateGameOpen(true);
+          }}
+          onMapDoubleTap={(lat, lng) => {
+            // Reload venues centered on the tapped point (debounced venue fetch).
+            setMapSearchLocation({ lat, lng });
+            setMapSearchLocationName(null);
           }}
           onCreateGameAtVenue={(venue, viewportPoint) => {
             setCreateGameCoords({ lat: venue.center.lat, lng: venue.center.lng });

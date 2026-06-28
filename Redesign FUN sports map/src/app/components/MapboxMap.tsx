@@ -204,7 +204,10 @@ type MapboxMapProps = {
   userSportsmanship?: number | null;
   currentUserId?: string | null;
   /** (lat, lng, viewportPoint) when user presses-and-holds the map to create a game */
-  onMapDoubleClick?: (lat: number, lng: number, viewportPoint?: { x: number; y: number }) => void;
+  /** Long-press on empty map → open Create Game at that point. */
+  onMapLongPress?: (lat: number, lng: number, viewportPoint?: { x: number; y: number }) => void;
+  /** Double-tap on empty map → reload venues centered on that point. */
+  onMapDoubleTap?: (lat: number, lng: number) => void;
   /** Open Create Game from selected venue popup. */
   onCreateGameAtVenue?: (venue: VenueSelection, viewportPoint?: { x: number; y: number }) => void;
   /** When this value changes, map flies to user location. */
@@ -249,7 +252,8 @@ export function MapboxMap(props: MapboxMapProps) {
     joinedGameIds,
     nearbyProfiles = [],
     userSportsmanship = null,
-    onMapDoubleClick,
+    onMapLongPress,
+    onMapDoubleTap,
     onCreateGameAtVenue,
     centerOnUserTrigger,
     onVenuesFetchLoadingChange,
@@ -293,8 +297,11 @@ export function MapboxMap(props: MapboxMapProps) {
   // Press-and-hold (long-press) Create Game: progress ring (0→1) drawn at the contact point.
   const [longPress, setLongPress] = useState<{ x: number; y: number; progress: number } | null>(null);
   // Latest create-game callback, read by the long-press effect so it never re-binds canvas listeners.
-  const onMapLongPressRef = useRef(onMapDoubleClick);
-  onMapLongPressRef.current = onMapDoubleClick;
+  const onMapLongPressRef = useRef(onMapLongPress);
+  onMapLongPressRef.current = onMapLongPress;
+  const onMapDoubleTapRef = useRef(onMapDoubleTap);
+  onMapDoubleTapRef.current = onMapDoubleTap;
+  const lastLongPressAtRef = useRef(0);
   const isMobile = useIsMobile();
   const cinematicTier = useMemo(() => MapCfg.getCinematicTier(isMobile), [isMobile]);
   const cinematicTierRef = useRef(cinematicTier);
@@ -1735,9 +1742,10 @@ export function MapboxMap(props: MapboxMapProps) {
 
   // Press-and-hold anywhere on empty map → Create Game at the contact point (desktop + mobile).
   // Listeners attach to the Mapbox canvas (Mapbox owns canvas pointer events for pan/zoom).
-  // A ring fills over MAP_LONG_PRESS_MS; dragging past the move threshold hands the gesture
-  // back to Mapbox for panning. Presses on a game/venue GL feature, an HTML marker, or just
-  // after a venue/game tap are ignored.
+  // Map gestures on the empty canvas: long-press (a ring fills over MAP_LONG_PRESS_MS) → Create
+  // Game; double-tap → reload venues at that point. Dragging past the move threshold hands the
+  // gesture back to Mapbox for panning. Presses/taps on a game/venue GL feature, an HTML marker,
+  // or just after a venue/game tap are ignored.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -1785,7 +1793,7 @@ export function MapboxMap(props: MapboxMapProps) {
       const { point, lngLat } = active;
       stop();
       setLongPress(null);
-      // Clear popups/selection (same as the old double-click flow).
+      // Clear popups/selection so Create Game opens on a clean map.
       setEventPopup(null);
       setColocatedModalGames(null);
       onSelectVenue(null);
@@ -1797,6 +1805,7 @@ export function MapboxMap(props: MapboxMapProps) {
       });
       const rect = map.getContainer().getBoundingClientRect();
       const viewportPoint = { x: rect.left + point.x, y: rect.top + point.y };
+      lastLongPressAtRef.current = Date.now();
       onMapLongPressRef.current?.(lngLat.lat, lngLat.lng, viewportPoint);
     };
 
@@ -1865,11 +1874,32 @@ export function MapboxMap(props: MapboxMapProps) {
       if (active) e.preventDefault(); // suppress the long-press context menu while holding
     };
 
+    // Double-tap (distinct from long-press): reload venues at the tapped point.
+    // doubleClickZoom is disabled, so this fires without zooming.
+    const onDblClick = (e: import("mapbox-gl").MapMouseEvent) => {
+      if (!onMapDoubleTapRef.current) return;
+      // Don't fire a double-tap on the tail of a just-completed long-press.
+      if (Date.now() - lastLongPressAtRef.current < MapCfg.MAP_DOUBLE_TAP_SUPPRESS_AFTER_LONG_PRESS_MS) return;
+      // Skip just after a venue/game tap.
+      if (Date.now() - venueInteractionTsRef.current < 250) return;
+      if (Date.now() - gameInteractionTsRef.current < 250) return;
+      // Skip double-taps that land on a game/venue GL feature.
+      if (
+        blockLayers.length &&
+        map.queryRenderedFeatures([e.point.x, e.point.y] as [number, number], { layers: blockLayers })
+          .length > 0
+      ) {
+        return;
+      }
+      onMapDoubleTapRef.current(e.lngLat.lat, e.lngLat.lng);
+    };
+
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
     canvas.addEventListener("contextmenu", onContextMenu);
+    map.on("dblclick", onDblClick);
 
     return () => {
       cancel();
@@ -1878,6 +1908,7 @@ export function MapboxMap(props: MapboxMapProps) {
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
       canvas.removeEventListener("contextmenu", onContextMenu);
+      map.off("dblclick", onDblClick);
     };
   }, [mapLoaded, onSelectVenue]);
 
