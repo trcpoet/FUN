@@ -140,6 +140,7 @@ export type FeedMediaPostRow = {
   body: string | null;
   storage_path: string;
   created_at: string;
+  visibility: "public" | "squad" | "private";
 };
 
 /** Row shape returned by the `get_my_note_inbox` RPC (notes I created or commented on). */

@@ -16,7 +16,7 @@ import { Slider } from "../ui/slider";
 import { Switch } from "../ui/switch";
 import { Film, ImagePlus, Loader2 } from "lucide-react";
 import { cn } from "../ui/utils";
-import { uploadProfileFeedMedia } from "../../../lib/api";
+import { uploadProfileFeedMedia, createFeedMediaPost, type FeedPostVisibility } from "../../../lib/api";
 import { getCroppedImageFile } from "../../../lib/imageCrop";
 import type { ActivityPost, HighlightEntry } from "../../../lib/athleteProfile";
 
@@ -50,6 +50,7 @@ export function AddPostOrReelDialog({ open, onOpenChange, kind, onSave }: Props)
   const [captionOrTitle, setCaptionOrTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [visibility, setVisibility] = useState<FeedPostVisibility>("public");
 
   const [squareCrop, setSquareCrop] = useState(true);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -73,6 +74,7 @@ export function AddPostOrReelDialog({ open, onOpenChange, kind, onSave }: Props)
     setCaptionOrTitle("");
     setSaving(false);
     setError(null);
+    setVisibility("public");
     resetCropState();
   }, [open, kind, resetCropState]);
 
@@ -139,11 +141,21 @@ export function AddPostOrReelDialog({ open, onOpenChange, kind, onSave }: Props)
       }
 
       const folder = kind === "post" ? "posts" : "reels";
-      const { url, error: upErr } = await uploadProfileFeedMedia(uploadFile, folder);
+      const { url, path, error: upErr } = await uploadProfileFeedMedia(uploadFile, folder);
       if (upErr || !url) throw new Error(upErr?.message ?? "Upload failed");
 
       const mediaKind = uploadFile.type.startsWith("video/") ? ("video" as const) : ("image" as const);
       const text = captionOrTitle.trim();
+
+      // Publish to the shared feed (feed_media_posts) with the chosen audience.
+      if (path) {
+        const { error: feedErr } = await createFeedMediaPost({
+          storagePath: path,
+          body: text,
+          visibility,
+        });
+        if (feedErr) console.error("Feed publish failed:", feedErr.message);
+      }
       const baseName = file.name.replace(/\.[^.]+$/, "") || (kind === "post" ? "Post" : "Reel");
 
       if (kind === "post") {
@@ -291,6 +303,34 @@ export function AddPostOrReelDialog({ open, onOpenChange, kind, onSave }: Props)
                 className="bg-slate-900/80 border-white/10 text-white placeholder:text-slate-600"
               />
             )}
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-slate-400">Audience</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {(["public", "squad", "private"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setVisibility(v)}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-xs font-semibold capitalize transition-colors",
+                    visibility === v
+                      ? "border-emerald-500/60 bg-emerald-600/20 text-white"
+                      : "border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]",
+                  )}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              {visibility === "public"
+                ? "Anyone — unless your profile is private, then just your squad."
+                : visibility === "squad"
+                  ? "Only your squad (mutual or approved follows)."
+                  : "Only you."}
+            </p>
           </div>
 
           {error && <p className="text-xs text-amber-400">{error}</p>}
