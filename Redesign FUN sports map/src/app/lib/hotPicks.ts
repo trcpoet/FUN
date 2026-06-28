@@ -148,6 +148,6 @@ export function rankHotPickVenues(
 /** Distance formatted for compact rows. */
 export function formatKm(km: number | null | undefined): string | null {
   if (km == null) return null;
-  if (km < 1) return "<1 km";
+  if (km < 1) return `${Math.round(km * 1000)} m`;
   return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
 }

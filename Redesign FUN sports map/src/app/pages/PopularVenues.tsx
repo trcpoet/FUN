@@ -4,6 +4,8 @@ import { ArrowLeft, Clock, Globe, Loader2, MapPin } from "lucide-react";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import { fetchSportsVenuesFromDb } from "../lib/sportsVenues";
 import { rankHotPickVenues, formatKm, type HotPickVenue } from "../lib/hotPicks";
+import { sportEmoji } from "../../lib/sportVisuals";
+import { reverseGeocodeLabel } from "../../lib/geocoding";
 import { cn } from "../components/ui/utils";
 import { glassMessengerPage } from "../styles/glass";
 
@@ -26,8 +28,23 @@ export default function PopularVenues() {
   const [venues, setVenues] = useState<HotPickVenue[]>([]);
   const [loading, setLoading] = useState(false);
   const [reachedEnd, setReachedEnd] = useState(false);
+  const [placeLabel, setPlaceLabel] = useState<string | null>(null);
   const prevCountRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!coords) {
+      setPlaceLabel(null);
+      return;
+    }
+    let cancelled = false;
+    void reverseGeocodeLabel(coords.lat, coords.lng).then((l) => {
+      if (!cancelled) setPlaceLabel(l);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [coords?.lat, coords?.lng]);
 
   // Fetch (and re-rank) every time the search radius grows.
   useEffect(() => {
@@ -107,7 +124,7 @@ export default function PopularVenues() {
             <div className="mt-1 flex items-center gap-1.5">
               <MapPin className="size-3 text-blue-400" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                Places to play near you
+                Near {placeLabel ?? "you"}
               </span>
             </div>
           </div>
@@ -152,9 +169,22 @@ export default function PopularVenues() {
                       onClick={() => navigate(`/?focusVenueId=${encodeURIComponent(v.id)}`)}
                       className="flex w-full items-center gap-4 rounded-3xl border border-white/[0.08] bg-white/[0.02] p-4 text-left transition-all hover:border-blue-500/30 hover:bg-white/[0.04]"
                     >
-                      <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
-                        <MapPin className="size-5" />
-                      </span>
+                      {v.heroImageUrl ? (
+                        <img
+                          src={v.heroImageUrl}
+                          alt=""
+                          loading="lazy"
+                          className="size-12 shrink-0 rounded-2xl object-cover"
+                        />
+                      ) : v.sport ? (
+                        <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-2xl">
+                          {sportEmoji(v.sport)}
+                        </span>
+                      ) : (
+                        <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
+                          <MapPin className="size-5" />
+                        </span>
+                      )}
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-bold text-white">{v.name}</span>
                         <span className="mt-0.5 block truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

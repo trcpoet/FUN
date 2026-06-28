@@ -7,6 +7,7 @@ import { getGamesNearby } from "../../lib/api";
 import type { GameRow } from "../../lib/supabase";
 import { splitGamesByLiveness, formatKm } from "../lib/hotPicks";
 import { sportEmoji } from "../../lib/sportVisuals";
+import { reverseGeocodeLabel } from "../../lib/geocoding";
 import { cn } from "../components/ui/utils";
 import { glassMessengerPage } from "../styles/glass";
 
@@ -125,6 +126,7 @@ export default function RecommendedGames() {
   const [loaded, setLoaded] = useState(false);
   const [openLive, setOpenLive] = useState(true);
   const [openEnded, setOpenEnded] = useState(false);
+  const [placeLabel, setPlaceLabel] = useState<string | null>(null);
 
   useEffect(() => {
     if (!coords) return;
@@ -140,6 +142,20 @@ export default function RecommendedGames() {
           setLoaded(true);
         }
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [coords?.lat, coords?.lng]);
+
+  useEffect(() => {
+    if (!coords) {
+      setPlaceLabel(null);
+      return;
+    }
+    let cancelled = false;
+    void reverseGeocodeLabel(coords.lat, coords.lng).then((l) => {
+      if (!cancelled) setPlaceLabel(l);
+    });
     return () => {
       cancelled = true;
     };
@@ -176,7 +192,7 @@ export default function RecommendedGames() {
             <div className="mt-1 flex items-center gap-1.5">
               <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                Games near you · {SEARCH_RADIUS_KM} km
+                Near {placeLabel ?? "you"} · {SEARCH_RADIUS_KM} km
               </span>
             </div>
           </div>
