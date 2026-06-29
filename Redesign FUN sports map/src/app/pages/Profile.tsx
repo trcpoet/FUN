@@ -343,7 +343,8 @@ export default function Profile() {
                   const err = await updateProfile({ athlete_profile: nextProfile });
                   if (err) throw new Error(err.message);
 
-                  await upsertMyStatus(text);
+                  const statusErr = await upsertMyStatus(text);
+                  if (statusErr) console.error("Status save failed:", statusErr.message);
                   setStatusText(text);
                   await refetch();
                 }}
@@ -494,7 +495,8 @@ export default function Profile() {
             const profileErr = await updateProfile({ athlete_profile: nextProfile });
             if (profileErr) throw new Error(profileErr.message);
 
-            await upsertMyStatus(post.caption);
+            const statusErr = await upsertMyStatus(post.caption);
+            if (statusErr) console.error("Status save failed:", statusErr.message);
             setStatusText(post.caption);
             await refetch();
           }}

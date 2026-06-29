@@ -92,3 +92,38 @@ export async function forwardGeocodeSearch(
     return [];
   }
 }
+
+const reverseCache = new Map<string, { at: number; label: string | null }>();
+
+/**
+ * Reverse geocode a point to a short place label (e.g. "Arlington, Texas") so a
+ * page can show which location it is searching near. Cached + abortable.
+ */
+export async function reverseGeocodeLabel(
+  lat: number,
+  lng: number,
+  options?: { signal?: AbortSignal }
+): Promise<string | null> {
+  if (!MAPBOX_TOKEN) return null;
+  const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+  const hit = reverseCache.get(key);
+  if (hit && Date.now() - hit.at < PLACE_QUERY_CACHE_TTL_MS) return hit.label;
+
+  const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json`);
+  url.searchParams.set("access_token", MAPBOX_TOKEN);
+  url.searchParams.set("types", "place,locality,neighborhood");
+  url.searchParams.set("limit", "1");
+
+  try {
+    const res = await fetch(url.toString(), { signal: options?.signal });
+    if (options?.signal?.aborted || !res.ok) return null;
+    const data = await res.json();
+    const feat = (data.features as Array<{ place_name?: string; text?: string }> | undefined)?.[0];
+    const full = feat?.place_name?.trim() || null;
+    const label = full ? full.split(",").slice(0, 2).join(",").trim() : feat?.text?.trim() || null;
+    reverseCache.set(key, { at: Date.now(), label });
+    return label;
+  } catch {
+    return null;
+  }
+}

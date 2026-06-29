@@ -18,6 +18,8 @@ const Onboarding = lazy(() => import("./app/pages/Onboarding.tsx"));
 const Profile = lazy(() => import("./app/pages/Profile.tsx"));
 const PublicProfile = lazy(() => import("./app/pages/PublicProfile.tsx"));
 const Feed = lazy(() => import("./app/pages/Feed.tsx"));
+const RecommendedGames = lazy(() => import("./app/pages/RecommendedGames.tsx"));
+const PopularVenues = lazy(() => import("./app/pages/PopularVenues.tsx"));
 const RedeemInvite = lazy(() => import("./app/pages/RedeemInvite.tsx"));
 
 function RouteFallback() {
@@ -100,6 +102,8 @@ createRoot(document.getElementById("root")!).render(
               }
             />
             <Route path="/feed" element={<Feed />} />
+            <Route path="/feed/games" element={<RecommendedGames />} />
+            <Route path="/feed/venues" element={<PopularVenues />} />
             <Route path="/athlete/:userId" element={<PublicProfile />} />
             <Route path="/g/:token" element={<RedeemInvite />} />
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -9,6 +9,7 @@ import {
   Users,
   Search,
   ChevronRight,
+  ArrowUpRight,
   MapPin,
   Flame,
   Loader2,
@@ -252,10 +253,18 @@ export default function Feed() {
     });
   }, [coords?.lat, coords?.lng, user?.id]);
 
+  // Games live on the Recommended Games page; Explore/Feed stay social-only
+  // (notes, statuses, photos & reels). Filter games out of the network stream.
   const mergedGlobal = useMemo(
-    () => mergeGlobalNetworkChronological(coords ? unified : [], mediaPosts),
+    () =>
+      mergeGlobalNetworkChronological(
+        coords ? unified.filter((it) => it.kind !== "game") : [],
+        mediaPosts,
+      ),
     [coords, unified, mediaPosts],
   );
+
+  const liveNotes = useMemo(() => liveItems.filter((it) => it.kind === "note"), [liveItems]);
 
   const globalStreamLoading = (coords ? unifiedLoading : false) || mediaLoading;
 
@@ -325,7 +334,7 @@ export default function Feed() {
                   <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                     {tab === "activity"
-                      ? "Feed · Live games near you"
+                      ? "Feed · Map notes near you"
                       : "Explore · Global network"}
                   </span>
                 </div>
@@ -407,6 +416,57 @@ export default function Feed() {
               </button>
             </div>
 
+            {/* Hot Picks — quick entry to the dedicated pages */}
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 px-1">
+                <div className="flex size-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Flame className="size-4" />
+                </div>
+                <h2 className="text-sm font-black uppercase tracking-widest text-white">Hot Picks</h2>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => navigate("/feed/games")}
+                  className="group relative h-48 overflow-hidden rounded-[32px] border border-white/[0.08] bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-[0_20px_40px_-15px_rgba(225,29,72,0.18)]"
+                >
+                  <div className="absolute top-0 right-0 p-4 opacity-10 transition-opacity group-hover:opacity-30">
+                    <Compass className="size-24 -rotate-12" />
+                  </div>
+                  <div className="relative flex h-full flex-col justify-between">
+                    <div>
+                      <Badge className="mb-3 border-none bg-primary/20 text-[9px] font-black uppercase tracking-[0.2em] text-primary">For you</Badge>
+                      <h3 className="text-xl font-black italic uppercase leading-none tracking-tighter text-white">Recommended<br/>Games</h3>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-xs font-bold text-muted-foreground transition-colors group-hover:text-white">
+                      <span>Live games near you</span>
+                      <span className="flex size-8 items-center justify-center rounded-full bg-primary/15 text-primary transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"><ArrowUpRight className="size-4" /></span>
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigate("/feed/venues")}
+                  className="group relative h-48 overflow-hidden rounded-[32px] border border-white/[0.08] bg-card p-6 text-left transition-all hover:border-blue-500/40 hover:shadow-[0_20px_40px_-15px_rgba(37,99,235,0.18)]"
+                >
+                  <div className="absolute top-0 right-0 p-4 opacity-10 transition-opacity group-hover:opacity-30">
+                    <MapPin className="size-24 -rotate-12 text-blue-500" />
+                  </div>
+                  <div className="relative flex h-full flex-col justify-between">
+                    <div>
+                      <Badge className="mb-3 border-none bg-blue-500/20 text-[9px] font-black uppercase tracking-[0.2em] text-blue-500">Near you</Badge>
+                      <h3 className="text-xl font-black italic uppercase leading-none tracking-tighter text-white">Popular<br/>Venues</h3>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-xs font-bold text-muted-foreground transition-colors group-hover:text-white">
+                      <span>Places to play near you</span>
+                      <span className="flex size-8 items-center justify-center rounded-full bg-blue-500/15 text-blue-400 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"><ArrowUpRight className="size-4" /></span>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </section>
+
             {/* Global network: games, notes, statuses, photos & reels */}
             <section className="space-y-4">
               <div className="flex items-center justify-between px-1 gap-3">
@@ -442,48 +502,6 @@ export default function Feed() {
                 </ul>
               )}
             </section>
-
-            {/* Recommendations Grid */}
-            <section className="space-y-4">
-              <div className="flex items-center gap-2 px-1">
-                <div className="flex size-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <Flame className="size-4" />
-                </div>
-                <h2 className="text-sm font-black uppercase tracking-widest text-white">Hot Picks</h2>
-              </div>
-              
-              <div className="grid gap-4 sm:grid-cols-2">
-                <button className="group relative h-48 overflow-hidden rounded-[32px] border border-white/[0.08] bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-[0_20px_40px_-15px_rgba(225,29,72,0.15)]">
-                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity">
-                    <Compass className="size-24 -rotate-12" />
-                  </div>
-                  <div className="relative h-full flex flex-col justify-between">
-                    <div>
-                      <Badge className="bg-primary/20 text-primary border-none text-[9px] font-black uppercase tracking-[0.2em] mb-3">AI Choice</Badge>
-                      <h3 className="text-xl font-black italic tracking-tighter text-white uppercase leading-none">Recommended<br/>Games</h3>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground group-hover:text-white transition-colors">
-                      Explore Personalized Runs <ChevronRight className="size-4 text-primary" />
-                    </div>
-                  </div>
-                </button>
-
-                <button className="group relative h-48 overflow-hidden rounded-[32px] border border-white/[0.08] bg-card p-6 text-left transition-all hover:border-blue-500/40 hover:shadow-[0_20px_40px_-15px_rgba(37,99,235,0.15)]">
-                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity">
-                    <MapPin className="size-24 -rotate-12 text-blue-500" />
-                  </div>
-                  <div className="relative h-full flex flex-col justify-between">
-                    <div>
-                      <Badge className="bg-blue-500/20 text-blue-500 border-none text-[9px] font-black uppercase tracking-[0.2em] mb-3">Trending</Badge>
-                      <h3 className="text-xl font-black italic tracking-tighter text-white uppercase leading-none">Popular<br/>Venues</h3>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground group-hover:text-white transition-colors">
-                      See where the energy is <ChevronRight className="size-4 text-blue-500" />
-                    </div>
-                  </div>
-                </button>
-              </div>
-            </section>
           </div>
         )}
 
@@ -500,7 +518,7 @@ export default function Feed() {
                 ) : null}
               </div>
               <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">
-                Live games and map notes within 25 km — global stream is on Explore
+                Map notes within 25 km — games live on Recommended Games
               </p>
             </section>
 
@@ -510,43 +528,32 @@ export default function Feed() {
                   <MapPin className="size-4" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-black uppercase tracking-widest text-white">Live games near you</h2>
+                  <h2 className="text-sm font-black uppercase tracking-widest text-white">Map notes near you</h2>
                   <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
-                    Games & map notes · 25 km
+                    Map notes · 25 km
                   </p>
                 </div>
               </div>
               {!coords ? (
                 <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90">
-                  Turn on location to load nearby games and notes.
+                  Turn on location to load nearby map notes.
                 </div>
               ) : liveLoading ? (
                 <LiveSectionSkeleton />
-              ) : liveItems.length === 0 ? (
-                <p className="text-xs text-slate-500 px-1">No games or notes in range yet.</p>
+              ) : liveNotes.length === 0 ? (
+                <p className="text-xs text-slate-500 px-1">No map notes in range yet.</p>
               ) : (
                 <ul className="grid gap-6">
-                  {liveItems.map((it) =>
-                    it.kind === "note" ? (
-                      <li key={`feed-note:${it.id}`}>
-                        <NoteFeedCard
-                          item={it}
-                          currentUserId={user?.id ?? null}
-                          onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
-                          onInvalidate={refreshFeeds}
-                        />
-                      </li>
-                    ) : (
-                      <li key={`feed-game:${it.id}`}>
-                        <GameFeedCard
-                          item={it}
-                          currentUserId={user?.id ?? null}
-                          onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
-                          onInvalidate={refreshFeeds}
-                        />
-                      </li>
-                    ),
-                  )}
+                  {liveNotes.map((it) => (
+                    <li key={`feed-note:${it.id}`}>
+                      <NoteFeedCard
+                        item={it}
+                        currentUserId={user?.id ?? null}
+                        onOpenOnMap={() => navigate(`/?focusNoteId=${encodeURIComponent(it.id)}`)}
+                        onInvalidate={refreshFeeds}
+                      />
+                    </li>
+                  ))}
                 </ul>
               )}
             </section>
