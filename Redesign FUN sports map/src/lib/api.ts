@@ -384,7 +384,7 @@ export async function fetchRecentFeedMediaPosts(limit = 12): Promise<{ data: Fee
   if (!supabase) return { data: [], error: new Error("Supabase not configured") };
   const { data, error } = await supabase
     .from("feed_media_posts")
-    .select("id, user_id, body, storage_path, created_at")
+    .select("id, user_id, body, storage_path, created_at, visibility")
     .order("created_at", { ascending: false })
     .limit(limit);
   return { data: (data as FeedMediaPostRow[]) ?? [], error: error ? new Error(error.message) : null };
@@ -422,7 +422,7 @@ export async function fetchPublicFeedMediaPosts(params: {
   const cap = Math.min(Math.max(1, params.limit ?? 24), 80);
   const { data: rows, error } = await supabase
     .from("feed_media_posts")
-    .select("id, user_id, body, storage_path, created_at")
+    .select("id, user_id, body, storage_path, created_at, visibility")
     .order("created_at", { ascending: false })
     .limit(cap * 3);
 
@@ -580,12 +580,12 @@ export async function uploadProfileStoryMedia(file: File): Promise<{ url: string
 export async function uploadProfileFeedMedia(
   file: File,
   folder: "posts" | "reels"
-): Promise<{ url: string | null; error: Error | null }> {
-  if (!supabase) return { url: null, error: new Error("Supabase not configured") };
+): Promise<{ url: string | null; path: string | null; error: Error | null }> {
+  if (!supabase) return { url: null, path: null, error: new Error("Supabase not configured") };
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { url: null, error: new Error("Not signed in") };
+  if (!user) return { url: null, path: null, error: new Error("Not signed in") };
 
   const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, "_");
   const path = `feed/${folder}/${user.id}/${Date.now()}-${safeName}`;
@@ -595,10 +595,32 @@ export async function uploadProfileFeedMedia(
     upsert: false,
     contentType: file.type || undefined,
   });
-  if (uploadError) return { url: null, error: new Error(uploadError.message) };
+  if (uploadError) return { url: null, path: null, error: new Error(uploadError.message) };
 
   const { data } = supabase.storage.from("avatars").getPublicUrl(path);
-  return { url: data.publicUrl ?? null, error: null };
+  return { url: data.publicUrl ?? null, path, error: null };
+}
+
+export type FeedPostVisibility = "public" | "squad" | "private";
+
+/** Publish a media post/reel to the shared feed (`feed_media_posts`) with an audience. */
+export async function createFeedMediaPost(params: {
+  storagePath: string;
+  body?: string | null;
+  visibility?: FeedPostVisibility;
+}): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: new Error("Not signed in") };
+  const { error } = await supabase.from("feed_media_posts").insert({
+    user_id: user.id,
+    storage_path: params.storagePath,
+    body: params.body?.trim() || null,
+    visibility: params.visibility ?? "public",
+  });
+  return { error: error ? new Error(error.message) : null };
 }
 
 // —— Games ——
