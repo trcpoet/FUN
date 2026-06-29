@@ -10,18 +10,15 @@ import { supabase } from "./supabase";
  * Deduping in-flight calls eliminates the contention without changing auth behavior.
  */
 
-let inFlightUser: Promise<User | null> | null = null;
+/**
+ * Current user from the LOCAL session (no `/auth/v1/user` network round-trip).
+ * Server-side RLS re-validates auth on every request, so the local session user
+ * is correct for client logic — and this avoids the slow serialized getUser()
+ * burst on mount that was delaying the feed. Deduped via getAuthSessionDeduped.
+ */
 export async function getAuthUserDeduped(): Promise<User | null> {
-  if (!supabase) return null;
-  if (inFlightUser) return inFlightUser;
-  inFlightUser = supabase.auth
-    .getUser()
-    .then(({ data }) => data.user ?? null)
-    .catch(() => null)
-    .finally(() => {
-      inFlightUser = null;
-    });
-  return inFlightUser;
+  const session = await getAuthSessionDeduped();
+  return session?.user ?? null;
 }
 
 let inFlightSession: Promise<Session | null> | null = null;
