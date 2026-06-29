@@ -28,7 +28,7 @@ import type {
 import type { VenueSelection } from "../app/components/mapboxMapTypes";
 import { venueSelectionFromDbRow } from "../app/lib/venueSelection";
 import { cachedAsync, cacheClear } from "./requestCache";
-import { getAuthUserDeduped } from "./authDedup";
+import { getAuthUserDeduped, getAuthUserIdCached } from "./authDedup";
 
 const DEFAULT_RADIUS_KM = 15;
 const DEFAULT_PROFILES_LIMIT = 50;
@@ -433,7 +433,7 @@ export async function fetchPublicFeedMediaPosts(params: {
   const userIds = [...new Set(list.map((r) => r.user_id))];
   const { data: profiles, error: profErr } = await supabase
     .from("profiles")
-    .select("id, athlete_profile")
+    .select("id, athlete_profile, avatar_url, display_name")
     .in("id", userIds);
 
   if (profErr || !profiles?.length) {
@@ -442,14 +442,27 @@ export async function fetchPublicFeedMediaPosts(params: {
 
   const viewer = params.viewerUserId?.trim() ?? null;
   const privateByUser = new Map<string, boolean>();
-  for (const row of profiles as { id: string; athlete_profile?: unknown }[]) {
+  const authorByUser = new Map<string, { name: string | null; avatarUrl: string | null }>();
+  for (const row of profiles as {
+    id: string;
+    athlete_profile?: unknown;
+    avatar_url?: string | null;
+    display_name?: string | null;
+  }[]) {
     privateByUser.set(row.id, Boolean(parseAthleteProfile(row.athlete_profile).is_private));
+    authorByUser.set(row.id, { name: row.display_name ?? null, avatarUrl: row.avatar_url ?? null });
   }
 
-  const filtered = list.filter((r) => {
-    if (viewer && r.user_id === viewer) return true;
-    return !privateByUser.get(r.user_id);
-  });
+  const filtered = list
+    .filter((r) => {
+      if (viewer && r.user_id === viewer) return true;
+      return !privateByUser.get(r.user_id);
+    })
+    .map((r) => ({
+      ...r,
+      authorName: authorByUser.get(r.user_id)?.name ?? null,
+      authorAvatarUrl: authorByUser.get(r.user_id)?.avatarUrl ?? null,
+    }));
 
   return { data: filtered.slice(0, cap), error: null };
 }
@@ -952,11 +965,11 @@ export async function unfollowUser(userId: string): Promise<{ error: Error | nul
  */
 export async function migrateLocalFollowsToDb(localIds: Set<string>): Promise<Set<string>> {
   if (!supabase) return localIds;
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return localIds;
+  const userId = await getAuthUserIdCached();
+  if (!userId) return localIds;
   const toInsert = [...localIds]
-    .filter((id) => id && id !== user.id)
-    .map((id) => ({ follower_id: user.id, followed_id: id }));
+    .filter((id) => id && id !== userId)
+    .map((id) => ({ follower_id: userId, followed_id: id }));
   if (toInsert.length > 0) {
     await supabase
       .from("user_follows")
@@ -965,7 +978,7 @@ export async function migrateLocalFollowsToDb(localIds: Set<string>): Promise<Se
   const { data } = await supabase
     .from("user_follows")
     .select("followed_id")
-    .eq("follower_id", user.id);
+    .eq("follower_id", userId);
   return new Set((data ?? []).map((r) => r.followed_id as string));
 }
 

@@ -17,7 +17,7 @@ import { Switch } from "../ui/switch";
 import { Film, ImagePlus, Loader2 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { uploadProfileFeedMedia, createFeedMediaPost, type FeedPostVisibility } from "../../../lib/api";
-import { getCroppedImageFile } from "../../../lib/imageCrop";
+import { getCroppedImageFile, resizeImageFile } from "../../../lib/imageCrop";
 import type { ActivityPost, HighlightEntry } from "../../../lib/athleteProfile";
 
 export type AddFeedKind = "post" | "reel";
@@ -137,6 +137,13 @@ export function AddPostOrReelDialog({ open, onOpenChange, kind, onSave }: Props)
         uploadFile = await getCroppedImageFile(previewUrl, croppedPixelsRef.current, file.name, {
           maxEdge: 1920,
           mimeType: outputMime(file.type),
+        });
+      } else if (file.type.startsWith("image/")) {
+        // Always downscale large images even without crop (avoids multi-MB uploads).
+        uploadFile = await resizeImageFile(previewUrl, file.name, {
+          maxEdge: 1600,
+          mimeType: outputMime(file.type),
+          quality: 0.82,
         });
       }
 
