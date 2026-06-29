@@ -15,6 +15,7 @@ import { formatDistanceToNow } from "date-fns";
 import { cn } from "../ui/utils";
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
+import { PostEngagementBar } from "./PostEngagementBar";
 import {
   addNoteComment,
   addStatusComment,
@@ -640,6 +641,8 @@ export function MediaFeedCard(props: {
             />
           )}
         </div>
+
+        <PostEngagementBar postId={item.id} shareUrl={url} caption={item.body} />
 
         {onOpenProfile ? (
           <button
