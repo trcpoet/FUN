@@ -66,3 +66,18 @@ export async function getCroppedImageFile(
   const base = outputName.replace(/\.[^.]+$/, "") || "image";
   return new File([blob], `${base}.${ext}`, { type: mime });
 }
+
+/** Downscale (no crop) so the longest edge ≤ maxEdge — keeps feed uploads small. */
+export async function resizeImageFile(
+  imageSrc: string,
+  outputName: string,
+  opts?: { maxEdge?: number; mimeType?: string; quality?: number }
+): Promise<File> {
+  const image = await loadImage(imageSrc);
+  return getCroppedImageFile(
+    imageSrc,
+    { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight },
+    outputName,
+    opts
+  );
+}

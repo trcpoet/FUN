@@ -588,16 +588,27 @@ export function MediaFeedCard(props: {
       <div className="p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="flex size-9 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-300 border border-sky-400/10">
-              {variant === "reel" ? <Clapperboard className="size-4" /> : <ImageIcon className="size-4" />}
-            </div>
+            {item.authorAvatarUrl ? (
+              <img
+                src={item.authorAvatarUrl}
+                alt=""
+                loading="lazy"
+                className="size-9 shrink-0 rounded-2xl border border-sky-400/10 object-cover"
+              />
+            ) : (
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-300 border border-sky-400/10">
+                {variant === "reel" ? <Clapperboard className="size-4" /> : <ImageIcon className="size-4" />}
+              </div>
+            )}
             <div className="space-y-0.5 min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">{label}</p>
-              <p className="text-xs font-semibold text-slate-200 line-clamp-1">{relTime(item.created_at)}</p>
+              <p className="text-xs font-bold text-white line-clamp-1">{item.authorName?.trim() || label}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 line-clamp-1">
+                {label} · {relTime(item.created_at)}
+              </p>
             </div>
           </div>
           <Badge className="bg-black/40 backdrop-blur-md border-white/10 text-[10px] font-bold uppercase tracking-wider py-0.5 px-2.5 shrink-0">
-            Public
+            {item.visibility ?? "Public"}
           </Badge>
         </div>
 
@@ -605,14 +616,14 @@ export function MediaFeedCard(props: {
           <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap break-words">{item.body.trim()}</p>
         ) : null}
 
-        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-black/40">
+        <div className="aspect-square overflow-hidden rounded-2xl border border-white/[0.08] bg-black/40">
           {!url ? (
-            <div className="flex aspect-video items-center justify-center px-4 py-10 text-center text-xs text-slate-500">
+            <div className="flex h-full items-center justify-center px-4 py-10 text-center text-xs text-slate-500">
               Media unavailable (check storage path).
             </div>
           ) : isVideo ? (
             <video
-              className="max-h-[min(70vh,520px)] w-full object-contain bg-black"
+              className="h-full w-full object-contain bg-black"
               controls
               playsInline
               preload="metadata"
@@ -623,7 +634,9 @@ export function MediaFeedCard(props: {
               src={url}
               alt=""
               loading="lazy"
-              className="max-h-[min(70vh,520px)] w-full object-contain bg-black/60"
+              width={1080}
+              height={1080}
+              className="h-full w-full object-contain bg-black/60"
             />
           )}
         </div>
