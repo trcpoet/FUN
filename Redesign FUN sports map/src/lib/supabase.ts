@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, processLock } from "@supabase/supabase-js";
 
 const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
 const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
@@ -10,7 +10,20 @@ if (!url || !anonKey) {
 }
 
 /** Trailing spaces / newlines in .env break JWT validation → REST 401. */
-export const supabase = url && anonKey ? createClient(url, anonKey) : null;
+export const supabase =
+  url && anonKey
+    ? createClient(url, anonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          // In-process lock instead of the Web Locks API: this is a single-tab SPA,
+          // and the navigator lock's 5s acquire timeout was stalling concurrent
+          // getUser()/getSession() calls on mount (NavigatorLockAcquireTimeoutError).
+          lock: processLock,
+        },
+      })
+    : null;
 
 export type GameVisibility = "public" | "friends_only" | "invite_only";
 

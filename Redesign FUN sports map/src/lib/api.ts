@@ -28,7 +28,7 @@ import type {
 import type { VenueSelection } from "../app/components/mapboxMapTypes";
 import { venueSelectionFromDbRow } from "../app/lib/venueSelection";
 import { cachedAsync, cacheClear } from "./requestCache";
-import { getAuthUserDeduped } from "./authDedup";
+import { getAuthUserDeduped, getAuthUserIdCached } from "./authDedup";
 
 const DEFAULT_RADIUS_KM = 15;
 const DEFAULT_PROFILES_LIMIT = 50;
@@ -952,11 +952,11 @@ export async function unfollowUser(userId: string): Promise<{ error: Error | nul
  */
 export async function migrateLocalFollowsToDb(localIds: Set<string>): Promise<Set<string>> {
   if (!supabase) return localIds;
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return localIds;
+  const userId = await getAuthUserIdCached();
+  if (!userId) return localIds;
   const toInsert = [...localIds]
-    .filter((id) => id && id !== user.id)
-    .map((id) => ({ follower_id: user.id, followed_id: id }));
+    .filter((id) => id && id !== userId)
+    .map((id) => ({ follower_id: userId, followed_id: id }));
   if (toInsert.length > 0) {
     await supabase
       .from("user_follows")
@@ -965,7 +965,7 @@ export async function migrateLocalFollowsToDb(localIds: Set<string>): Promise<Se
   const { data } = await supabase
     .from("user_follows")
     .select("followed_id")
-    .eq("follower_id", user.id);
+    .eq("follower_id", userId);
   return new Set((data ?? []).map((r) => r.followed_id as string));
 }
 

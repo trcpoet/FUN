@@ -38,3 +38,28 @@ export async function getAuthSessionDeduped(): Promise<Session | null> {
   return inFlightSession;
 }
 
+// A single module-level auth listener keeps the current user id fresh, so callers
+// that only need the id can avoid a per-call `auth.getUser()` network round-trip.
+let cachedUserId: string | null = null;
+let cachedUserIdReady = false;
+if (supabase) {
+  supabase.auth.onAuthStateChange((_event, session) => {
+    cachedUserId = session?.user?.id ?? null;
+    cachedUserIdReady = true;
+  });
+}
+
+/**
+ * Current user id from the local session (no network), kept fresh by the listener
+ * above. Falls back to a deduped getSession() until the first auth event lands.
+ * Prefer this over `auth.getUser()` wherever only the id is needed for client
+ * logic — RLS still enforces auth server-side.
+ */
+export async function getAuthUserIdCached(): Promise<string | null> {
+  if (cachedUserIdReady) return cachedUserId;
+  const session = await getAuthSessionDeduped();
+  cachedUserId = session?.user?.id ?? null;
+  cachedUserIdReady = true;
+  return cachedUserId;
+}
+
