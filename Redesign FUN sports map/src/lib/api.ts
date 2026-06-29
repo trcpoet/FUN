@@ -927,23 +927,62 @@ export async function fetchMyFollowedIds(): Promise<{ data: Set<string>; error: 
   const { data, error } = await supabase
     .from("user_follows")
     .select("followed_id")
-    .eq("follower_id", user.id);
+    .eq("follower_id", user.id)
+    .eq("status", "accepted");
   if (error) return { data: new Set(), error: new Error(error.message) };
   return { data: new Set((data ?? []).map((r) => r.followed_id as string)), error: null };
 }
 
-export async function followUser(userId: string): Promise<{ error: Error | null }> {
-  if (!supabase) return { error: new Error("Supabase not configured") };
-  if (!userId) return { error: new Error("Missing userId") };
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: new Error("Not signed in") };
-  if (user.id === userId) return { error: new Error("Cannot follow yourself") };
-  const { error } = await supabase
+export type FollowState = "none" | "pending" | "accepted";
+
+/** Request to follow: instant 'accepted' for public accounts, 'pending' for private. */
+export async function followUser(userId: string): Promise<{ status: FollowState | null; error: Error | null }> {
+  if (!supabase) return { status: null, error: new Error("Supabase not configured") };
+  if (!userId) return { status: null, error: new Error("Missing userId") };
+  const { data, error } = await supabase.rpc("request_follow", { p_target: userId });
+  if (error) return { status: null, error: new Error(error.message) };
+  return { status: ((data as FollowState) ?? "accepted"), error: null };
+}
+
+/** My follow relationship to a user: none / pending request / accepted. */
+export async function getMyFollowState(userId: string): Promise<FollowState> {
+  if (!supabase || !userId) return "none";
+  const uid = await getAuthUserIdCached();
+  if (!uid) return "none";
+  const { data } = await supabase
     .from("user_follows")
-    .upsert(
-      { follower_id: user.id, followed_id: userId },
-      { onConflict: "follower_id,followed_id", ignoreDuplicates: true }
-    );
+    .select("status")
+    .eq("follower_id", uid)
+    .eq("followed_id", userId)
+    .maybeSingle();
+  const s = (data as { status?: string } | null)?.status;
+  return s === "pending" ? "pending" : s === "accepted" ? "accepted" : "none";
+}
+
+export type FollowRequestRow = {
+  follower_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+};
+
+/** Incoming pending follow requests for the current user. */
+export async function fetchFollowRequests(): Promise<{ data: FollowRequestRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_follow_requests");
+  return { data: (data as FollowRequestRow[]) ?? [], error: error ? new Error(error.message) : null };
+}
+
+/** Owner accepts or rejects a pending follow request. */
+export async function respondFollowRequest(
+  followerId: string,
+  accept: boolean,
+): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.rpc("respond_follow_request", {
+    p_follower: followerId,
+    p_accept: accept,
+  });
   return { error: error ? new Error(error.message) : null };
 }
 

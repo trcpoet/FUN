@@ -19,6 +19,7 @@ import {
   PerformanceStatsStrip,
   ProfileComposerCard,
   QuickStatusPostDialog,
+  FollowRequestsSection,
   DiscoveredPeopleCarousel,
   StoriesRail,
 } from "../components/athlete-profile";
@@ -350,6 +351,8 @@ export default function Profile() {
                 }}
               />
             </div>
+
+            <FollowRequestsSection />
 
             {/* Activity Hub */}
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">

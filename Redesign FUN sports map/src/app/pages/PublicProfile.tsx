@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useAuth } from "../contexts/AuthContext";
-import { getPublicProfileById, followUser, unfollowUser } from "../../lib/api";
+import { getPublicProfileById, followUser, unfollowUser, getMyFollowState, type FollowState } from "../../lib/api";
 import type { AthleteProfilePayload } from "../../lib/athleteProfile";
 import { useIsMobile } from "../components/ui/use-mobile";
 import { ProfileHubHero, ProfileHubHeader, PostsReelsSection } from "../components/athlete-profile";
 import { cn } from "../components/ui/utils";
-import { isFollowing, toggleFollowing } from "../../lib/localFollows";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -32,7 +31,7 @@ export default function PublicProfile() {
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [athleteProfile, setAthleteProfile] = useState<AthleteProfilePayload | null>(null);
-  const [following, setFollowing] = useState(false);
+  const [followState, setFollowState] = useState<FollowState>("none");
   const [repAvg, setRepAvg] = useState<number | null>(null);
   const [repCount, setRepCount] = useState<number>(0);
   const [statusText, setStatusText] = useState<string | null>(null);
@@ -71,7 +70,9 @@ export default function PublicProfile() {
         setDisplayName(res.displayName);
         setAvatarUrl(res.avatarUrl);
         setAthleteProfile(res.athleteProfile);
-        setFollowing(isFollowing(userId));
+        void getMyFollowState(userId).then((s) => {
+          if (!cancelled) setFollowState(s);
+        });
         void getAthleteReputation(userId).then((r) => {
           if (cancelled) return;
           if (r.error || !r.data) {
@@ -99,7 +100,7 @@ export default function PublicProfile() {
   const primarySports = ap?.primarySports ?? [];
   const rating = repAvg ?? ap?.trust?.sportsmanship ?? null;
   const isPrivate = !!ap?.is_private;
-  const hideContent = isPrivate && !following;
+  const hideContent = isPrivate && followState !== "accepted";
 
   return (
     <div className="min-h-screen w-full bg-[#050505] text-white selection:bg-primary selection:text-white">
@@ -167,19 +168,30 @@ export default function PublicProfile() {
               <div className="flex items-center gap-4">
                 <Button
                   type="button"
-                  variant={following ? "outline" : "default"}
+                  variant={followState === "none" ? "default" : "outline"}
                   className={cn(
                     "h-12 px-8 rounded-2xl font-black uppercase tracking-widest text-[10px]",
-                    following ? "border-white/10 text-white" : "bg-primary text-white shadow-lg shadow-primary/20"
+                    followState === "none"
+                      ? "bg-primary text-white shadow-lg shadow-primary/20"
+                      : "border-white/10 text-white"
                   )}
                   onClick={() => {
                     if (!userId) return;
-                    const res = toggleFollowing(userId);
-                    setFollowing(res.next);
-                    void (res.next ? followUser(userId) : unfollowUser(userId));
+                    if (followState === "none") {
+                      // Optimistic: private targets become a pending request, public ones accept.
+                      setFollowState(isPrivate ? "pending" : "accepted");
+                      void followUser(userId).then((r) => setFollowState(r.status ?? "none"));
+                    } else {
+                      setFollowState("none");
+                      void unfollowUser(userId);
+                    }
                   }}
                 >
-                  {following ? "Following" : "Follow Athlete"}
+                  {followState === "accepted"
+                    ? "Following"
+                    : followState === "pending"
+                      ? "Requested"
+                      : "Follow Athlete"}
                 </Button>
                 
                 <Button

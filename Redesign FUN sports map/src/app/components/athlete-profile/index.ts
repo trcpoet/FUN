@@ -22,6 +22,7 @@ export { ProfileHubHero } from "./ProfileHubHero";
 export { PerformanceStatsStrip } from "./PerformanceStatsStrip";
 export { ProfileComposerCard } from "./ProfileComposerCard";
 export { QuickStatusPostDialog } from "./QuickStatusPostDialog";
+export { FollowRequestsSection } from "./FollowRequestsSection";
 export { PostGrid, PinnedProfileRibbon } from "./PostGrid";
 export { AboutSheet } from "./AboutSheet";
 export { DiscoveredPeopleCarousel } from "./DiscoveredPeopleCarousel";
