@@ -45,7 +45,9 @@ async function forwardToApiHandler(
   response.headers.forEach((value, key) => {
     res.setHeader(key, value);
   });
-  res.end(await response.text());
+  // Pass the raw bytes through unchanged. `response.text()` UTF-8-decodes the body,
+  // which corrupts binary responses (e.g. /api/venue-photo image bytes → replacement chars).
+  res.end(Buffer.from(await response.arrayBuffer()));
 }
 
 type OsmEl = {
