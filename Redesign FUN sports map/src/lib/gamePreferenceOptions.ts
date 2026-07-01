@@ -1,6 +1,7 @@
 /** Options for optional "who should join" fields on create-game (not map filters). */
 
 import type { GameVisibility } from "./supabase";
+import { resolveCatalogSport } from "./sportsCatalog";
 
 export const LEVEL_OPTIONS = ["Any", "Beginner", "Intermediate", "Advanced", "Competitive"] as const;
 export const AGE_RANGE_OPTIONS = ["Any", "13–17", "18–24", "25–34", "35–44", "45+"] as const;
@@ -100,17 +101,41 @@ export function ageRangesOverlap(a: string, b: string): boolean {
 export const MIN_DURATION_MIN = 15;
 export const MAX_DURATION_MIN = 480;
 
-/** Sport-aware preset chips for the create-game Duration field. */
+/** Default duration presets (minutes) per sport category. */
+const CATEGORY_DURATIONS: Record<string, number[]> = {
+  court: [60, 90],
+  field: [90, 120, 180],
+  fitness: [30, 45, 60],
+  combat: [60, 90],
+  water: [45, 60, 90],
+  wheels: [60, 90, 120],
+  ice: [60, 90],
+  target: [60, 90],
+  climb: [60, 90, 120],
+  adventure: [60, 90, 120],
+  mind: [30, 60, 90],
+};
+
+/** Sport-aware preset chips for the create-game Duration field (registry-driven). */
 export function durationPresetsForSport(sport: string | null | undefined): number[] {
-  const s = (sport ?? "").trim().toLowerCase();
-  if (s === "basketball" || s === "soccer") return [60, 90, 120];
-  if (s === "football" || s === "american football") return [90, 120, 180];
-  if (s === "volleyball" || s === "tennis" || s === "table tennis" || s === "badminton") return [60, 90];
-  if (s === "running" || s === "jogging" || s === "track") return [30, 45, 60];
-  if (s === "baseball" || s === "softball" || s === "cricket") return [120, 150, 180];
-  if (s === "hockey" || s === "ice hockey" || s === "field hockey") return [60, 90, 120];
-  if (s === "yoga" || s === "pilates" || s === "stretching") return [30, 45, 60];
-  if (s === "cycling" || s === "climbing" || s === "hiking") return [60, 90, 120];
+  const def = resolveCatalogSport(sport);
+  // A few tuned overrides that differ from their category default.
+  switch (def?.mapboxSuffix) {
+    case "basketball":
+    case "soccer":
+      return [60, 90, 120];
+    case "football":
+      return [90, 120, 180];
+    case "baseball":
+    case "softball":
+    case "cricket":
+      return [120, 150, 180];
+    case "running":
+    case "endurance":
+    case "speed":
+      return [30, 45, 60];
+  }
+  if (def) return CATEGORY_DURATIONS[def.category] ?? [60, 90, 120];
   return [60, 90, 120];
 }
 

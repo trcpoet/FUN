@@ -1,10 +1,8 @@
 import React, { useMemo } from "react";
 import { cn } from "./ui/utils";
-import { SPORT_OPTIONS } from "../../lib/sports";
+import { POPULAR_SPORT_LABELS } from "../../lib/sportsCatalog";
 import { sportEmoji } from "../../lib/sportVisuals";
 import type { VenueSportIntent } from "../lib/venueSportIntent";
-
-const SLIDER_SPORTS = ["Basketball", "Soccer", "Tennis", "Volleyball", "Pickleball", "Running", "Gym"] as const;
 
 type VenueSportSliderProps = {
   value: VenueSportIntent;
@@ -17,10 +15,7 @@ type VenueSportSliderProps = {
  * `null` = All Sports.
  */
 export function VenueSportSlider({ value, onChange, className }: VenueSportSliderProps) {
-  const items = useMemo(() => {
-    const core = SLIDER_SPORTS.filter((s) => (SPORT_OPTIONS as readonly string[]).includes(s));
-    return [...core, null] as const;
-  }, []);
+  const items = useMemo(() => [...POPULAR_SPORT_LABELS, null], []);
 
   return (
     <div

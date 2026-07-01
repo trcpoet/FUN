@@ -1,9 +1,13 @@
 /**
  * Sport → Mapbox icon id + display emoji for rasterized game markers.
- * Venues stay separate (subtle GL layers); only *games* use these ids via addImage + symbol layer.
+ * Derived from the sport registry (`src/lib/sportsCatalog.ts`). Venues stay separate
+ * (subtle GL layers); only *games* use these ids via addImage + symbol layer.
  *
- * Tuning: add rows here to support new sports; unknown sports fall back to `other`.
+ * To support a new sport, add a row to `SPORTS_CATALOG` — pins register automatically.
+ * Unknown sports fall back to `other`.
  */
+
+import { SPORTS_CATALOG, OTHER_SPORT, resolveCatalogSport } from "../../lib/sportsCatalog";
 
 export type SportIconEntry = {
   mapboxSuffix: string;
@@ -14,39 +18,19 @@ export type SportIconEntry = {
 const PREFIX = "fun-game-sport-";
 
 const SPORT_ICON_ROWS: SportIconEntry[] = [
-  { mapboxSuffix: "basketball", emoji: "🏀", aliases: ["basketball"] },
-  { mapboxSuffix: "soccer", emoji: "⚽", aliases: ["soccer", "association football"] },
-  { mapboxSuffix: "football", emoji: "🏈", aliases: ["football", "american football"] },
-  { mapboxSuffix: "volleyball", emoji: "🏐", aliases: ["volleyball"] },
-  { mapboxSuffix: "tennis", emoji: "🎾", aliases: ["tennis"] },
-  { mapboxSuffix: "pickleball", emoji: "🏓", aliases: ["pickleball"] },
-  { mapboxSuffix: "baseball", emoji: "⚾", aliases: ["baseball"] },
-  { mapboxSuffix: "cricket", emoji: "🏏", aliases: ["cricket"] },
-  { mapboxSuffix: "badminton", emoji: "🏸", aliases: ["badminton"] },
-  { mapboxSuffix: "futsal", emoji: "⚽", aliases: ["futsal", "indoor soccer"] },
-  { mapboxSuffix: "running", emoji: "🏃", aliases: ["running", "track"] },
-  { mapboxSuffix: "gym", emoji: "🏋️", aliases: ["gym", "fitness", "workout"] },
-  { mapboxSuffix: "other", emoji: "🎯", aliases: ["other", "pickup"] },
+  ...SPORTS_CATALOG.map((s) => ({
+    mapboxSuffix: s.mapboxSuffix,
+    emoji: s.emoji,
+    aliases: [s.id.toLowerCase(), ...(s.aliases ?? [])],
+  })),
+  { mapboxSuffix: OTHER_SPORT.mapboxSuffix, emoji: OTHER_SPORT.emoji, aliases: [...OTHER_SPORT.aliases] },
 ];
-
-/** alias (lowercase) → mapboxSuffix */
-const ALIAS_TO_SUFFIX = new Map<string, string>();
-for (const row of SPORT_ICON_ROWS) {
-  for (const a of row.aliases ?? []) {
-    ALIAS_TO_SUFFIX.set(a.trim().toLowerCase(), row.mapboxSuffix);
-  }
-}
 
 /**
  * Resolve backend/UI sport label to a registered suffix (e.g. "Soccer" → "soccer", unknown → "other").
  */
 export function resolveSportMapboxSuffix(sport: string): string {
-  const raw = sport.trim().toLowerCase();
-  if (!raw) return "other";
-  const viaAlias = ALIAS_TO_SUFFIX.get(raw);
-  if (viaAlias) return viaAlias;
-  if (SPORT_ICON_ROWS.some((r) => r.mapboxSuffix === raw)) return raw;
-  return "other";
+  return resolveCatalogSport(sport)?.mapboxSuffix ?? OTHER_SPORT.mapboxSuffix;
 }
 
 export function normalizeSportKey(sport: string): string {
@@ -59,8 +43,7 @@ export function getGameMapboxIconId(sport: string): string {
 }
 
 export function getSportIconEmoji(sport: string): string {
-  const suf = resolveSportMapboxSuffix(sport);
-  return SPORT_ICON_ROWS.find((r) => r.mapboxSuffix === suf)?.emoji ?? "🎯";
+  return resolveCatalogSport(sport)?.emoji ?? OTHER_SPORT.emoji;
 }
 
 /** For getGameMarkerStyle / docs — status ring colors (circle stroke under icon). */

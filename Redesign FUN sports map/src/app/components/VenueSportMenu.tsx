@@ -2,11 +2,9 @@ import React, { useMemo } from "react";
 import { MapPinned } from "lucide-react";
 import { cn } from "./ui/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { SPORT_OPTIONS } from "../../lib/sports";
+import { POPULAR_SPORT_LABELS } from "../../lib/sportsCatalog";
 import { sportEmoji } from "../../lib/sportVisuals";
 import type { VenueSportIntent } from "../lib/venueSportIntent";
-
-const MENU_SPORTS = ["Basketball", "Soccer", "Tennis", "Volleyball", "Pickleball", "Running", "Gym"] as const;
 
 const TRIGGER_BTN =
   "relative w-10 h-10 rounded-full shrink-0 flex items-center justify-center transition-all duration-200 " +
@@ -23,10 +21,7 @@ type VenueSportMenuProps = {
 
 /** Compact courts/venues sport picker — right-rail dropdown (replaces center slider). */
 export function VenueSportMenu({ value, onChange, className }: VenueSportMenuProps) {
-  const items = useMemo(() => {
-    const core = MENU_SPORTS.filter((s) => (SPORT_OPTIONS as readonly string[]).includes(s));
-    return [...core, null] as const;
-  }, []);
+  const items = useMemo(() => [...POPULAR_SPORT_LABELS, null], []);
 
   const triggerEmoji = value === null ? "🌐" : sportEmoji(value);
   const triggerLabel = value === null ? "All venues" : `${value} venues`;
