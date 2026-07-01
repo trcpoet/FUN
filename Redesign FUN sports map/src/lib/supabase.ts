@@ -154,9 +154,10 @@ export type FeedMediaPostRow = {
   storage_path: string;
   created_at: string;
   visibility: "public" | "squad" | "private";
-  /** Populated client-side by fetchPublicFeedMediaPosts (joined from profiles). */
+  /** Populated client-side by fetchFeedMediaPosts (joined from profiles). */
   authorName?: string | null;
   authorAvatarUrl?: string | null;
+  authorIsPrivate?: boolean;
 };
 
 /** Row shape returned by the `get_my_note_inbox` RPC (notes I created or commented on). */

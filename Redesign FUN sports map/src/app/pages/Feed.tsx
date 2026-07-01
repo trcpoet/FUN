@@ -22,7 +22,7 @@ import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import {
   fetchLiveNearby,
-  fetchPublicFeedMediaPosts,
+  fetchFeedMediaPosts,
   fetchUnifiedFeed,
   mergeGlobalNetworkChronological,
   type GlobalNetworkItem,
@@ -145,6 +145,12 @@ function globalNetworkRowKey(row: GlobalNetworkItem, index: number): string {
   return `${row.item.kind}:${row.item.id}:${index}`;
 }
 
+/** Explore shows only public content; treat items without a visibility field as public. */
+function unifiedItemIsPublic(it: UnifiedFeedItem): boolean {
+  const v = (it as { visibility?: string | null }).visibility;
+  return v == null || v === "public";
+}
+
 function renderGlobalNetworkItem(
   row: GlobalNetworkItem,
   ctx: {
@@ -228,7 +234,8 @@ export default function Feed() {
 
   const refreshFeeds = useCallback(() => {
     setMediaLoading(true);
-    void fetchPublicFeedMediaPosts({ limit: 28, viewerUserId: user?.id ?? null }).then((r) => {
+    // Fetch the personal set (public + squad + own via RLS); Explore derives the public subset.
+    void fetchFeedMediaPosts({ limit: 28, viewerUserId: user?.id ?? null, scope: "personal" }).then((r) => {
       setMediaLoading(false);
       setMediaPosts(r.data ?? []);
     });
@@ -253,15 +260,30 @@ export default function Feed() {
     });
   }, [coords?.lat, coords?.lng, user?.id]);
 
-  // Games live on the Recommended Games page; Explore/Feed stay social-only
-  // (notes, statuses, photos & reels). Filter games out of the network stream.
+  // Explore = strictly public content; Feed = personal (public + squad + own).
+  const publicMedia = useMemo(
+    () => mediaPosts.filter((m) => (m.visibility ?? "public") === "public" && !m.authorIsPrivate),
+    [mediaPosts],
+  );
+
+  // Games live on the Recommended Games page; Explore stays social-only and public.
   const mergedGlobal = useMemo(
     () =>
       mergeGlobalNetworkChronological(
-        coords ? unified.filter((it) => it.kind !== "game") : [],
+        coords ? unified.filter((it) => it.kind !== "game" && unifiedItemIsPublic(it)) : [],
+        publicMedia,
+      ),
+    [coords, unified, publicMedia],
+  );
+
+  // Feed (activity) social stream: your squad's photos/reels + statuses you're allowed to see.
+  const activitySocial = useMemo(
+    () =>
+      mergeGlobalNetworkChronological(
+        unified.filter((it) => it.kind === "status"),
         mediaPosts,
       ),
-    [coords, unified, mediaPosts],
+    [unified, mediaPosts],
   );
 
   const liveNotes = useMemo(() => liveItems.filter((it) => it.kind === "note"), [liveItems]);
@@ -518,8 +540,37 @@ export default function Feed() {
                 ) : null}
               </div>
               <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold">
-                Map notes within 25 km — games live on Recommended Games
+                Public + squad photos, reels &amp; statuses — plus map notes near you
               </p>
+            </section>
+
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 px-1">
+                <div className="flex size-8 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">
+                  <Globe className="size-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-black uppercase tracking-widest text-white">From your squad</h2>
+                  <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-tight mt-0.5">
+                    Public + squad · photos, reels &amp; statuses
+                  </p>
+                </div>
+              </div>
+              {globalStreamLoading ? (
+                <GlobalNetworkSkeleton />
+              ) : activitySocial.length === 0 ? (
+                <p className="text-xs text-slate-500 px-1">
+                  Nothing from your squad yet — follow players and share photos to fill this in.
+                </p>
+              ) : (
+                <ul className="grid gap-6">
+                  {activitySocial.map((row, i) => (
+                    <li key={globalNetworkRowKey(row, i)}>
+                      {renderGlobalNetworkItem(row, { userId: user?.id, navigate, refreshFeeds })}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
 
             <section className="space-y-4">
