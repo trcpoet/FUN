@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Image as ImageIcon,
   Clapperboard,
-  User,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "../ui/utils";
@@ -588,7 +587,13 @@ export function MediaFeedCard(props: {
     >
       <div className="p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            disabled={!onOpenProfile}
+            aria-label={`View ${item.authorName?.trim() || "athlete"}'s profile`}
+            className="flex items-center gap-2 min-w-0 text-left rounded-2xl transition-opacity hover:opacity-90 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40"
+          >
             {item.authorAvatarUrl ? (
               <img
                 src={item.authorAvatarUrl}
@@ -607,7 +612,7 @@ export function MediaFeedCard(props: {
                 {label} · {relTime(item.created_at)}
               </p>
             </div>
-          </div>
+          </button>
           <Badge className="bg-black/40 backdrop-blur-md border-white/10 text-[10px] font-bold uppercase tracking-wider py-0.5 px-2.5 shrink-0">
             {item.visibility ?? "Public"}
           </Badge>
@@ -643,17 +648,6 @@ export function MediaFeedCard(props: {
         </div>
 
         <PostEngagementBar postId={item.id} shareUrl={url} caption={item.body} />
-
-        {onOpenProfile ? (
-          <button
-            type="button"
-            onClick={onOpenProfile}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-slate-300 hover:bg-white/[0.06] hover:text-white transition-colors"
-          >
-            <User className="size-3.5" />
-            View profile
-          </button>
-        ) : null}
       </div>
     </article>
   );

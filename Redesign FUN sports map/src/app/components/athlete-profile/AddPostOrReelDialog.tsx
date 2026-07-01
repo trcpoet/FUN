@@ -163,12 +163,10 @@ export function AddPostOrReelDialog({ open, onOpenChange, kind, onSave }: Props)
         });
         if (feedErr) console.error("Feed publish failed:", feedErr.message);
       }
-      const baseName = file.name.replace(/\.[^.]+$/, "") || (kind === "post" ? "Post" : "Reel");
-
       if (kind === "post") {
         const post: ActivityPost = {
           id: newId("post"),
-          caption: text || baseName,
+          caption: text,
           mediaUrl: url,
           mediaKind,
         };
@@ -177,7 +175,7 @@ export function AddPostOrReelDialog({ open, onOpenChange, kind, onSave }: Props)
         const highlight: HighlightEntry = {
           id: newId("reel"),
           kind: "clip",
-          title: text || baseName,
+          title: text,
           thumbUrl: url,
           mediaKind,
         };
