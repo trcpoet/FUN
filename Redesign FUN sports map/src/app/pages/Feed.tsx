@@ -22,11 +22,13 @@ import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import {
   fetchLiveNearby,
+  fetchLocalNews,
   fetchFeedMediaPosts,
   fetchUnifiedFeed,
   mergeGlobalNetworkChronological,
   type GlobalNetworkItem,
   type LiveFeedItem,
+  type LocalNewsItem,
   type UnifiedFeedItem,
 } from "../../lib/api";
 import type { FeedMediaPostRow } from "../../lib/supabase";
@@ -37,8 +39,10 @@ import {
   StatusFeedCard,
 } from "../components/feed/UnifiedFeedCards";
 import LightRays from "../components/feed/LightRays";
+import { LocalNewsSection } from "../components/feed/LocalNewsSection";
 import { glassMessengerPage } from "../styles/glass";
 import { useAuth } from "../contexts/AuthContext";
+import { reverseGeocodeLabel } from "../../lib/geocoding";
 
 function notificationLabel(n: { type: string; payload?: unknown }): string {
   const p = (n.payload ?? {}) as Record<string, unknown>;
@@ -231,6 +235,12 @@ export default function Feed() {
   const [liveLoading, setLiveLoading] = useState(false);
   const [mediaPosts, setMediaPosts] = useState<FeedMediaPostRow[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [localNews, setLocalNews] = useState<LocalNewsItem[]>([]);
+  const [localNewsAvailable, setLocalNewsAvailable] = useState(0);
+  const [localNewsLoading, setLocalNewsLoading] = useState(false);
+  const [localNewsLoadingMore, setLocalNewsLoadingMore] = useState(false);
+  const [localNewsError, setLocalNewsError] = useState<Error | null>(null);
+  const [placeLabel, setPlaceLabel] = useState<string | null>(null);
 
   const refreshFeeds = useCallback(() => {
     setMediaLoading(true);
@@ -303,6 +313,74 @@ export default function Feed() {
   useEffect(() => {
     refreshFeeds();
   }, [refreshFeeds]);
+
+  useEffect(() => {
+    if (!coords) {
+      setPlaceLabel(null);
+      setLocalNews([]);
+      setLocalNewsAvailable(0);
+      setLocalNewsError(null);
+      setLocalNewsLoading(false);
+      setLocalNewsLoadingMore(false);
+      return;
+    }
+    let cancelled = false;
+    void reverseGeocodeLabel(coords.lat, coords.lng).then((l) => {
+      if (!cancelled) setPlaceLabel(l);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [coords?.lat, coords?.lng]);
+
+  useEffect(() => {
+    if (!coords) return;
+    let cancelled = false;
+    setLocalNewsLoading(true);
+    setLocalNewsError(null);
+    setLocalNews([]);
+    setLocalNewsAvailable(0);
+    void fetchLocalNews({ lat: coords.lat, lng: coords.lng, radiusKm: 25, limit: 10, offset: 0 }).then((r) => {
+      if (cancelled) return;
+      setLocalNewsLoading(false);
+      setLocalNews(r.data ?? []);
+      setLocalNewsAvailable(r.available);
+      setLocalNewsError(r.error);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [coords?.lat, coords?.lng]);
+
+  const handleLoadMoreLocalNews = useCallback(() => {
+    if (!coords || localNewsLoadingMore) return;
+    setLocalNewsLoadingMore(true);
+    void fetchLocalNews({
+      lat: coords.lat,
+      lng: coords.lng,
+      radiusKm: 25,
+      limit: 10,
+      offset: localNews.length,
+    }).then((r) => {
+      setLocalNewsLoadingMore(false);
+      if (r.error) {
+        setLocalNewsError(r.error);
+        return;
+      }
+      setLocalNewsAvailable(r.available);
+      setLocalNews((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        const next = [...prev];
+        for (const item of r.data ?? []) {
+          if (!seen.has(item.id)) {
+            seen.add(item.id);
+            next.push(item);
+          }
+        }
+        return next;
+      });
+    });
+  }, [coords, localNews.length, localNewsLoadingMore]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-foreground selection:bg-primary selection:text-white">
@@ -488,6 +566,16 @@ export default function Feed() {
                 </button>
               </div>
             </section>
+
+            <LocalNewsSection
+              items={localNews}
+              loading={localNewsLoading}
+              loadingMore={localNewsLoadingMore}
+              error={localNewsError}
+              locationLabel={placeLabel}
+              available={localNewsAvailable}
+              onLoadMore={handleLoadMoreLocalNews}
+            />
 
             {/* Global network: games, notes, statuses, photos & reels */}
             <section className="space-y-4">
