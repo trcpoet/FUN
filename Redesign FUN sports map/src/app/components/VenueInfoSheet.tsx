@@ -19,6 +19,8 @@ import { formatVenueGameTimerSummary } from "../../lib/mapGameTimer";
 import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";
 import { getSportIconEmoji } from "../map/gameSportIcons";
 import { fetchVenueById, fetchVenueEnrichment } from "../../lib/api";
+import { useRouteDirections } from "../../hooks/useRouteDirections";
+import { directionsHref } from "../lib/venueInfoHelpers";
 import { Sheet, SheetContent } from "./ui/sheet";
 import { useIsMobile } from "./ui/use-mobile";
 
@@ -33,6 +35,7 @@ type VenueInfoSheetProps = {
   onJoinGame?: (game: GameRow) => void;
   onOpenChat?: (game: GameRow) => void;
   viewerCoords?: { lat: number; lng: number } | null;
+  onNavigateTo?: (dest: { lat: number; lng: number }) => void;
 };
 
 function formatCoords(lat: number, lng: number): string {
@@ -82,16 +85,21 @@ export function VenueInfoSheet({
   onJoinGame,
   onOpenChat,
   viewerCoords = null,
+  onNavigateTo,
 }: VenueInfoSheetProps) {
   const isMobile = useIsMobile();
   const [now, setNow] = useState(() => Date.now());
   const [details, setDetails] = useState(venue);
   const [heroImageUrl, setHeroImageUrl] = useState<string | null>(venue.hero_image_url ?? null);
+  const [photoAttributions, setPhotoAttributions] = useState<string[]>(
+    venue.photo_attributions ?? []
+  );
   const [enrichingHero, setEnrichingHero] = useState(false);
 
   useEffect(() => {
     setDetails(venue);
     setHeroImageUrl(venue.hero_image_url ?? null);
+    setPhotoAttributions(venue.photo_attributions ?? []);
   }, [venue]);
 
   useEffect(() => {
@@ -112,13 +120,16 @@ export function VenueInfoSheet({
     setEnrichingHero(true);
     void fetchVenueEnrichment(venue.id)
       .then(({ data }) => {
-        if (cancelled || !data?.heroImageUrl) return;
-        setHeroImageUrl(data.heroImageUrl);
+        if (cancelled || !data) return;
+        if (data.heroImageUrl) setHeroImageUrl(data.heroImageUrl);
+        if (data.photoAttributions?.length) setPhotoAttributions(data.photoAttributions);
         setDetails((prev) => ({
           ...prev,
           hero_image_url: data.heroImageUrl ?? prev.hero_image_url,
           wikidata_label: data.label ?? prev.wikidata_label,
           wikidata_description: data.description ?? prev.wikidata_description,
+          photo_attributions: data.photoAttributions ?? prev.photo_attributions,
+          enrichment_source: data.source ?? prev.enrichment_source,
         }));
       })
       .finally(() => {
@@ -166,15 +177,16 @@ export function VenueInfoSheet({
     return (m / 1609.34).toFixed(1);
   };
 
-  const mapsHref = useMemo(() => {
-    const dest = { lat: details.center.lat, lng: details.center.lng };
-    if (viewerCoords && Number.isFinite(viewerCoords.lat) && Number.isFinite(viewerCoords.lng)) {
-      const o = `${viewerCoords.lat},${viewerCoords.lng}`;
-      const d = `${dest.lat},${dest.lng}`;
-      return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=driving`;
-    }
-    return `https://www.google.com/maps/search/?api=1&query=${dest.lat},${dest.lng}`;
-  }, [viewerCoords, details.center.lat, details.center.lng]);
+  const mapsHref = useMemo(
+    () => directionsHref({ lat: details.center.lat, lng: details.center.lng }, viewerCoords),
+    [viewerCoords, details.center.lat, details.center.lng]
+  );
+
+  const { summary: walkSummary, loading: walkLoading } = useRouteDirections({
+    from: viewerCoords,
+    to: details.center,
+    enabled: open && Boolean(viewerCoords),
+  });
 
   const handleShare = async () => {
     const titleLine = title;
@@ -232,6 +244,11 @@ export function VenueInfoSheet({
               <div className="absolute inset-0 animate-pulse bg-white/5" />
             ) : null}
             <div className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-transparent to-black/20" />
+            {photoAttributions.length > 0 ? (
+              <p className="absolute bottom-2 left-3 right-3 text-[10px] text-slate-400/90 drop-shadow">
+                Photo: {photoAttributions.join(", ")}
+              </p>
+            ) : null}
             <div className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-[max(0.75rem,env(safe-area-inset-right))] flex items-center gap-1.5">
               <button
                 type="button"
@@ -319,15 +336,44 @@ export function VenueInfoSheet({
               ) : null}
             </div>
 
-            <a
-              href={mapsHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-600/80 bg-slate-800/90 px-3 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-emerald-500/50 hover:bg-slate-800"
-            >
-              <Navigation className="w-4 h-4 text-emerald-400" aria-hidden />
-              Directions
-            </a>
+            {viewerCoords && (walkSummary || walkLoading) ? (
+              <p className="text-center text-xs text-slate-400 tabular-nums">
+                {walkLoading ? "Calculating walk time…" : walkSummary}
+              </p>
+            ) : null}
+
+            <div className="flex items-center gap-2">
+              {onNavigateTo && viewerCoords ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigateTo({ lat: details.center.lat, lng: details.center.lng })}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-600/80 bg-slate-800/90 px-3 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-emerald-500/50 hover:bg-slate-800"
+                >
+                  <Navigation className="w-4 h-4 text-emerald-400" aria-hidden />
+                  Show route
+                </button>
+              ) : (
+                <a
+                  href={mapsHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-600/80 bg-slate-800/90 px-3 py-2.5 text-sm font-medium text-slate-100 transition-colors hover:border-emerald-500/50 hover:bg-slate-800"
+                >
+                  <Navigation className="w-4 h-4 text-emerald-400" aria-hidden />
+                  Directions
+                </a>
+              )}
+              {onNavigateTo && viewerCoords ? (
+                <a
+                  href={mapsHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex shrink-0 items-center justify-center rounded-xl border border-white/10 px-3 py-2.5 text-xs font-medium text-slate-400 hover:text-white"
+                >
+                  Maps
+                </a>
+              ) : null}
+            </div>
 
             {gamesNearby.length > 0 ? (
               <div className="space-y-2 border-t border-white/10 pt-3">

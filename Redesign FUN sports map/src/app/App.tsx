@@ -31,6 +31,7 @@ import { useNotifications } from "../hooks/useNotifications";
 import { useTotalUnreadMessages } from "../hooks/useTotalUnreadMessages";
 import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById, fetchVenueById } from "../lib/api";
+import { fetchDirections } from "../lib/directions";
 import { fetchMyDmInbox, getOrCreateDmThread } from "../lib/dmChat";
 import { fetchMyGameInbox, sendGameMessage } from "../lib/gameChat";
 import { visibilityEnumToLabel } from "../lib/gamePreferenceOptions";
@@ -246,6 +247,23 @@ export default function App() {
   const presenceHeartbeatAtRef = useRef(0);
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
   const [selectedVenue, setSelectedVenue] = useState<VenueSelection | null>(null);
+  const [directionsGeometry, setDirectionsGeometry] = useState<GeoJSON.LineString | null>(null);
+
+  const handleNavigateTo = useCallback(
+    async (dest: { lat: number; lng: number }) => {
+      const from = userCoords ?? lastKnownCoords;
+      if (!from) return;
+      const { data } = await fetchDirections({ from, to: dest, profile: "walking" });
+      if (data?.geometry) setDirectionsGeometry(data.geometry);
+    },
+    [userCoords, lastKnownCoords]
+  );
+
+  useEffect(() => {
+    if (!selectedGame && !selectedVenue) {
+      setDirectionsGeometry(null);
+    }
+  }, [selectedGame, selectedVenue]);
   const [gamePopupRequest, setGamePopupRequest] = useState<{ nonce: number; gameId: string } | null>(null);
   const openGamePopupNonceRef = useRef(0);
   const [createGameOpen, setCreateGameOpen] = useState(false);
@@ -785,6 +803,9 @@ export default function App() {
           mapMinuteEpoch={mapMinuteEpoch}
           pauseVenueFetch={messagesOpen}
           mapStyleUrl={satelliteOn ? "mapbox://styles/mapbox/satellite-streets-v12" : null}
+          directionsGeometry={directionsGeometry}
+          onNavigateTo={handleNavigateTo}
+          onClearDirections={() => setDirectionsGeometry(null)}
         />
       </Suspense>
 

@@ -1572,10 +1572,12 @@ export type VenueEnrichment = {
   heroImageUrl: string | null;
   label: string | null;
   description: string | null;
+  photoAttributions?: string[];
+  source?: "google" | "wikidata" | null;
 };
 
 const OSM_VENUE_SELECT =
-  "id, lat, lng, name, sport, leisure, osm_type, osm_id, surface, lit, access, opening_hours, website, operator, wikidata, hero_image_url, wikidata_label, wikidata_description";
+  "id, lat, lng, name, sport, leisure, osm_type, osm_id, surface, lit, access, opening_hours, website, operator, wikidata, hero_image_url, wikidata_label, wikidata_description, photo_attributions, enrichment_source";
 
 export async function fetchVenueById(
   id: string
@@ -1608,4 +1610,66 @@ export async function fetchVenueEnrichment(
   } catch (e) {
     return { data: null, error: e instanceof Error ? e : new Error(String(e)) };
   }
+}
+
+export type LocalNewsItem = {
+  id: number;
+  title: string;
+  summary: string | null;
+  url: string;
+  image: string | null;
+  publishDate: string;
+  category: string | null;
+  sourceCountry: string | null;
+  sentiment: number | null;
+  authors: string[];
+  video: string | null;
+};
+
+type LocalNewsApiEnvelope = {
+  success?: boolean;
+  data?: { items?: LocalNewsItem[]; available?: number; offset?: number };
+  error?: { code?: string; message?: string };
+};
+
+export async function fetchLocalNews(params: {
+  lat: number;
+  lng: number;
+  radiusKm?: number;
+  limit?: number;
+  offset?: number;
+}): Promise<{ data: LocalNewsItem[]; available: number; error: Error | null }> {
+  const radiusKm = params.radiusKm ?? 25;
+  const limit = params.limit ?? 10;
+  const offset = params.offset ?? 0;
+  const cacheKey = `localNews:${params.lat.toFixed(3)}:${params.lng.toFixed(3)}:${radiusKm}:${limit}:${offset}`;
+
+  return cachedAsync(cacheKey, 5 * 60_000, async () => {
+    try {
+      const res = await fetch("/api/local-news", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lat: params.lat,
+          lng: params.lng,
+          radiusKm,
+          limit,
+          offset,
+        }),
+      });
+      const json = (await res.json()) as LocalNewsApiEnvelope;
+      if (!res.ok || json.success === false) {
+        const msg = json.error?.message ?? `Local news failed (${res.status})`;
+        return { data: [], available: 0, error: new Error(msg) };
+      }
+      const items = json.data?.items ?? [];
+      const available =
+        typeof json.data?.available === "number" && Number.isFinite(json.data.available)
+          ? json.data.available
+          : items.length;
+      return { data: items, available, error: null };
+    } catch (e) {
+      return { data: [], available: 0, error: e instanceof Error ? e : new Error(String(e)) };
+    }
+  });
 }

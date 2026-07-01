@@ -1,8 +1,13 @@
 /**
- * Lazy Wikidata/Wikimedia enrichment for venue sheets.
+ * Lazy venue enrichment: Google Places photos (primary) + Wikidata fallback.
  * POST JSON: { id: "way/12345" }
  */
 import { rateLimit, apiResponse } from "../server/lib/apiGuards";
+import {
+  fetchGooglePlacePhotoBytes,
+  fetchGooglePlacesEnrichment,
+  venuePhotoProxyUrl,
+} from "../server/lib/googlePlaces";
 
 export const config = { runtime: "edge" };
 
@@ -10,10 +15,19 @@ const CACHE_MS = 30 * 24 * 60 * 60 * 1000;
 
 type VenueRow = {
   id: string;
+  lat: number;
+  lng: number;
+  name: string | null;
+  sport: string | null;
+  leisure: string | null;
   wikidata: string | null;
   hero_image_url: string | null;
   wikidata_label: string | null;
   wikidata_description: string | null;
+  google_place_id: string | null;
+  google_photo_name: string | null;
+  photo_attributions: string[] | null;
+  enrichment_source: string | null;
   enriched_at: string | null;
 };
 
@@ -28,6 +42,14 @@ type WikidataEntityResponse = {
       };
     }
   >;
+};
+
+export type VenueEnrichmentResponse = {
+  heroImageUrl: string | null;
+  label: string | null;
+  description: string | null;
+  photoAttributions?: string[];
+  source?: "google" | "wikidata" | null;
 };
 
 function normalizeWikidataId(raw: string | null | undefined): string | null {
@@ -82,6 +104,24 @@ function isCacheFresh(row: VenueRow): boolean {
   return Date.now() - ts < CACHE_MS;
 }
 
+function parseAttributions(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+}
+
+function responseFromRow(row: VenueRow): VenueEnrichmentResponse {
+  return {
+    heroImageUrl: row.hero_image_url,
+    label: row.wikidata_label,
+    description: row.wikidata_description,
+    photoAttributions: parseAttributions(row.photo_attributions),
+    source:
+      row.enrichment_source === "google" || row.enrichment_source === "wikidata"
+        ? row.enrichment_source
+        : null,
+  };
+}
+
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== "POST") {
     return apiResponse.error("METHOD_NOT_ALLOWED", "Method Not Allowed", 405);
@@ -101,7 +141,6 @@ export default async function handler(request: Request): Promise<Response> {
     return apiResponse.error("INVALID_JSON", "Invalid JSON", 400);
   }
 
-  // Venue ids are OSM element refs, e.g. "way/12345" — reject anything else.
   const id = body.id?.trim();
   if (!id || !/^(node|way|relation)\/\d+$/.test(id)) {
     return apiResponse.error("INVALID_ID", "Invalid venue id", 400);
@@ -113,7 +152,7 @@ export default async function handler(request: Request): Promise<Response> {
     return apiResponse.error(
       "CONFIG",
       "Missing SUPABASE_SERVICE_ROLE_KEY in .env — add it (server-only, not VITE_) and restart npm run dev",
-      500,
+      500
     );
   }
 
@@ -122,7 +161,9 @@ export default async function handler(request: Request): Promise<Response> {
 
   const { data: row, error: readError } = await supabase
     .from("osm_sports_venues")
-    .select("id, wikidata, hero_image_url, wikidata_label, wikidata_description, enriched_at")
+    .select(
+      "id, lat, lng, name, sport, leisure, wikidata, hero_image_url, wikidata_label, wikidata_description, google_place_id, google_photo_name, photo_attributions, enrichment_source, enriched_at"
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -132,53 +173,114 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   if (!row) {
-    return new Response(JSON.stringify({ heroImageUrl: null, label: null, description: null }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const venue = row as VenueRow;
-
-  if (isCacheFresh(venue)) {
     return new Response(
       JSON.stringify({
-        heroImageUrl: venue.hero_image_url,
-        label: venue.wikidata_label,
-        description: venue.wikidata_description,
-      }),
+        heroImageUrl: null,
+        label: null,
+        description: null,
+        photoAttributions: [],
+        source: null,
+      } satisfies VenueEnrichmentResponse),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   }
 
-  const wikidataId = normalizeWikidataId(venue.wikidata);
-  if (!wikidataId) {
-    const now = new Date().toISOString();
-    await supabase
-      .from("osm_sports_venues")
-      .update({ enriched_at: now })
-      .eq("id", id);
-    return new Response(JSON.stringify({ heroImageUrl: null, label: null, description: null }), {
+  const venue = row as VenueRow;
+
+  if (isCacheFresh(venue) && venue.enriched_at) {
+    return new Response(JSON.stringify(responseFromRow(venue)), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const enrichment = await fetchWikidataEnrichment(wikidataId);
   const now = new Date().toISOString();
+  const googleKey = process.env.GOOGLE_PLACES_API_KEY?.trim();
 
-  await supabase
-    .from("osm_sports_venues")
-    .update({
-      hero_image_url: enrichment.heroImageUrl,
-      wikidata_label: enrichment.label,
-      wikidata_description: enrichment.description,
-      enriched_at: now,
-    })
-    .eq("id", id);
+  if (googleKey) {
+    try {
+      const google = await fetchGooglePlacesEnrichment(googleKey, {
+        lat: venue.lat,
+        lng: venue.lng,
+        name: venue.name,
+        sport: venue.sport,
+        leisure: venue.leisure,
+      });
 
-  return new Response(JSON.stringify(enrichment), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+      if (google) {
+        const heroImageUrl = venuePhotoProxyUrl(id);
+        const photoAttributions = google.photoAttributions;
+
+        await supabase
+          .from("osm_sports_venues")
+          .update({
+            hero_image_url: heroImageUrl,
+            google_place_id: google.googlePlaceId,
+            google_photo_name: google.googlePhotoName,
+            photo_attributions: photoAttributions,
+            enrichment_source: "google",
+            wikidata_label: google.label ?? venue.wikidata_label,
+            enriched_at: now,
+          })
+          .eq("id", id);
+
+        // Warm the photo cache in the background (validates the photo reference).
+        void fetchGooglePlacePhotoBytes(googleKey, google.googlePhotoName);
+
+        const payload: VenueEnrichmentResponse = {
+          heroImageUrl,
+          label: google.label ?? venue.wikidata_label,
+          description: venue.wikidata_description,
+          photoAttributions,
+          source: "google",
+        };
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    } catch (err) {
+      console.error("[venue-enrich] google places failed", err);
+    }
+  }
+
+  const wikidataId = normalizeWikidataId(venue.wikidata);
+  if (wikidataId) {
+    const enrichment = await fetchWikidataEnrichment(wikidataId);
+    await supabase
+      .from("osm_sports_venues")
+      .update({
+        hero_image_url: enrichment.heroImageUrl,
+        wikidata_label: enrichment.label,
+        wikidata_description: enrichment.description,
+        enrichment_source: enrichment.heroImageUrl ? "wikidata" : null,
+        enriched_at: now,
+      })
+      .eq("id", id);
+
+    const payload: VenueEnrichmentResponse = {
+      heroImageUrl: enrichment.heroImageUrl,
+      label: enrichment.label,
+      description: enrichment.description,
+      photoAttributions: [],
+      source: enrichment.heroImageUrl ? "wikidata" : null,
+    };
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  await supabase.from("osm_sports_venues").update({ enriched_at: now }).eq("id", id);
+
+  return new Response(
+    JSON.stringify({
+      heroImageUrl: null,
+      label: null,
+      description: null,
+      photoAttributions: [],
+      source: null,
+    } satisfies VenueEnrichmentResponse),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 }

@@ -26,6 +26,8 @@ export function venueSelectionFromProperties(
     | "hero_image_url"
     | "wikidata_label"
     | "wikidata_description"
+    | "photo_attributions"
+    | "enrichment_source"
   >,
   center: { lat: number; lng: number }
 ): VenueSelection {
@@ -47,6 +49,8 @@ export function venueSelectionFromProperties(
     hero_image_url: props.hero_image_url,
     wikidata_label: props.wikidata_label,
     wikidata_description: props.wikidata_description,
+    photo_attributions: props.photo_attributions,
+    enrichment_source: props.enrichment_source,
   };
 }
 
@@ -69,6 +73,10 @@ export function venueSelectionFromDbRow(row: OsmSportsVenueRow): VenueSelection 
       hero_image_url: optionalField(row.hero_image_url),
       wikidata_label: optionalField(row.wikidata_label),
       wikidata_description: optionalField(row.wikidata_description),
+      photo_attributions: Array.isArray(row.photo_attributions)
+        ? row.photo_attributions.filter((v): v is string => typeof v === "string")
+        : undefined,
+      enrichment_source: optionalField(row.enrichment_source),
     },
     { lat: row.lat, lng: row.lng }
   );
@@ -92,5 +100,9 @@ export function dbRowToVenueProperties(row: OsmSportsVenueRow): SportsVenuePrope
     hero_image_url: optionalField(row.hero_image_url),
     wikidata_label: optionalField(row.wikidata_label),
     wikidata_description: optionalField(row.wikidata_description),
+    photo_attributions: Array.isArray(row.photo_attributions)
+      ? row.photo_attributions.filter((v): v is string => typeof v === "string")
+      : undefined,
+    enrichment_source: optionalField(row.enrichment_source),
   };
 }

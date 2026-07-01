@@ -61,6 +61,8 @@ const L_VENUE_DOTS = "venue-dots-core";
 /** Dark bluish-purple halos (outer + inner gradient) — animated via rAF */
 const L_VENUE_DOTS_PULSE = "venue-dots-pulse";
 const L_VENUE_DOTS_PULSE_INNER = "venue-dots-pulse-inner";
+const DIRECTIONS_SOURCE_ID = "fun-directions-route";
+const DIRECTIONS_LAYER_ID = "fun-directions-route-line";
 
 /** Remove venue GL layers/sources — map teardown or basemap style swap only (not venue-fetch effect re-runs). */
 function removeVenueGlLayers(map: import("mapbox-gl").Map): void {
@@ -222,6 +224,12 @@ type MapboxMapProps = {
   venueFetchEnabled?: boolean;
   /** Optional basemap style override (e.g. satellite). */
   mapStyleUrl?: string | null;
+  /** Walking route polyline from Mapbox Directions. */
+  directionsGeometry?: GeoJSON.LineString | null;
+  /** Request in-app route to a destination. */
+  onNavigateTo?: (dest: { lat: number; lng: number }) => void;
+  /** Clear the directions overlay (e.g. when a popup closes). */
+  onClearDirections?: () => void;
 };
 
 export function MapboxMap(props: MapboxMapProps) {
@@ -261,6 +269,9 @@ export function MapboxMap(props: MapboxMapProps) {
     pauseVenueFetch = false,
     venueFetchEnabled = true,
     mapStyleUrl = null,
+    directionsGeometry = null,
+    onNavigateTo,
+    onClearDirections,
   } = props;
   const navigate = useNavigate();
 
@@ -850,6 +861,51 @@ export function MapboxMap(props: MapboxMapProps) {
 
     return () => window.clearTimeout(t);
   }, [mapLoaded, gamePopupRequest, onSelectVenue]);
+
+  /** Mapbox Directions walking route overlay. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const removeRoute = () => {
+      try {
+        if (map.getLayer(DIRECTIONS_LAYER_ID)) map.removeLayer(DIRECTIONS_LAYER_ID);
+        if (map.getSource(DIRECTIONS_SOURCE_ID)) map.removeSource(DIRECTIONS_SOURCE_ID);
+      } catch {
+        /* style reload race */
+      }
+    };
+
+    if (!directionsGeometry) {
+      removeRoute();
+      return;
+    }
+
+    const fc: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: [{ type: "Feature", properties: {}, geometry: directionsGeometry }],
+    };
+
+    const existing = map.getSource(DIRECTIONS_SOURCE_ID) as import("mapbox-gl").GeoJSONSource | undefined;
+    if (existing) {
+      existing.setData(fc);
+    } else {
+      map.addSource(DIRECTIONS_SOURCE_ID, { type: "geojson", data: fc });
+      map.addLayer({
+        id: DIRECTIONS_LAYER_ID,
+        type: "line",
+        source: DIRECTIONS_SOURCE_ID,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#34d399",
+          "line-width": 4,
+          "line-opacity": 0.88,
+        },
+      });
+    }
+
+    return removeRoute;
+  }, [directionsGeometry, mapLoaded]);
 
   /** Venue dot + sport icon paint when selection changes. */
   useEffect(() => {
@@ -2569,7 +2625,11 @@ export function MapboxMap(props: MapboxMapProps) {
             <GameEventPopup
               game={eventPopup.game}
               viewerCoords={userCoords}
-              onClose={() => setEventPopup(null)}
+              onNavigateTo={onNavigateTo}
+              onClose={() => {
+                setEventPopup(null);
+                onClearDirections?.();
+              }}
               onJoin={onJoinGame}
               onLeave={onLeaveGame}
               onOpenMessages={onOpenMessagesForGame}
@@ -2600,11 +2660,13 @@ export function MapboxMap(props: MapboxMapProps) {
           gamesNearby={gamesAtSelectedVenue}
           joinedGameIds={joinedSet}
           viewerCoords={userCoords}
+          onNavigateTo={onNavigateTo}
           onJoinGame={onJoinGame}
           onOpenChat={onOpenMessagesForGame}
           onClose={() => {
             onSelectVenue(null);
             setVenuePopupPoint(null);
+            onClearDirections?.();
           }}
           onCreateGame={(venue) => {
             onCreateGameAtVenue?.(venue, venuePopupPoint ?? undefined);

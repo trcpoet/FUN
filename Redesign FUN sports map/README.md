@@ -78,6 +78,7 @@ VITE_SUPABASE_ANON_KEY=eyJhbGc...
 Optional:
 ```
 VITE_MAPBOX_STYLE_URL=mapbox://styles/...
+WORLD_NEWS_API_KEY=...   # server-only — Explore tab sports headlines (/api/local-news; sports category + keyword fallback)
 ```
 
 ## Important rules
@@ -147,6 +148,9 @@ Add these in Vercel → Project Settings → Environment Variables:
 **Server-only (for `/api/` routes):**
 - `SUPABASE_SERVICE_ROLE_KEY` — admin key for the importer (never expose to browser)
 - `OSM_IMPORT_SECRET` — random secret shared between import script and API
+- `WORLD_NEWS_API_KEY` — [World News API](https://worldnewsapi.com/) key for Explore tab sports headlines (`/api/local-news`; defaults to `categories=sports` with sport-keyword fallback; never expose to browser)
+- `GOOGLE_PLACES_API_KEY` — [Places API (New)](https://developers.google.com/maps/documentation/places/web-service/overview) for venue hero photos (`/api/venue-enrich`, `/api/venue-photo`; enable billing + Places API New in Google Cloud)
+- `MAPBOX_ACCESS_TOKEN` — optional server alias for `/api/directions` (defaults to `VITE_MAPBOX_ACCESS_TOKEN`)
 
 ### Database migrations
 Before deploying, make sure Supabase has all migrations applied. See `../supabase/MIGRATION_ORDER.md` for the checklist.
