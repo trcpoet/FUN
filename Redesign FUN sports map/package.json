@@ -8,7 +8,7 @@
     "dev": "vite",
     "start": "vite",
     "import-osm": "node scripts/import-osm-venues.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

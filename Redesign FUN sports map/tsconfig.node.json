@@ -1,0 +1,5 @@
+{
+  "//": "Type-checks server-only code (edge API routes, server libs, Vite config) that the app tsconfig (include: [\"src\"]) does not cover. Inherits the base compilerOptions (incl. all @types: node, geojson, …). Run via `npm run typecheck`.",
+  "extends": "./tsconfig.json",
+  "include": ["api", "server", "vite.config.ts", "vite-plugin-overpass-dev.ts"]
+}
