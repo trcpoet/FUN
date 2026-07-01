@@ -5,6 +5,8 @@ import { format } from "date-fns";
 import { Clock, Trash2, Navigation, Share2, Play, Square, MessageCircle, X, Users } from "lucide-react";
 import { sportEmojiFor } from "../../lib/sportDisplay";
 import { glassMessengerPanel } from "../styles/glass";
+import { useRouteDirections } from "../../hooks/useRouteDirections";
+import { directionsHref } from "../lib/venueInfoHelpers";
 
 const SPORT_GRADIENT: Record<string, string> = {
   soccer:     'from-emerald-600 to-green-800',
@@ -21,42 +23,6 @@ const SPORT_GRADIENT: Record<string, string> = {
 
 function sportGradient(sport: string): string {
   return SPORT_GRADIENT[sport.toLowerCase()] ?? 'from-slate-600 to-slate-800';
-}
-
-function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  const R = 6371;
-  const dLat = ((bLat - aLat) * Math.PI) / 180;
-  const dLng = ((bLng - aLng) * Math.PI) / 180;
-  const s1 = Math.sin(dLat / 2);
-  const s2 = Math.sin(dLng / 2);
-  const h =
-    s1 * s1 +
-    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * s2 * s2;
-  return R * (2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)));
-}
-
-/** Rough urban driving ETA (no routing API). */
-function estimateDriveMinutes(km: number): number {
-  const avgKmh = 32;
-  return Math.max(1, Math.round((km / avgKmh) * 60));
-}
-
-function formatDistanceShort(km: number): string {
-  if (km < 1) return `${Math.round(km * 1000)} m`;
-  return `${km.toFixed(km < 10 ? 1 : 0)} km`;
-}
-
-function googleMapsDirectionsUrl(
-  from: { lat: number; lng: number },
-  to: { lat: number; lng: number }
-): string {
-  const o = `${from.lat},${from.lng}`;
-  const d = `${to.lat},${to.lng}`;
-  return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=driving`;
-}
-
-function googleMapsPlaceUrl(to: { lat: number; lng: number }): string {
-  return `https://www.google.com/maps/search/?api=1&query=${to.lat},${to.lng}`;
 }
 
 function formatCoords(lat: number, lng: number): string {
@@ -85,6 +51,8 @@ type GameEventPopupProps = {
   onEndHostedGame?: (game: GameRow) => Promise<void> | void;
   /** Viewer location for distance / directions (browser geolocation). */
   viewerCoords?: { lat: number; lng: number } | null;
+  /** Draw Mapbox walking route on the map. */
+  onNavigateTo?: (dest: { lat: number; lng: number }) => void;
 };
 
 export function GameEventPopup({
@@ -100,6 +68,7 @@ export function GameEventPopup({
   onStartHostedGame,
   onEndHostedGame,
   viewerCoords = null,
+  onNavigateTo,
 }: GameEventPopupProps) {
   const [deleting, setDeleting] = useState(false);
   const [hostBusy, setHostBusy] = useState<"start" | "end" | null>(null);
@@ -109,35 +78,28 @@ export function GameEventPopup({
   const isLive = game.status === "live";
   const liveNow = isLive || optimisticLive;
 
-  const routeMeta = useMemo(() => {
-    if (!hasCoords) return null;
-    const dest = { lat: game.lat, lng: game.lng };
-    if (
-      viewerCoords &&
-      Number.isFinite(viewerCoords.lat) &&
-      Number.isFinite(viewerCoords.lng)
-    ) {
-      const km = haversineKm(viewerCoords.lat, viewerCoords.lng, dest.lat, dest.lng);
-      return {
-        km,
-        minutes: estimateDriveMinutes(km),
-        href: googleMapsDirectionsUrl(viewerCoords, dest),
-        hasOrigin: true as const,
-      };
-    }
-    return {
-      km: null as number | null,
-      minutes: null as number | null,
-      href: googleMapsPlaceUrl(dest),
-      hasOrigin: false as const,
-    };
-  }, [hasCoords, game.lat, game.lng, viewerCoords]);
+  const dest = hasCoords ? { lat: game.lat, lng: game.lng } : null;
+  const { summary: walkSummary, loading: walkLoading } = useRouteDirections({
+    from: viewerCoords,
+    to: dest,
+    enabled: hasCoords && Boolean(viewerCoords),
+  });
+
+  const mapsHref = useMemo(() => {
+    if (!dest) return null;
+    return directionsHref(dest, viewerCoords);
+  }, [dest, viewerCoords]);
+
+  const handleShowRoute = () => {
+    if (!dest) return;
+    onNavigateTo?.(dest);
+  };
 
   const handleShare = async () => {
     const titleLine = game.title || "Pickup game";
     const whenLine = game.starts_at ? format(new Date(game.starts_at), "MMM d, h:mm a") : "Time on app";
     const coordsLine = hasCoords ? `📍 ${formatCoords(game.lat, game.lng)}` : "";
-    const urlLine = routeMeta?.href ?? "";
+    const urlLine = mapsHref ?? "";
     const text = [titleLine, `${game.sport} · ${whenLine}`, coordsLine, urlLine].filter(Boolean).join("\n");
 
     const shareData: ShareData = { title: titleLine, text, url: urlLine || undefined };
@@ -210,29 +172,49 @@ export function GameEventPopup({
           </div>
         </div>
 
-        {/* Distance / ETA row — prominent */}
-        {routeMeta && (
-          <a
-            href={routeMeta.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-3 flex items-center gap-3 rounded-xl bg-black/20 px-3 py-2 hover:bg-black/30 transition-colors"
-            aria-label={routeMeta.hasOrigin ? `Directions — ${formatDistanceShort(routeMeta.km!)} away` : "Open in Maps"}
-          >
-            <Navigation className="h-4 w-4 text-white/80 shrink-0" aria-hidden />
-            {routeMeta.hasOrigin && routeMeta.km != null ? (
-              <div className="flex items-baseline gap-2">
-                <span className="text-sm font-bold text-white tabular-nums">
-                  {formatDistanceShort(routeMeta.km)}
-                </span>
-                <span className="text-xs text-white/65">·</span>
-                <span className="text-xs text-white/70">~{routeMeta.minutes} min drive</span>
-              </div>
+        {/* Distance / ETA row — Mapbox walking time */}
+        {hasCoords && mapsHref ? (
+          <div className="mt-3 flex items-center gap-2 rounded-xl bg-black/20 px-3 py-2">
+            {onNavigateTo && viewerCoords ? (
+              <button
+                type="button"
+                onClick={handleShowRoute}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left hover:bg-black/10 rounded-lg -mx-1 px-1 py-0.5 transition-colors"
+                aria-label={walkSummary ? `Show route — ${walkSummary}` : "Show route"}
+              >
+                <Navigation className="h-4 w-4 text-white/80 shrink-0" aria-hidden />
+                {walkLoading ? (
+                  <span className="text-sm text-white/80">Calculating walk…</span>
+                ) : walkSummary ? (
+                  <span className="text-sm font-bold text-white tabular-nums">{walkSummary}</span>
+                ) : (
+                  <span className="text-sm text-white/80">Show route</span>
+                )}
+              </button>
             ) : (
-              <span className="text-sm text-white/80">Open in Maps</span>
+              <a
+                href={mapsHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex min-w-0 flex-1 items-center gap-3"
+                aria-label="Open in Maps"
+              >
+                <Navigation className="h-4 w-4 text-white/80 shrink-0" aria-hidden />
+                <span className="text-sm text-white/80">Open in Maps</span>
+              </a>
             )}
-          </a>
-        )}
+            {onNavigateTo && viewerCoords ? (
+              <a
+                href={mapsHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 text-[11px] font-medium text-white/60 hover:text-white/90"
+              >
+                Maps
+              </a>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="px-4 py-3 space-y-3">

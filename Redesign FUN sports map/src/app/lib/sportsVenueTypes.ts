@@ -22,6 +22,8 @@ export type SportsVenueProperties = {
   hero_image_url?: string;
   wikidata_label?: string;
   wikidata_description?: string;
+  photo_attributions?: string[];
+  enrichment_source?: string;
 };
 
 export type VenueDotProperties = {

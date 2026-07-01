@@ -22,4 +22,6 @@ export type VenueSelection = {
   hero_image_url?: string;
   wikidata_label?: string;
   wikidata_description?: string;
+  photo_attributions?: string[];
+  enrichment_source?: string;
 };

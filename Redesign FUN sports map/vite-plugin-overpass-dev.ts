@@ -5,7 +5,7 @@ import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from 
 /** Vite middleware runs outside the client env graph — hydrate server-only .env keys here. */
 function applyServerEnv(mode: string, root: string): void {
   const env = loadEnv(mode, root, "");
-  for (const key of ["SUPABASE_URL", "VITE_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"] as const) {
+  for (const key of ["SUPABASE_URL", "VITE_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "WORLD_NEWS_API_KEY", "GOOGLE_PLACES_API_KEY", "VITE_MAPBOX_ACCESS_TOKEN", "MAPBOX_ACCESS_TOKEN"] as const) {
     const value = env[key]?.trim();
     if (value) process.env[key] = value;
   }
@@ -114,7 +114,10 @@ export function overpassDevProxy(): Plugin {
           const isApiRoute =
             urlPath === "/api/overpass" ||
             urlPath === "/api/auto-cache-venues" ||
-            urlPath === "/api/venue-enrich";
+            urlPath === "/api/venue-enrich" ||
+            urlPath === "/api/venue-photo" ||
+            urlPath === "/api/directions" ||
+            urlPath === "/api/local-news";
           if (isApiRoute) applyServerEnv(mode, root);
 
           // Legacy direct Overpass proxy (kept for any other callers)
@@ -189,6 +192,53 @@ export function overpassDevProxy(): Plugin {
               await forwardToApiHandler(req, res, handler, body);
             } catch (err) {
               console.error("[venue-enrich proxy] failed:", err);
+              res.setHeader("Content-Type", "application/json");
+              res.statusCode = 500;
+              res.end(JSON.stringify({ success: false, error: { code: "PROXY_ERROR", message: "Dev proxy failed" } }));
+            }
+            return;
+          }
+
+          if (urlPath === "/api/local-news") {
+            if (req.method === "OPTIONS") { res.statusCode = 204; res.end(); return; }
+            if (req.method !== "POST") { res.statusCode = 405; res.end(); return; }
+            try {
+              const body = await readBody(req);
+              const { default: handler } = await import("./api/local-news");
+              await forwardToApiHandler(req, res, handler, body);
+            } catch (err) {
+              console.error("[local-news proxy] failed:", err);
+              res.setHeader("Content-Type", "application/json");
+              res.statusCode = 500;
+              res.end(JSON.stringify({ success: false, error: { code: "PROXY_ERROR", message: "Dev proxy failed" } }));
+            }
+            return;
+          }
+
+          if (urlPath === "/api/directions") {
+            if (req.method === "OPTIONS") { res.statusCode = 204; res.end(); return; }
+            if (req.method !== "POST") { res.statusCode = 405; res.end(); return; }
+            try {
+              const body = await readBody(req);
+              const { default: handler } = await import("./api/directions");
+              await forwardToApiHandler(req, res, handler, body);
+            } catch (err) {
+              console.error("[directions proxy] failed:", err);
+              res.setHeader("Content-Type", "application/json");
+              res.statusCode = 500;
+              res.end(JSON.stringify({ success: false, error: { code: "PROXY_ERROR", message: "Dev proxy failed" } }));
+            }
+            return;
+          }
+
+          if (urlPath === "/api/venue-photo") {
+            if (req.method === "OPTIONS") { res.statusCode = 204; res.end(); return; }
+            if (req.method !== "GET") { res.statusCode = 405; res.end(); return; }
+            try {
+              const { default: handler } = await import("./api/venue-photo");
+              await forwardToApiHandler(req, res, handler, "");
+            } catch (err) {
+              console.error("[venue-photo proxy] failed:", err);
               res.setHeader("Content-Type", "application/json");
               res.statusCode = 500;
               res.end(JSON.stringify({ success: false, error: { code: "PROXY_ERROR", message: "Dev proxy failed" } }));

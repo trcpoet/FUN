@@ -24,6 +24,7 @@ import { formatVenueGameTimerSummary } from "../../lib/mapGameTimer";
 import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";
 import { getSportIconEmoji } from "../map/gameSportIcons";
 import { fetchVenueById, fetchVenueEnrichment } from "../../lib/api";
+import { useRouteDirections } from "../../hooks/useRouteDirections";
 import { glassMessengerPanel } from "../styles/glass";
 import {
   prettyLabel,
@@ -54,6 +55,8 @@ type VenueInfoPopupProps = {
   onOpenChat?: (game: GameRow) => void;
   /** Viewer location for directions shortcut. */
   viewerCoords?: { lat: number; lng: number } | null;
+  /** Draw Mapbox walking route on the map. */
+  onNavigateTo?: (dest: { lat: number; lng: number }) => void;
 };
 
 const ICON_BTN =
@@ -79,6 +82,7 @@ export function VenueInfoPopup({
   onJoinGame,
   onOpenChat,
   viewerCoords = null,
+  onNavigateTo,
 }: VenueInfoPopupProps) {
   const reduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -86,6 +90,9 @@ export function VenueInfoPopup({
   const [details, setDetails] = useState<VenueSelection>(venue);
   const [now, setNow] = useState(() => Date.now());
   const [heroImageUrl, setHeroImageUrl] = useState<string | null>(venue.hero_image_url ?? null);
+  const [photoAttributions, setPhotoAttributions] = useState<string[]>(
+    venue.photo_attributions ?? []
+  );
   const [enriching, setEnriching] = useState(false);
   const [enrichRequested, setEnrichRequested] = useState(false);
 
@@ -94,6 +101,7 @@ export function VenueInfoPopup({
     setView("actions");
     setDetails(venue);
     setHeroImageUrl(venue.hero_image_url ?? null);
+    setPhotoAttributions(venue.photo_attributions ?? []);
     setEnriching(false);
     setEnrichRequested(false);
   }, [venue.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -140,11 +148,14 @@ export function VenueInfoPopup({
       .then(({ data }) => {
         if (cancelled || !data) return;
         if (data.heroImageUrl) setHeroImageUrl(data.heroImageUrl);
+        if (data.photoAttributions?.length) setPhotoAttributions(data.photoAttributions);
         setDetails((prev) => ({
           ...prev,
           hero_image_url: data.heroImageUrl ?? prev.hero_image_url,
           wikidata_label: data.label ?? prev.wikidata_label,
           wikidata_description: data.description ?? prev.wikidata_description,
+          photo_attributions: data.photoAttributions ?? prev.photo_attributions,
+          enrichment_source: data.source ?? prev.enrichment_source,
         }));
       })
       .finally(() => {
@@ -199,6 +210,16 @@ export function VenueInfoPopup({
     () => directionsHref({ lat: details.center.lat, lng: details.center.lng }, viewerCoords),
     [viewerCoords, details.center.lat, details.center.lng]
   );
+
+  const { summary: walkSummary, loading: walkLoading } = useRouteDirections({
+    from: viewerCoords,
+    to: details.center,
+    enabled: open && Boolean(viewerCoords),
+  });
+
+  const handleShowRoute = () => {
+    onNavigateTo?.({ lat: details.center.lat, lng: details.center.lng });
+  };
 
   const handleShare = async () => {
     const coordsLine = `📍 ${formatCoords(details.center.lat, details.center.lng)}`;
@@ -399,28 +420,57 @@ export function VenueInfoPopup({
               </div>
 
               {/* Footer actions */}
-              <div className="flex items-center gap-2 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-                <a
-                  href={mapsHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/15 cursor-pointer"
-                >
-                  <Navigation className="w-4 h-4" aria-hidden />
-                  Directions
-                </a>
-                {onCreateGame ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onCreateGame(details);
-                      onClose();
-                    }}
-                    className="inline-flex flex-1 items-center justify-center rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 cursor-pointer"
-                  >
-                    Create game
-                  </button>
+              <div className="flex flex-col gap-2 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                {viewerCoords && (walkSummary || walkLoading) ? (
+                  <p className="text-center text-xs text-slate-400 tabular-nums">
+                    {walkLoading ? "Calculating walk time…" : walkSummary}
+                  </p>
                 ) : null}
+                <div className="flex items-center gap-2">
+                  {onNavigateTo && viewerCoords ? (
+                    <button
+                      type="button"
+                      onClick={handleShowRoute}
+                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/15 cursor-pointer"
+                    >
+                      <Navigation className="w-4 h-4" aria-hidden />
+                      Show route
+                    </button>
+                  ) : (
+                    <a
+                      href={mapsHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/15 cursor-pointer"
+                    >
+                      <Navigation className="w-4 h-4" aria-hidden />
+                      Directions
+                    </a>
+                  )}
+                  {onNavigateTo && viewerCoords ? (
+                    <a
+                      href={mapsHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex shrink-0 items-center justify-center rounded-xl border border-white/10 px-3 py-2.5 text-xs font-medium text-slate-400 transition-colors hover:text-white hover:bg-white/5"
+                      title="Open in Google Maps"
+                    >
+                      Maps
+                    </a>
+                  ) : null}
+                  {onCreateGame ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onCreateGame(details);
+                        onClose();
+                      }}
+                      className="inline-flex flex-1 items-center justify-center rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 cursor-pointer"
+                    >
+                      Create game
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </motion.div>
           ) : (
@@ -478,6 +528,11 @@ export function VenueInfoPopup({
                   )}
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-transparent to-transparent" />
                 </div>
+                {photoAttributions.length > 0 ? (
+                  <p className="mx-4 mt-1 text-[10px] leading-snug text-slate-500">
+                    Photo: {photoAttributions.join(", ")}
+                  </p>
+                ) : null}
 
                 <div className="px-4 pt-3">
                   <h2 className="text-lg font-semibold text-white">{title}</h2>

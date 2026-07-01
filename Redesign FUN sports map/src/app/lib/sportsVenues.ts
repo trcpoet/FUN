@@ -248,7 +248,7 @@ export async function fetchSportsVenuesFromDb(
   let query = supabase
     .from("osm_sports_venues")
     .select(
-      "id, lat, lng, name, sport, leisure, osm_type, osm_id, surface, lit, access, opening_hours, website, operator, wikidata, hero_image_url, wikidata_label, wikidata_description"
+      "id, lat, lng, name, sport, leisure, osm_type, osm_id, surface, lit, access, opening_hours, website, operator, wikidata, hero_image_url, wikidata_label, wikidata_description, photo_attributions, enrichment_source"
     )
     .gte("lat", minLat)
     .lte("lat", maxLat)

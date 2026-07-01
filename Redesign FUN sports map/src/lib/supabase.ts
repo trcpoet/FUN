@@ -269,4 +269,8 @@ export type OsmSportsVenueRow = {
   wikidata_label: string | null;
   wikidata_description: string | null;
   enriched_at: string | null;
+  google_place_id: string | null;
+  google_photo_name: string | null;
+  photo_attributions: string[] | null;
+  enrichment_source: string | null;
 };
