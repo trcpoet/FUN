@@ -1,10 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useAuth } from "../contexts/AuthContext";
-import { getPublicProfileById, followUser, unfollowUser, getMyFollowState, type FollowState } from "../../lib/api";
+import { getPublicProfileById, followUser, unfollowUser, getMyFollowState, getFollowCounts, type FollowState } from "../../lib/api";
 import type { AthleteProfilePayload } from "../../lib/athleteProfile";
 import { useIsMobile } from "../components/ui/use-mobile";
-import { ProfileHubHero, ProfileHubHeader, PostsReelsSection } from "../components/athlete-profile";
+import {
+  ProfileHubHero,
+  ProfileHubHeader,
+  PostsReelsSection,
+  FollowersFollowingModal,
+  type FollowTab,
+} from "../components/athlete-profile";
 import { cn } from "../components/ui/utils";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
@@ -35,6 +41,22 @@ export default function PublicProfile() {
   const [repAvg, setRepAvg] = useState<number | null>(null);
   const [repCount, setRepCount] = useState<number>(0);
   const [statusText, setStatusText] = useState<string | null>(null);
+  const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
+  const [followModal, setFollowModal] = useState<{ open: boolean; tab: FollowTab }>({
+    open: false,
+    tab: "followers",
+  });
+
+  useEffect(() => {
+    if (!userId || user?.id === userId) return;
+    let cancelled = false;
+    void getFollowCounts(userId).then((c) => {
+      if (!cancelled) setFollowCounts(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, user?.id]);
 
   const [endorseOpen, setEndorseOpen] = useState(false);
   const [sharedGames, setSharedGames] = useState<{ id: string; label: string }[]>([]);
@@ -118,6 +140,13 @@ export default function PublicProfile() {
         onMarkRead={() => {}}
       />
 
+      <FollowersFollowingModal
+        open={followModal.open}
+        onOpenChange={(o) => setFollowModal((s) => ({ ...s, open: o }))}
+        userId={userId ?? null}
+        initialTab={followModal.tab}
+      />
+
       <main className="relative mx-auto w-full max-w-6xl px-4 md:px-8 pb-32 pt-20">
         {loading ? (
           <div className="space-y-8 animate-pulse">
@@ -152,8 +181,10 @@ export default function PublicProfile() {
               bio={ap.bio ?? null}
               performanceMetrics={ap.performanceMetrics ?? []}
               primarySports={primarySports}
-              followersCount={0}
-              followingCount={0}
+              followersCount={followCounts.followers}
+              followingCount={followCounts.following}
+              onOpenFollowers={() => setFollowModal({ open: true, tab: "followers" })}
+              onOpenFollowing={() => setFollowModal({ open: true, tab: "following" })}
               homeBaseLabel={ap.city ?? null}
               onAbout={() => {}}
               onShare={() => {

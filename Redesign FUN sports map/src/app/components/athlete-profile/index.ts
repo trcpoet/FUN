@@ -19,6 +19,8 @@ export { PostsReelsSection } from "./PostsReelsSection";
 export type { ProfileFeedTab, HubFeedTab } from "./PostsReelsSection";
 export { ProfileHubHeader } from "./ProfileHubHeader";
 export { ProfileHubHero } from "./ProfileHubHero";
+export { FollowersFollowingModal } from "./FollowersFollowingModal";
+export type { FollowTab } from "./FollowersFollowingModal";
 export { PerformanceStatsStrip } from "./PerformanceStatsStrip";
 export { ProfileComposerCard } from "./ProfileComposerCard";
 export { QuickStatusPostDialog } from "./QuickStatusPostDialog";

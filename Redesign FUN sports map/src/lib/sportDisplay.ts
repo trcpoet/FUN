@@ -1,35 +1,12 @@
-import { SPORT_OPTIONS, type SportOption } from "./sports";
+import { SPORTS_CATALOG, resolveCatalogSport } from "./sportsCatalog";
 
-/** Emoji / glyph per canonical sport (extend when adding `SPORT_OPTIONS` entries). */
-const SPORT_EMOJI: Record<string, string> = {
-  Basketball: "🏀",
-  Soccer: "⚽",
-  Volleyball: "🏐",
-  Tennis: "🎾",
-  Pickleball: "🏓",
-  Gym: "🏋️",
-  "Martial Arts": "🥋",
-  Wrestling: "🤼",
-  Boxing: "🥊",
-  Chess: "♟️",
-  Yoga: "🧘",
-  Pilates: "🧘‍♀️",
-  Dance: "💃",
-  Cardio: "❤️‍🔥",
-  "Strength Training": "💪",
-  Flexibility: "🤸",
-  Endurance: "🏃‍♂️",
-  Speed: "⚡",
-  Power: "🔥",
-};
-
+/** Emoji / glyph for a sport label — registry first, then keyword fallbacks. */
 export function sportEmojiFor(name: string): string {
   if (!name) return "🏆";
-  if (SPORT_EMOJI[name]) return SPORT_EMOJI[name];
-  const lower = name.toLowerCase();
-  const hit = Object.keys(SPORT_EMOJI).find((k) => k.toLowerCase() === lower);
-  if (hit) return SPORT_EMOJI[hit]!;
+  const hit = resolveCatalogSport(name);
+  if (hit) return hit.emoji;
 
+  const lower = name.toLowerCase();
   // Keyword fallbacks for unknown sports (like "Pinik Ball" -> "🏐")
   if (lower.includes("ball")) return "🏐";
   if (lower.includes("run") || lower.includes("track") || lower.includes("jog")) return "🏃";
@@ -47,13 +24,13 @@ export function sportEmojiFor(name: string): string {
   return "🏆";
 }
 
-export type SportChoice = { id: SportOption; label: string; icon: string };
+export type SportChoice = { id: string; label: string; icon: string };
 
 export function getSportsForPicker(): SportChoice[] {
-  return SPORT_OPTIONS.map((id) => ({
-    id,
-    label: id,
-    icon: sportEmojiFor(id),
+  return SPORTS_CATALOG.map((s) => ({
+    id: s.id,
+    label: s.id,
+    icon: s.emoji,
   }));
 }
 

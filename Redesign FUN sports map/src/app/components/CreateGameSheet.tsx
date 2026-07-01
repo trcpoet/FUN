@@ -23,14 +23,11 @@ import {
   MAX_DURATION_MIN,
 } from "../../lib/gamePreferenceOptions";
 import type { MapNoteVisibility } from "../../lib/supabase";
+import { POPULAR_SPORT_LABELS } from "../../lib/sportsCatalog";
+import { sportEmojiFor } from "../../lib/sportDisplay";
 
 const SPORTS = [
-  { id: "Basketball", label: "Basketball", icon: "🏀" },
-  { id: "Soccer", label: "Soccer", icon: "⚽" },
-  { id: "Football", label: "Football", icon: "🏈" },
-  { id: "Volleyball", label: "Volleyball", icon: "🏐" },
-  { id: "Tennis", label: "Tennis", icon: "🎾" },
-  { id: "Running", label: "Running", icon: "🏃" },
+  ...POPULAR_SPORT_LABELS.map((label) => ({ id: label, label, icon: sportEmojiFor(label) })),
   { id: "Pickup", label: "Pickup", icon: "🎯" },
 ];
 

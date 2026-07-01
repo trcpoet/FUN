@@ -1,32 +1,12 @@
-/** Subtle emoji markers for sport rows — keep sparse; not a toy UI. */
+import { resolveCatalogSport } from "./sportsCatalog";
+
+/** Subtle emoji markers for sport rows — registry first, then keyword fallbacks. */
 export function sportEmoji(sport: string): string {
   if (!sport) return "🏆";
-  const k = sport.trim().toLowerCase();
-  const map: Record<string, string> = {
-    basketball: "🏀",
-    soccer: "⚽",
-    volleyball: "🏐",
-    tennis: "🎾",
-    pickleball: "🏓",
-    running: "🏃",
-    gym: "🏋️",
-    "martial arts": "🥋",
-    wrestling: "🤼",
-    boxing: "🥊",
-    chess: "♟️",
-    yoga: "🧘",
-    pilates: "🧘",
-    dance: "💃",
-    cardio: "❤️",
-    "strength training": "🏋️",
-    flexibility: "🤸",
-    endurance: "⏱️",
-    speed: "⚡",
-    power: "💥",
-  };
-  
-  if (map[k]) return map[k];
+  const hit = resolveCatalogSport(sport);
+  if (hit) return hit.emoji;
 
+  const k = sport.trim().toLowerCase();
   // Keyword fallbacks for unknown sports (like "Pinik Ball" -> "🏐")
   if (k.includes("ball")) return "🏐";
   if (k.includes("run") || k.includes("track") || k.includes("jog")) return "🏃";

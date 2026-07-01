@@ -22,6 +22,8 @@ type Props = {
   primarySports?: string[];
   followersCount?: number;
   followingCount?: number;
+  onOpenFollowers?: () => void;
+  onOpenFollowing?: () => void;
   homeBaseLabel?: string | null;
   onAbout?: () => void;
   onShare?: () => void;
@@ -56,6 +58,8 @@ export function ProfileHubHero({
   primarySports = [],
   followersCount,
   followingCount,
+  onOpenFollowers,
+  onOpenFollowing,
   homeBaseLabel,
   onAbout,
   onShare,
@@ -202,15 +206,27 @@ export function ProfileHubHero({
                 <span className="text-[8px] sm:text-[10px] font-black uppercase tracking-widest text-slate-500 hidden sm:inline">Network</span>
               </div>
               <div className="flex items-baseline gap-1.5 sm:gap-3">
-                <div className="flex items-baseline gap-0.5 sm:gap-1">
+                <button
+                  type="button"
+                  onClick={onOpenFollowers}
+                  disabled={!onOpenFollowers}
+                  aria-label="View followers"
+                  className="flex items-baseline gap-0.5 sm:gap-1 rounded-lg transition-opacity hover:opacity-80 disabled:cursor-default disabled:hover:opacity-100"
+                >
                   <span className="text-lg sm:text-3xl font-black italic tracking-tighter text-white uppercase">{followers}</span>
                   <span className="text-[7px] sm:text-[9px] font-bold text-rose-500/60 uppercase tracking-tighter hidden xs:inline">Followers</span>
-                </div>
+                </button>
                 <div className="w-px h-3 sm:h-4 bg-white/10 self-center" />
-                <div className="flex items-baseline gap-0.5 sm:gap-1">
+                <button
+                  type="button"
+                  onClick={onOpenFollowing}
+                  disabled={!onOpenFollowing}
+                  aria-label="View following"
+                  className="flex items-baseline gap-0.5 sm:gap-1 rounded-lg transition-opacity hover:opacity-80 disabled:cursor-default disabled:hover:opacity-100"
+                >
                   <span className="text-lg sm:text-3xl font-black italic tracking-tighter text-white uppercase">{following}</span>
                   <span className="text-[7px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-tighter hidden xs:inline">Following</span>
-                </div>
+                </button>
               </div>
             </div>
 

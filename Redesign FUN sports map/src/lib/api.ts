@@ -411,14 +411,22 @@ export function feedMediaLooksVideo(storagePath: string, publicUrl: string | nul
 }
 
 /**
- * Recent photo/reel posts, excluding creators whose `athlete_profile.is_private` is true.
+ * Recent photo/reel posts for the feed streams.
+ *
+ * - `scope: "public"` (Explore) → only `visibility === "public"` posts from non-private authors.
+ * - `scope: "personal"` (Feed)  → whatever the viewer is allowed to see (public + squad + own),
+ *   trusting the row-level security policy on `feed_media_posts`. Rows are enriched with
+ *   `authorIsPrivate` so callers can derive the public subset without a second query.
+ *
  * The viewer always sees their own uploads.
  */
-export async function fetchPublicFeedMediaPosts(params: {
+export async function fetchFeedMediaPosts(params: {
   limit?: number;
   viewerUserId?: string | null;
+  scope?: "public" | "personal";
 }): Promise<{ data: FeedMediaPostRow[]; error: Error | null }> {
   if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const scope = params.scope ?? "public";
   const cap = Math.min(Math.max(1, params.limit ?? 24), 80);
   const { data: rows, error } = await supabase
     .from("feed_media_posts")
@@ -455,16 +463,30 @@ export async function fetchPublicFeedMediaPosts(params: {
 
   const filtered = list
     .filter((r) => {
-      if (viewer && r.user_id === viewer) return true;
-      return !privateByUser.get(r.user_id);
+      const isOwn = viewer != null && r.user_id === viewer;
+      if (scope === "public") {
+        // Explore: strictly public content from non-private authors (own public posts included).
+        return r.visibility === "public" && (isOwn || !privateByUser.get(r.user_id));
+      }
+      // Personal (Feed): trust RLS — it already scopes to public + squad + own.
+      return true;
     })
     .map((r) => ({
       ...r,
       authorName: authorByUser.get(r.user_id)?.name ?? null,
       authorAvatarUrl: authorByUser.get(r.user_id)?.avatarUrl ?? null,
+      authorIsPrivate: Boolean(privateByUser.get(r.user_id)),
     }));
 
   return { data: filtered.slice(0, cap), error: null };
+}
+
+/** @deprecated Use `fetchFeedMediaPosts({ scope: "public" })`. Thin wrapper for existing callers. */
+export function fetchPublicFeedMediaPosts(params: {
+  limit?: number;
+  viewerUserId?: string | null;
+}): Promise<{ data: FeedMediaPostRow[]; error: Error | null }> {
+  return fetchFeedMediaPosts({ ...params, scope: "public" });
 }
 
 /** Single chronological stream: unified RPC rows + media posts (Explore tab “Global network”). */
@@ -1019,6 +1041,83 @@ export async function migrateLocalFollowsToDb(localIds: Set<string>): Promise<Se
     .select("followed_id")
     .eq("follower_id", userId);
   return new Set((data ?? []).map((r) => r.followed_id as string));
+}
+
+export type FollowListEntry = {
+  userId: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+};
+
+/**
+ * Follower / following reads. `user_follows` has a public SELECT policy (using(true)),
+ * so we read the graph directly and hydrate display fields from `profiles`.
+ */
+
+/** Resolve a set of user ids to display name + avatar, preserving the input order. */
+async function hydrateFollowProfiles(ids: string[]): Promise<FollowListEntry[]> {
+  if (!supabase || ids.length === 0) return [];
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, display_name, avatar_url")
+    .in("id", ids);
+  const byId = new Map<string, { display_name: string | null; avatar_url: string | null }>();
+  for (const r of (data ?? []) as { id: string; display_name: string | null; avatar_url: string | null }[]) {
+    byId.set(r.id, { display_name: r.display_name ?? null, avatar_url: r.avatar_url ?? null });
+  }
+  return ids.map((id) => ({
+    userId: id,
+    displayName: byId.get(id)?.display_name ?? null,
+    avatarUrl: byId.get(id)?.avatar_url ?? null,
+  }));
+}
+
+/** Accounts that follow `userId` (accepted), newest first. */
+export async function getFollowers(userId: string): Promise<{ data: FollowListEntry[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  if (!userId) return { data: [], error: null };
+  const { data, error } = await supabase
+    .from("user_follows")
+    .select("follower_id, created_at")
+    .eq("followed_id", userId)
+    .eq("status", "accepted")
+    .order("created_at", { ascending: false });
+  if (error) return { data: [], error: new Error(error.message) };
+  const ids = [...new Set((data ?? []).map((r) => r.follower_id as string))];
+  return { data: await hydrateFollowProfiles(ids), error: null };
+}
+
+/** Accounts `userId` follows (accepted), newest first. */
+export async function getFollowing(userId: string): Promise<{ data: FollowListEntry[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  if (!userId) return { data: [], error: null };
+  const { data, error } = await supabase
+    .from("user_follows")
+    .select("followed_id, created_at")
+    .eq("follower_id", userId)
+    .eq("status", "accepted")
+    .order("created_at", { ascending: false });
+  if (error) return { data: [], error: new Error(error.message) };
+  const ids = [...new Set((data ?? []).map((r) => r.followed_id as string))];
+  return { data: await hydrateFollowProfiles(ids), error: null };
+}
+
+/** Accepted follower + following counts for a profile. */
+export async function getFollowCounts(userId: string): Promise<{ followers: number; following: number }> {
+  if (!supabase || !userId) return { followers: 0, following: 0 };
+  const [followersRes, followingRes] = await Promise.all([
+    supabase
+      .from("user_follows")
+      .select("follower_id", { count: "exact", head: true })
+      .eq("followed_id", userId)
+      .eq("status", "accepted"),
+    supabase
+      .from("user_follows")
+      .select("followed_id", { count: "exact", head: true })
+      .eq("follower_id", userId)
+      .eq("status", "accepted"),
+  ]);
+  return { followers: followersRes.count ?? 0, following: followingRes.count ?? 0 };
 }
 
 /** Full profile row when `athlete_profile` migration has been applied. */

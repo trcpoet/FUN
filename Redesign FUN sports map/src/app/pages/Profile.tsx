@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { useUserStats } from "../../hooks/useUserStats";
 import { useNotifications } from "../../hooks/useNotifications";
-import { signOut, getMyBadges, uploadAvatarImage } from "../../lib/api";
+import { signOut, getMyBadges, uploadAvatarImage, getFollowCounts } from "../../lib/api";
 import { useIsMobile } from "../components/ui/use-mobile";
 import {
   ProfileEditSheet,
@@ -16,6 +16,8 @@ import {
   type UserBadgeWithDetail,
   ProfileHubHeader,
   ProfileHubHero,
+  FollowersFollowingModal,
+  type FollowTab,
   PerformanceStatsStrip,
   ProfileComposerCard,
   QuickStatusPostDialog,
@@ -24,7 +26,6 @@ import {
   StoriesRail,
 } from "../components/athlete-profile";
 import { mergeAthleteProfile } from "../../lib/athleteProfile";
-import { readFollowedIds } from "../../lib/localFollows";
 import { cn } from "../components/ui/utils";
 import { useAuth } from "../contexts/AuthContext";
 import { getAthleteReputation } from "../../lib/endorsements";
@@ -87,6 +88,22 @@ export default function Profile() {
   const [addFeedOpen, setAddFeedOpen] = useState(false);
   const [addFeedKind, setAddFeedKind] = useState<AddFeedKind>("post");
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
+  const [followModal, setFollowModal] = useState<{ open: boolean; tab: FollowTab }>({
+    open: false,
+    tab: "followers",
+  });
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    void getFollowCounts(user.id).then((c) => {
+      if (!cancelled) setFollowCounts(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [shareCopiedAt, setShareCopiedAt] = useState<number | null>(null);
@@ -208,7 +225,6 @@ export default function Profile() {
   const fallbackInitial = (displayName?.trim() || "?")[0].toUpperCase();
   const primarySports = athleteProfile.primarySports ?? [];
   const pinnedPost = (athleteProfile.posts ?? []).find((p) => p.pinned) ?? null;
-  const followingCount = readFollowedIds().size;
   const homeBaseLabel =
     athleteProfile.snapshot?.neighbourhood?.trim() ||
     athleteProfile.city?.trim() ||
@@ -243,6 +259,13 @@ export default function Profile() {
         onMarkRead={markRead}
       />
 
+      <FollowersFollowingModal
+        open={followModal.open}
+        onOpenChange={(o) => setFollowModal((s) => ({ ...s, open: o }))}
+        userId={user?.id ?? null}
+        initialTab={followModal.tab}
+      />
+
       <main className="relative mx-auto w-full max-w-6xl px-4 md:px-8 pb-32 pt-16">
         {loading ? (
           <div className="space-y-8 animate-pulse">
@@ -267,8 +290,10 @@ export default function Profile() {
               bio={athleteProfile.bio ?? null}
               performanceMetrics={athleteProfile.performanceMetrics ?? []}
               primarySports={primarySports}
-              followersCount={0}
-              followingCount={followingCount}
+              followersCount={followCounts.followers}
+              followingCount={followCounts.following}
+              onOpenFollowers={() => setFollowModal({ open: true, tab: "followers" })}
+              onOpenFollowing={() => setFollowModal({ open: true, tab: "following" })}
               homeBaseLabel={homeBaseLabel}
               onShare={() => void handleShare()}
               onAbout={() => setAboutOpen(true)}

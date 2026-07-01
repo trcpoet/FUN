@@ -7,6 +7,7 @@
  * Every subsequent user in that area gets an instant DB read.
  */
 import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "../server/lib/osmVenueTags";
+import { buildVenueOverpassQuery } from "../server/lib/osmVenueQuery";
 import { promiseAny } from "../server/lib/promiseAny";
 import { validateBbox, rateLimit } from "../server/lib/apiGuards";
 
@@ -16,19 +17,6 @@ const UPSTREAMS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
 ] as const;
-
-function bboxQuery(bboxStr: string): string {
-  return `
-    [out:json][timeout:60];
-    (
-      node["leisure"="pitch"](${bboxStr});
-      way["leisure"="pitch"](${bboxStr});
-      node["leisure"="sports_centre"](${bboxStr});
-      way["leisure"="sports_centre"](${bboxStr});
-    );
-    out center;
-  `.replace(/\n\s+/g, " ");
-}
 
 async function fetchOverpassJson(body: string): Promise<{ elements?: unknown[] } | null> {
   const controllers = UPSTREAMS.map(() => new AbortController());
@@ -131,7 +119,7 @@ export default async function handler(request: Request): Promise<Response> {
   const { minLat, minLng, maxLat, maxLng } = v.bbox;
 
   const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
-  const json = await fetchOverpassJson(bboxQuery(bboxStr));
+  const json = await fetchOverpassJson(buildVenueOverpassQuery(bboxStr));
   if (!json) {
     return new Response(
       JSON.stringify({ success: false, error: "Overpass upstream unavailable", type: "FeatureCollection", features: [] }),

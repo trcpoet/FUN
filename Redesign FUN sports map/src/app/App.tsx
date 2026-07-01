@@ -43,7 +43,6 @@ import { readFollowedIds, writeFollowedIds } from "../lib/localFollows";
 import { updateMyPresence, migrateLocalFollowsToDb } from "../lib/api";
 import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
-import { MapToast } from "./components/MapToast";
 import {
   readStoredVenueSportIntent,
   venueIntentToSportFilter,
@@ -653,9 +652,18 @@ export default function App() {
     [games, filtersDraft, mapMinuteEpoch]
   );
 
-  // Genuinely-empty banner: nothing fetched nearby at all (distinct from filters hiding games).
-  const [noGamesBannerDismissed, setNoGamesBannerDismissed] = useState(false);
-  const showNoGamesBanner = !nearbyLoading && games.length === 0 && !noGamesBannerDismissed;
+  // Surface hard errors (location / DB) as brief transient toasts instead of persistent map banners.
+  useEffect(() => {
+    if (locationError && userCoords == null) {
+      toast("Location unavailable — using a default spot. Allow location for accurate nearby games.");
+    }
+  }, [locationError, userCoords]);
+
+  useEffect(() => {
+    if (gamesError) {
+      toast.error("Couldn't load games — check the database setup (supabase/schema.sql), then refresh.");
+    }
+  }, [gamesError]);
 
   const liveStripGames = useMemo(() => {
     const now = Date.now();
@@ -791,49 +799,6 @@ export default function App() {
           <Loader2 className="size-5 shrink-0 animate-spin text-emerald-400" aria-hidden />
         </div>
       )}
-
-      {/* Top-left status column — compact, dismissible map notices (distinct from
-          the bell/Alerts dropdown and transient sonner toasts). */}
-      <div className="pointer-events-none absolute left-4 top-24 z-[45] flex w-[min(18rem,72vw)] flex-col gap-2">
-        {locationError && userCoords == null && (
-          <MapToast variant="warning">
-            Location: {locationError}. Using a default location for now — allow location for accurate nearby games.
-          </MapToast>
-        )}
-
-        {gamesError && (
-          <MapToast variant="warning">
-            <strong className="font-semibold text-slate-100">Database setup needed:</strong> Run the SQL from{" "}
-            <code className="rounded bg-slate-700/80 px-1">supabase/schema.sql</code> in your Supabase project, then refresh.
-          </MapToast>
-        )}
-
-        {showNoGamesBanner && (
-          <MapToast
-            onDismiss={() => setNoGamesBannerDismissed(true)}
-            actions={
-              <button
-                type="button"
-                className="min-h-[32px] cursor-pointer rounded-full bg-primary px-3 text-[11px] font-semibold text-slate-950 transition-colors hover:bg-primary/90"
-                onClick={() => {
-                  if (userCoords) {
-                    setCreateGameCoords({ lat: userCoords.lat, lng: userCoords.lng });
-                    setCreateGameAnchorPoint(null);
-                    setCreateGameLocationLabel(null);
-                  }
-                  setCreateGameOpen(true);
-                }}
-              >
-                Create game
-              </button>
-            }
-          >
-            <p className="font-semibold text-slate-100">No games nearby yet</p>
-            <p className="text-slate-400">Be the first to host one here.</p>
-          </MapToast>
-        )}
-
-      </div>
 
       {satelliteOn && (
         <div
