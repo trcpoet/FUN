@@ -11,17 +11,25 @@
 
   <rect width="32" height="32" rx="6" fill="#0B0C10" />
 
-  <!-- Outer technical ring -->
   <circle cx="16" cy="16" r="13" stroke="#00F2FE" stroke-width="1" stroke-opacity="0.15" />
+
   <path
-    d="M16 29C23.1797 29 29 23.1797 29 16"
+    d="M16 3C23.1797 3 29 8.8203 29 16C29 23.1797 23.1797 29 16 29"
     stroke="#00F2FE"
     stroke-width="1.5"
     stroke-linecap="round"
     filter="url(#glow)"
-  />
+  >
+    <animateTransform
+      attributeName="transform"
+      type="rotate"
+      from="0 16 16"
+      to="360 16 16"
+      dur="8s"
+      repeatCount="indefinite"
+    />
+  </path>
 
-  <!-- Map pin frame -->
   <path
     d="M16 6C11.5 6 8 9.5 8 14C8 19.5 16 26 16 26C16 26 24 19.5 24 14C24 9.5 20.5 6 16 6Z"
     fill="#00F2FE"
@@ -31,10 +39,10 @@
     filter="url(#glow)"
   />
 
-  <!-- Play button core -->
-  <path d="M14.5 11L19 14L14.5 17V11Z" fill="#00F2FE" filter="url(#glow)" />
+  <path d="M14.5 11L19 14L14.5 17V11Z" fill="#00F2FE" filter="url(#glow)">
+    <animate attributeName="opacity" values="1;0.55;1" dur="2s" repeatCount="indefinite" />
+  </path>
 
-  <!-- Bottom technical accent -->
   <path
     d="M12 24H20"
     stroke="#00F2FE"

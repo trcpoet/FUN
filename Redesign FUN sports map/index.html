@@ -24,38 +24,34 @@
     <link rel="dns-prefetch" href="https://api.mapbox.com" />
     <title>FUN – Sports Map</title>
     <style>
-      .fun-orbit-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.25rem;width:100%;height:100%;min-height:100vh;min-height:100dvh;background:#0a0f1c;color:#94a3b8;font-family:system-ui,-apple-system,sans-serif}
-      .fun-orbit-loader__stage{position:relative;width:9rem;height:9rem}
-      .fun-orbit-loader__core{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.75rem;font-weight:800;letter-spacing:.2em;color:#10b981;text-shadow:0 0 24px rgba(16,185,129,.45)}
-      .fun-orbit-loader__orbit{position:absolute;inset:0;animation:fun-orbit-spin 3.2s linear infinite}
-      .fun-orbit-loader__icon{position:absolute;top:50%;left:50%;width:1.75rem;height:1.75rem;margin:-.875rem;display:flex;align-items:center;justify-content:center;font-size:1.25rem;transform:rotate(var(--angle)) translateY(-4.25rem) rotate(calc(-1 * var(--angle)))}
-      .fun-orbit-loader__icon:nth-child(1){--angle:0deg}
-      .fun-orbit-loader__icon:nth-child(2){--angle:60deg}
-      .fun-orbit-loader__icon:nth-child(3){--angle:120deg}
-      .fun-orbit-loader__icon:nth-child(4){--angle:180deg}
-      .fun-orbit-loader__icon:nth-child(5){--angle:240deg}
-      .fun-orbit-loader__icon:nth-child(6){--angle:300deg}
-      .fun-orbit-loader__tagline{margin:0;font-size:.875rem;font-weight:500;color:#64748b}
-      @keyframes fun-orbit-spin{to{transform:rotate(360deg)}}
-      @media (prefers-reduced-motion:reduce){.fun-orbit-loader__orbit{animation:none}.fun-orbit-loader__icon{transform:rotate(var(--angle)) translateY(-3.5rem) rotate(calc(-1 * var(--angle)))}}
+      .fun-app-icon-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.25rem;width:100%;height:100%;min-height:100vh;min-height:100dvh;background:#0b0c10;color:#94a3b8;font-family:system-ui,-apple-system,sans-serif}
+      .fun-app-icon-loader__stage{width:6.5rem;height:6.5rem;filter:drop-shadow(0 0 18px rgba(0,242,254,.35))}
+      .fun-app-icon-loader__tagline{margin:0;font-size:.875rem;font-weight:500;color:#64748b}
+      .fun-app-icon{display:block;width:100%;height:100%}
+      .fun-app-icon__ring-spin{transform-origin:16px 16px;animation:fun-app-icon-ring-spin 8s linear infinite}
+      .fun-app-icon__play-pulse{animation:fun-app-icon-play-pulse 2s ease-in-out infinite}
+      @keyframes fun-app-icon-ring-spin{to{transform:rotate(360deg)}}
+      @keyframes fun-app-icon-play-pulse{0%,100%{opacity:1}50%{opacity:.55}}
+      @media (prefers-reduced-motion:reduce){.fun-app-icon__ring-spin,.fun-app-icon__play-pulse{animation:none}}
     </style>
   </head>
 
-  <body style="margin:0;background:#0A0F1C">
+  <body style="margin:0;background:#0B0C10">
     <div id="root">
-      <div class="fun-orbit-loader" role="status" aria-live="polite">
-        <div class="fun-orbit-loader__stage" aria-hidden="true">
-          <div class="fun-orbit-loader__orbit">
-            <span class="fun-orbit-loader__icon">🏀</span>
-            <span class="fun-orbit-loader__icon">⚽</span>
-            <span class="fun-orbit-loader__icon">🏈</span>
-            <span class="fun-orbit-loader__icon">🎾</span>
-            <span class="fun-orbit-loader__icon">🏐</span>
-            <span class="fun-orbit-loader__icon">🏃</span>
-          </div>
-          <div class="fun-orbit-loader__core">FUN</div>
+      <div class="fun-app-icon-loader" role="status" aria-live="polite">
+        <div class="fun-app-icon-loader__stage" aria-hidden="true">
+          <svg class="fun-app-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <rect width="32" height="32" rx="6" fill="#0B0C10" />
+            <circle cx="16" cy="16" r="13" stroke="#00F2FE" stroke-width="1" stroke-opacity="0.15" />
+            <g class="fun-app-icon__ring-spin">
+              <path d="M16 3C23.1797 3 29 8.8203 29 16C29 23.1797 23.1797 29 16 29" stroke="#00F2FE" stroke-width="1.5" stroke-linecap="round" />
+            </g>
+            <path d="M16 6C11.5 6 8 9.5 8 14C8 19.5 16 26 16 26C16 26 24 19.5 24 14C24 9.5 20.5 6 16 6Z" fill="#00F2FE" fill-opacity="0.1" stroke="#00F2FE" stroke-width="1.5" />
+            <path class="fun-app-icon__play-pulse" d="M14.5 11L19 14L14.5 17V11Z" fill="#00F2FE" />
+            <path d="M12 24H20" stroke="#00F2FE" stroke-width="0.5" stroke-opacity="0.4" stroke-dasharray="1 1" />
+          </svg>
         </div>
-        <p class="fun-orbit-loader__tagline">Loading FUN…</p>
+        <p class="fun-app-icon-loader__tagline">Loading FUN…</p>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
