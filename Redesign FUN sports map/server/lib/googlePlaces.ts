@@ -133,7 +133,7 @@ function enrichmentFromPlace(place: PlaceResult): GooglePlacesEnrichment | null 
   const photo = place.photos?.[0];
   const photoName = photo?.name?.trim();
   const placeId = place.id?.trim();
-  if (!photoName || !placeId) return null;
+  if (!photo || !photoName || !placeId) return null;
   const attributions =
     photo.authorAttributions
       ?.map((a) => a.displayName?.trim())
