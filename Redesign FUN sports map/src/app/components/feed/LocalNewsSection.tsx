@@ -124,6 +124,11 @@ export function LocalNewsSection({
 }: LocalNewsSectionProps) {
   const showLoadMore = items.length > 0 && available > items.length && onLoadMore;
 
+  // Fail quietly: if the news service errored and there's nothing (not even a
+  // cached result) to show, hide the whole section rather than surfacing an
+  // alarming error box in the feed.
+  if (error && items.length === 0) return null;
+
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-3 px-1">
