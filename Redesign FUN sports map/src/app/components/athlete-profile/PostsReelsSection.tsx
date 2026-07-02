@@ -42,11 +42,13 @@ function ReelCell({ cell }: { cell: HighlightEntry }) {
         <Play className="size-3 text-white fill-current" />
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 p-4">
-        <p className="text-[11px] font-black italic uppercase tracking-tighter text-white line-clamp-2 leading-none">
-          {cell.title || "Highlight"}
-        </p>
-      </div>
+      {cell.title?.trim() ? (
+        <div className="absolute inset-x-0 bottom-0 p-4">
+          <p className="text-[11px] font-black italic uppercase tracking-tighter text-white line-clamp-2 leading-none">
+            {cell.title.trim()}
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

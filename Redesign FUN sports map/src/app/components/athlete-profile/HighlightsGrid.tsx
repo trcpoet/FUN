@@ -76,9 +76,11 @@ export function HighlightsGrid({ highlights, onAdd, className, gridClassName }: 
                 <video src={thumb} className="absolute inset-0 size-full object-cover" muted playsInline loop />
               ) : null}
               <div className="absolute inset-0 bg-black/40 group-hover:bg-black/25 transition-colors" />
-              <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-black/80 to-transparent">
-                <p className="text-[10px] font-medium text-white line-clamp-2 leading-tight">{cell.title || "Highlight"}</p>
-              </div>
+              {cell.title?.trim() ? (
+                <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-black/80 to-transparent">
+                  <p className="text-[10px] font-medium text-white line-clamp-2 leading-tight">{cell.title.trim()}</p>
+                </div>
+              ) : null}
             </div>
           );
         })}

@@ -204,6 +204,19 @@ function asStr(v: unknown): string | null {
   return typeof v === "string" ? v : v == null ? null : String(v);
 }
 
+/**
+ * Strip raw device filenames that leaked in as captions/titles before the
+ * "blank caption" fix (e.g. "IMG_4113", "photo.jpg"). Applied on read so old
+ * data stops surfacing filenames without a data migration.
+ */
+export function cleanCaption(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim();
+  if (!s) return "";
+  if (/^(img|dsc|dscn|pxl|vid|mov|gopr|screenshot|photo|image)[-_ ]?\d+$/i.test(s)) return "";
+  if (/\.(jpe?g|png|gif|webp|heic|heif|mp4|mov|m4v|webm)$/i.test(s)) return "";
+  return s;
+}
+
 function asNum(v: unknown): number | null {
   if (typeof v === "number" && !Number.isNaN(v)) return v;
   if (typeof v === "string" && v.trim() !== "") {
@@ -306,7 +319,7 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
         .map((h, i) => ({
           id: asStr(h.id) ?? `hl-${i}`,
           kind: highlightKinds.includes(h.kind as HighlightKind) ? (h.kind as HighlightKind) : "other",
-          title: asStr(h.title) ?? "",
+          title: cleanCaption(asStr(h.title)),
           subtitle: asStr(h.subtitle) ?? undefined,
           date: asStr(h.date) ?? undefined,
           thumbUrl: asStr(h.thumbUrl) ?? undefined,
@@ -320,7 +333,7 @@ export function parseAthleteProfile(raw: unknown): AthleteProfilePayload {
         .filter((x): x is Record<string, unknown> => x != null && typeof x === "object")
         .map((p, i) => ({
           id: asStr(p.id) ?? `post-${i}`,
-          caption: asStr(p.caption) ?? "",
+          caption: cleanCaption(asStr(p.caption)),
           sport: asStr(p.sport) ?? undefined,
           timeAgo: asStr(p.timeAgo) ?? undefined,
           likes: asNum(p.likes) ?? undefined,
