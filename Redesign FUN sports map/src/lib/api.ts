@@ -1632,6 +1632,23 @@ type LocalNewsApiEnvelope = {
   error?: { code?: string; message?: string };
 };
 
+/** Persist last-good local news across reloads to cut World News API quota use. */
+const LOCAL_NEWS_TTL_MS = 30 * 60_000;
+
+type CachedLocalNews = { data: LocalNewsItem[]; available: number; ts: number };
+
+function readCachedLocalNews(cacheKey: string): CachedLocalNews | null {
+  try {
+    const raw = localStorage.getItem(`fun.${cacheKey}`);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Partial<CachedLocalNews>;
+    if (!Array.isArray(p.data) || typeof p.ts !== "number") return null;
+    return { data: p.data, available: p.available ?? p.data.length, ts: p.ts };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchLocalNews(params: {
   lat: number;
   lng: number;
@@ -1644,32 +1661,40 @@ export async function fetchLocalNews(params: {
   const offset = params.offset ?? 0;
   const cacheKey = `localNews:${params.lat.toFixed(3)}:${params.lng.toFixed(3)}:${radiusKm}:${limit}:${offset}`;
 
-  return cachedAsync(cacheKey, 5 * 60_000, async () => {
-    try {
+  // Serve a fresh persisted result without hitting the API (survives reloads).
+  const cached = readCachedLocalNews(cacheKey);
+  if (cached && Date.now() - cached.ts < LOCAL_NEWS_TTL_MS) {
+    return { data: cached.data, available: cached.available, error: null };
+  }
+
+  try {
+    // The inner fn throws on failure, so cachedAsync only caches successes —
+    // a transient 429/timeout won't get cached and blank news for the whole TTL.
+    return await cachedAsync(cacheKey, LOCAL_NEWS_TTL_MS, async () => {
       const res = await fetch("/api/local-news", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lat: params.lat,
-          lng: params.lng,
-          radiusKm,
-          limit,
-          offset,
-        }),
+        body: JSON.stringify({ lat: params.lat, lng: params.lng, radiusKm, limit, offset }),
       });
       const json = (await res.json()) as LocalNewsApiEnvelope;
       if (!res.ok || json.success === false) {
-        const msg = json.error?.message ?? `Local news failed (${res.status})`;
-        return { data: [], available: 0, error: new Error(msg) };
+        throw new Error(json.error?.message ?? `Local news failed (${res.status})`);
       }
       const items = json.data?.items ?? [];
       const available =
         typeof json.data?.available === "number" && Number.isFinite(json.data.available)
           ? json.data.available
           : items.length;
-      return { data: items, available, error: null };
-    } catch (e) {
-      return { data: [], available: 0, error: e instanceof Error ? e : new Error(String(e)) };
-    }
-  });
+      try {
+        localStorage.setItem(`fun.${cacheKey}`, JSON.stringify({ data: items, available, ts: Date.now() }));
+      } catch {
+        /* quota / private mode */
+      }
+      return { data: items, available, error: null as Error | null };
+    });
+  } catch (e) {
+    // Stale-on-error: show the last good headlines rather than an error box.
+    if (cached) return { data: cached.data, available: cached.available, error: null };
+    return { data: [], available: 0, error: e instanceof Error ? e : new Error(String(e)) };
+  }
 }

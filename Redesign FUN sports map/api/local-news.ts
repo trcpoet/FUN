@@ -49,9 +49,6 @@ type SearchParams = {
   text?: string;
 };
 
-const SPORT_KEYWORDS =
-  "basketball OR football OR soccer OR baseball OR hockey OR tennis OR volleyball OR sports";
-
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
@@ -121,13 +118,19 @@ async function fetchWorldNewsSearch(
   opts: SearchParams,
 ): Promise<{ items: LocalNewsItem[]; available: number } | { error: string; status: number }> {
   const params = buildSearchParams(opts);
+  // Fail fast instead of hanging until Vercel's function timeout (which returned 504s).
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
   let upstream: Response;
   try {
     upstream = await fetch(`https://api.worldnewsapi.com/search-news?${params.toString()}`, {
       headers: { "x-api-key": apiKey, Accept: "application/json" },
+      signal: controller.signal,
     });
   } catch {
     return { error: "News service unavailable", status: 502 };
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!upstream.ok) {
@@ -201,22 +204,8 @@ export default async function handler(request: Request): Promise<Response> {
     return apiResponse.error("UPSTREAM_ERROR", primary.error, primary.status);
   }
 
-  let { items, available } = primary;
-
-  if (offset === 0 && items.length < 3) {
-    const fallback = await fetchWorldNewsSearch(apiKey, {
-      lat,
-      lng,
-      radiusKm,
-      limit,
-      offset: 0,
-      text: SPORT_KEYWORDS,
-    });
-    if (!("error" in fallback) && fallback.items.length > items.length) {
-      items = fallback.items;
-      available = fallback.available;
-    }
-  }
-
+  // One upstream call per request (no broad-keyword fallback) to conserve the
+  // World News API quota — repeated calls were hitting 429 rate limits.
+  const { items, available } = primary;
   return apiResponse.success({ items, available, offset });
 }
