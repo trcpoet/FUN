@@ -29,6 +29,7 @@ import {
   shouldShowVenueDots,
 } from "../map/mapVisibility";
 import * as MapCfg from "../map/mapConfig";
+import { applyFunBasemapTheme } from "../map/mapTheme";
 import { loadMapboxGl } from "../lib/mapboxCached";
 import { registerGameSportImages } from "../map/registerGameSportImages";
 import { getGameMapboxIconId } from "../map/gameSportIcons";
@@ -119,6 +120,10 @@ function applyCinematicBasemap(
   map: import("mapbox-gl").Map,
   tier: MapCfg.CinematicTier
 ): void {
+  // Every caller of this fn is exactly "style just became ready", so re-anchor the
+  // basemap palette here (before the tier gate — the theme applies even with 3D off).
+  applyFunBasemapTheme(map);
+
   if (tier === "off") {
     try {
       map.setTerrain(null);

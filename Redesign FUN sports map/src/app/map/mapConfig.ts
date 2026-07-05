@@ -264,6 +264,8 @@ export function easeOutQuad(t: number): number {
 /**
  * Atmosphere lives in Mapbox Studio (Global → Atmosphere). Do not call setFog() in code —
  * mixing both makes the horizon look muddy.
+ * Basemap surface colors (land/water/landuse/roads/buildings/labels) are the exception:
+ * they ARE code-owned — see `mapTheme.ts` (applied after every style.load).
  */
 export const STUDIO_ATMOSPHERE_HINT = {
   "low-color": "#0a0f1c",
