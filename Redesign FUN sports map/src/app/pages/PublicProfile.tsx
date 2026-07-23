@@ -231,6 +231,15 @@ export default function PublicProfile() {
                   className="h-12 px-8 rounded-2xl border-white/10 text-white font-black uppercase tracking-widest text-[10px]"
                   onClick={() => {
                     if (!userId) return;
+                    if (!user) {
+                      navigate("/login");
+                      return;
+                    }
+                    if (user.id === userId) {
+                      navigate("/profile");
+                      return;
+                    }
+                    // App deep-links `?dm=` → get_or_create_dm_thread → opens messenger on Direct.
                     navigate(`/?dm=${encodeURIComponent(userId)}`);
                   }}
                 >

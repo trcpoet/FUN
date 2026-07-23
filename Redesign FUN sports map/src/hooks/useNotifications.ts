@@ -16,6 +16,7 @@ export function useNotifications(options?: { limit?: number; enabled?: boolean }
     setLoading(true);
     setError(null);
     const { data, error: err } = await getMyNotifications(limit);
+    if (err) console.warn("[FUN] notifications fetch failed:", err.message);
     setList(data ?? []);
     setError(err?.message ?? null);
     setLoading(false);

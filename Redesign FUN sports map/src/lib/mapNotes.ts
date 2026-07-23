@@ -1,21 +1,16 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import type { MapNoteCommentRow, MapNoteRow, NoteInboxRow } from "./supabase";
+import { isMissingRpc } from "./rpcErrors";
 
 /**
  * Centralized helpers for the perpetual map-notes inbox + realtime fan-out.
  * Mirrors the patterns in `src/lib/gameChat.ts` (rich RPC + table fallback).
  */
 
-function inboxRpcMissing(error: { message?: string; code?: string } | null): boolean {
-  if (!error) return false;
-  if (error.code === "PGRST202") return true;
-  const m = (error.message ?? "").toLowerCase();
-  return (
-    m.includes("schema cache") ||
-    m.includes("could not find the function") ||
-    m.includes("get_my_note_inbox")
-  );
+/** RPC genuinely missing — permission failures surface as real errors. */
+function inboxRpcMissing(error: { message?: string; code?: string; hint?: string | null } | null): boolean {
+  return error ? isMissingRpc(error) : false;
 }
 
 /** Build NoteInboxRow[] without the RPC — joins map_notes + map_note_comments client-side. */

@@ -14,6 +14,7 @@ export function useUserStats(options?: { enabled?: boolean }) {
     setLoading(true);
     setError(null);
     const { data, error: err } = await getMyStats();
+    if (err) console.warn("[FUN] user_stats fetch failed:", err.message);
     setStats(data ?? null);
     setError(err?.message ?? null);
     setLoading(false);

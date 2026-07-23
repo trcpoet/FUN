@@ -22,3 +22,5 @@ jobs:
       - run: npm ci
       # Type-checks the client (tsconfig.json) AND server/edge code (tsconfig.node.json).
       - run: npm run typecheck
+      # Vitest unit suite (pure logic + API error classification).
+      - run: npm test

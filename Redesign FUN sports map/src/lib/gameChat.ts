@@ -1,17 +1,11 @@
 import { supabase } from "./supabase";
 import type { GameInboxRow, GameMessageRow } from "./supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { isMissingRpc } from "./rpcErrors";
 
-/** PostgREST: function missing from schema cache or not deployed (404). */
-function inboxRpcMissing(error: { message?: string; code?: string } | null): boolean {
-  if (!error) return false;
-  if (error.code === "PGRST202") return true;
-  const m = (error.message ?? "").toLowerCase();
-  return (
-    m.includes("schema cache") ||
-    m.includes("could not find the function") ||
-    m.includes("get_my_game_inbox")
-  );
+/** PostgREST: function genuinely missing — permission failures surface as real errors. */
+function inboxRpcMissing(error: { message?: string; code?: string; hint?: string | null } | null): boolean {
+  return error ? isMissingRpc(error) : false;
 }
 
 function isGameMessagesSchemaCacheMissing(error: { message?: string; code?: string } | null): boolean {

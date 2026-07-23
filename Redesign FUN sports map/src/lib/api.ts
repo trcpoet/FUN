@@ -6,6 +6,7 @@
  */
 
 import { supabase } from "./supabase";
+import { isMissingRpc } from "./rpcErrors";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
 import { searchPeople } from "./searchPeople";
 import type { LocationVisibilityMode } from "./locationVisibility";
@@ -62,20 +63,15 @@ async function reverseGeocodeLocationLabel(lat: number, lng: number): Promise<st
   }
 }
 
-function isMissingMapNotesRpc(err: { message?: string; code?: string } | null): boolean {
+/**
+ * True only when the Map Notes RPCs are genuinely absent (pre-migration DB).
+ * Permission failures (42501) are real errors and must NOT match — the old
+ * name-substring version matched "permission denied for function get_notes_nearby"
+ * and silently blanked the notes layer.
+ */
+function isMissingMapNotesRpc(err: { message?: string; code?: string; hint?: string | null } | null): boolean {
   if (!err) return false;
-  const m = (err.message ?? "").toLowerCase();
-  return (
-    err.code === "PGRST202" ||
-    /not found|could not find function|404/i.test(m) ||
-    m.includes("schema cache") ||
-    m.includes("map_notes") ||
-    m.includes("map_note_comments") ||
-    m.includes("create_map_note") ||
-    m.includes("get_notes_nearby") ||
-    m.includes("get_unified_feed") ||
-    m.includes("get_live_nearby")
-  );
+  return isMissingRpc(err);
 }
 
 export async function createMapNote(params: {
@@ -239,14 +235,10 @@ export async function fetchLiveNearby(params: {
   return { data: (data as LiveFeedItem[]) ?? [], error: error ? new Error(error.message) : null };
 }
 
-function isRpcSignatureMismatch(err: { message?: string; code?: string } | null): boolean {
+/** Function absent or argument names changed — never permission failures. */
+function isRpcSignatureMismatch(err: { message?: string; code?: string; hint?: string | null } | null): boolean {
   if (!err) return false;
-  const m = (err.message ?? "").toLowerCase();
-  return (
-    err.code === "PGRST202" ||
-    /not found|could not find function|404/.test(m) ||
-    m.includes("schema cache")
-  );
+  return isMissingRpc(err);
 }
 
 export async function fetchUnifiedFeed(params: {
@@ -1424,7 +1416,7 @@ export async function getMyStats(): Promise<{ data: UserStatsRow | null; error: 
     .select("*")
     .eq("user_id", user.id)
     .maybeSingle();
-  if (error) return { data: null, error: null };
+  if (error) return { data: null, error: new Error(error.message) };
   return { data: data as UserStatsRow | null, error: null };
 }
 
@@ -1456,7 +1448,7 @@ export async function getMyNotifications(limit = 20): Promise<{
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(limit);
-  if (error) return { data: [], error: null };
+  if (error) return { data: [], error: new Error(error.message) };
   return { data: (data as NotificationRow[]) ?? [], error: null };
 }
 

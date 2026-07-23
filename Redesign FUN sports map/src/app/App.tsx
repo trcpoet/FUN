@@ -31,6 +31,7 @@ import { useNotifications } from "../hooks/useNotifications";
 import { useTotalUnreadMessages } from "../hooks/useTotalUnreadMessages";
 import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById, fetchVenueById } from "../lib/api";
+import { isPermissionDenied, friendlyRpcError } from "../lib/rpcErrors";
 import { fetchDirections } from "../lib/directions";
 import { fetchMyDmInbox, getOrCreateDmThread } from "../lib/dmChat";
 import { fetchMyGameInbox, sendGameMessage } from "../lib/gameChat";
@@ -81,7 +82,7 @@ function persistAppliedFilters(f: FiltersState) {
 }
 
 export default function App() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const currentUserId = user?.id ?? null;
   const secondaryReady = useIdleReady();
   const { coords: userCoords, error: locationError } = useGeolocation();
@@ -130,14 +131,22 @@ export default function App() {
   const sportExtendSessionRef = useRef<string | null>(null);
   const effectiveGamesRadiusKm = sportExtendRadius ?? appliedFilters.gamesRadiusKm;
 
+  const notesErrorToastedRef = useRef(false);
   const refetchNotes = useCallback(async () => {
-    const { data } = await fetchNotesNearby({
+    const { data, error } = await fetchNotesNearby({
       lat: gamesFetchLat,
       lng: gamesFetchLng,
       // Keep notes roughly aligned with venue/game context so pins populate when the map area changes.
       radiusKm: Math.max(10, appliedFilters.venueRadiusKm),
       limit: 120,
     });
+    if (error) {
+      console.warn("[FUN] map notes fetch failed:", error.message);
+      if (isPermissionDenied(error) && !notesErrorToastedRef.current) {
+        notesErrorToastedRef.current = true;
+        toast.error(friendlyRpcError(error, "Map Notes"));
+      }
+    }
     setMapNotes(data ?? []);
   }, [gamesFetchLat, gamesFetchLng, appliedFilters.venueRadiusKm]);
 
@@ -365,6 +374,64 @@ export default function App() {
       strip();
     });
   }, [location.pathname, location.search, navigate]);
+
+  // Deep link from public profile Message → open / create Direct DM thread.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const otherId = params.get("dm")?.trim() ?? "";
+    if (!otherId) return;
+
+    const strip = () => {
+      params.delete("dm");
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" },
+        { replace: true },
+      );
+    };
+
+    if (authLoading) return;
+
+    if (!currentUserId) {
+      navigate("/login", { replace: true });
+      return;
+    }
+
+    if (otherId === currentUserId) {
+      toast.error("That's your own profile — pick someone else to message.");
+      strip();
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const { threadId, error } = await getOrCreateDmThread(otherId);
+      if (cancelled) return;
+      if (error || !threadId) {
+        toast.error(error?.message ?? "Couldn't start a direct message.");
+        strip();
+        return;
+      }
+
+      const inboxRes = await fetchMyDmInbox();
+      if (cancelled) return;
+      const rows = inboxRes.data ?? [];
+      setDmInboxBootstrap(rows);
+      const row = rows.find((r) => r.thread_id === threadId);
+      setMessengerFocus({
+        kind: "dm",
+        threadId,
+        otherUserId: otherId,
+        displayName: row?.display_name ?? null,
+        avatarUrl: row?.avatar_url ?? null,
+      });
+      setMessagesOpen(true);
+      strip();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, currentUserId, location.pathname, location.search, navigate]);
 
   // Presence heartbeat: sync location + chosen visibility mode (throttled 30s).
   // Mode changes fire an immediate update via onLocationVisibilityChange.

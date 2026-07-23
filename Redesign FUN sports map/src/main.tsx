@@ -1,7 +1,6 @@
 import React, { Component, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
-import { ClerkProvider } from "@clerk/react";
 import { AuthProvider } from "./app/contexts/AuthContext";
 import { RequireAuth } from "./app/components/RequireAuth";
 import { RequireOnboarding } from "./app/components/RequireOnboarding";
@@ -62,63 +61,58 @@ class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBo
 }
 
 createRoot(document.getElementById("root")!).render(
-  <ClerkProvider
-    publishableKey={(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined)?.trim() ?? ""}
-    afterSignOutUrl="/"
-  >
-    <AuthProvider>
-      <BrowserRouter>
-        <RouteErrorBoundary>
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route path="/" element={<App />} />
-              <Route
-                path="/login"
-                element={
-                  <PublicOnly>
-                    <Login />
-                  </PublicOnly>
-                }
-              />
-              <Route
-                path="/signup"
-                element={
-                  <PublicOnly>
-                    <SignUp />
-                  </PublicOnly>
-                }
-              />
-              <Route
-                path="/onboarding"
-                element={
-                  <RequireAuth>
-                    <Onboarding />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/profile"
-                element={
-                  <RequireAuth>
-                    <RequireOnboarding>
-                      <Profile />
-                    </RequireOnboarding>
-                  </RequireAuth>
-                }
-              />
-              <Route path="/feed" element={<Feed />} />
-              <Route path="/feed/games" element={<RecommendedGames />} />
-              <Route path="/feed/venues" element={<PopularVenues />} />
-              <Route path="/athlete/:userId" element={<PublicProfile />} />
-              <Route path="/g/:token" element={<RedeemInvite />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </Suspense>
-        </RouteErrorBoundary>
-      </BrowserRouter>
-      <Toaster theme="dark" richColors position="top-center" />
-      <Analytics />
-      <SpeedInsights />
-    </AuthProvider>
-  </ClerkProvider>
+  <AuthProvider>
+    <BrowserRouter>
+      <RouteErrorBoundary>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<App />} />
+            <Route
+              path="/login"
+              element={
+                <PublicOnly>
+                  <Login />
+                </PublicOnly>
+              }
+            />
+            <Route
+              path="/signup"
+              element={
+                <PublicOnly>
+                  <SignUp />
+                </PublicOnly>
+              }
+            />
+            <Route
+              path="/onboarding"
+              element={
+                <RequireAuth>
+                  <Onboarding />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <RequireAuth>
+                  <RequireOnboarding>
+                    <Profile />
+                  </RequireOnboarding>
+                </RequireAuth>
+              }
+            />
+            <Route path="/feed" element={<Feed />} />
+            <Route path="/feed/games" element={<RecommendedGames />} />
+            <Route path="/feed/venues" element={<PopularVenues />} />
+            <Route path="/athlete/:userId" element={<PublicProfile />} />
+            <Route path="/g/:token" element={<RedeemInvite />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </RouteErrorBoundary>
+    </BrowserRouter>
+    <Toaster theme="dark" richColors position="top-center" />
+    <Analytics />
+    <SpeedInsights />
+  </AuthProvider>
 );

@@ -14,6 +14,7 @@
  */
 
 import { supabase } from "./supabase";
+import { isMissingRpc } from "./rpcErrors";
 
 export type InviteAction = "approve" | "deny" | "revoke";
 export type InviteStatus = "pending" | "approved" | "denied" | "revoked";
@@ -21,17 +22,9 @@ export type InviteStatus = "pending" | "approved" | "denied" | "revoked";
 const MIGRATION_HINT =
   "Run supabase/migrations/20260501080000_game_duration_and_visibility.sql, then NOTIFY pgrst, 'reload schema'.";
 
-function rpcMissing(error: { message?: string; code?: string } | null): boolean {
-  if (!error) return false;
-  if (error.code === "PGRST202") return true;
-  const m = (error.message ?? "").toLowerCase();
-  return (
-    m.includes("schema cache") ||
-    (m.includes("could not find") && m.includes("function")) ||
-    m.includes("request_chat_invite") ||
-    m.includes("respond_chat_invite") ||
-    m.includes("redeem_invite_token")
-  );
+/** Genuinely-absent invite RPCs only — permission failures surface as real errors. */
+function rpcMissing(error: { message?: string; code?: string; hint?: string | null } | null): boolean {
+  return error ? isMissingRpc(error) : false;
 }
 
 /**

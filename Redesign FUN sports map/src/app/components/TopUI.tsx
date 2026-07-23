@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Filter, Navigation, MapPinned, X, MessageCircle, Rss, EyeOff, Shield, Globe, Bell, UserRound, Satellite } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react';
 import { useIsMobile } from './ui/use-mobile';
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 import type { ForwardGeocodeFeature } from '../../lib/geocoding';
 import type { ProfileSearchRow } from '../../lib/supabase';
@@ -14,6 +13,7 @@ import type { LocationVisibilityMode } from "../../lib/locationVisibility";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { VenueSportMenu } from "./VenueSportMenu";
 import type { VenueSportIntent } from "../lib/venueSportIntent";
+import { useAuth } from "../contexts/AuthContext";
 
 /** Glass morphism for map toolbar round controls (search, filter). */
 const MAP_GLASS_ICON_BTN =
@@ -165,6 +165,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const FEED_TOOLBAR_HINT_KEY = "fun_map_feed_toolbar_hint_v1";
   useEffect(() => {
@@ -193,30 +194,23 @@ export const TopNavigation = (props: TopNavigationProps) => {
   return (
     <div className="absolute top-0 left-0 right-0 z-50 pt-12 px-4 pb-4 bg-gradient-to-b from-[#0A0F1C]/90 via-[#0A0F1C]/50 to-transparent pointer-events-none">
       <div className="flex flex-col items-end gap-2">
-        {/* Clerk auth controls — visible sign-in / sign-up / account */}
-        <div className="flex items-center gap-2 pointer-events-auto self-start">
-          <Show when="signed-out">
-            <SignInButton mode="modal">
-              <button
-                type="button"
-                className="h-9 rounded-full border border-white/20 bg-slate-900/80 px-3.5 text-sm font-medium text-slate-100 backdrop-blur-xl hover:border-emerald-400/45 hover:text-emerald-300"
-              >
-                Sign in
-              </button>
-            </SignInButton>
-            <SignUpButton mode="modal">
-              <button
-                type="button"
-                className="h-9 rounded-full bg-emerald-600 px-3.5 text-sm font-medium text-white hover:bg-emerald-500"
-              >
-                Sign up
-              </button>
-            </SignUpButton>
-          </Show>
-          <Show when="signed-in">
-            <UserButton />
-          </Show>
-        </div>
+        {/* Guest auth controls — signed-in users use bottom-left avatar + settings Terminate Session */}
+        {!user && (
+          <div className="flex items-center gap-2 pointer-events-auto self-start">
+            <Link
+              to="/login"
+              className="inline-flex h-9 items-center rounded-full border border-white/20 bg-slate-900/80 px-3.5 text-sm font-medium text-slate-100 backdrop-blur-xl hover:border-emerald-400/45 hover:text-emerald-300"
+            >
+              Sign in
+            </Link>
+            <Link
+              to="/signup"
+              className="inline-flex h-9 items-center rounded-full bg-emerald-600 px-3.5 text-sm font-medium text-white hover:bg-emerald-500"
+            >
+              Sign up
+            </Link>
+          </div>
+        )}
 
         {/* Row: search, profile, filter — only this row goes full-width when search is open. */}
         <div

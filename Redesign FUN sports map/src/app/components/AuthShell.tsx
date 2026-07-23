@@ -3,46 +3,6 @@ import { Link } from "react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowLeft, MapPin, Users, Zap } from "lucide-react";
 
-const clerkAppearance = {
-  variables: {
-    colorPrimary: "#22d3ee",
-    colorDanger: "#fb7185",
-    colorSuccess: "#34d399",
-    colorWarning: "#fbbf24",
-    colorNeutral: "#94a3b8",
-    colorText: "#e2e8f0",
-    colorTextSecondary: "#94a3b8",
-    colorTextOnPrimaryBackground: "#020617",
-    colorBackground: "transparent",
-    colorInputBackground: "rgba(2, 6, 23, 0.72)",
-    colorInputText: "#f8fafc",
-    borderRadius: "0.9rem",
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
-  },
-  elements: {
-    rootBox: "w-full",
-    cardBox: "w-full shadow-none",
-    card: "bg-transparent shadow-none border-0 p-0",
-    headerTitle: "hidden",
-    headerSubtitle: "hidden",
-    socialButtonsBlockButton:
-      "border border-white/15 bg-slate-950/60 text-slate-100 hover:bg-slate-900/80 backdrop-blur-md",
-    socialButtonsBlockButtonText: "font-medium text-slate-100",
-    dividerLine: "bg-white/10",
-    dividerText: "text-slate-500",
-    formFieldLabel: "text-slate-300 text-sm font-medium",
-    formFieldInput:
-      "bg-slate-950/70 border border-white/12 text-slate-50 placeholder:text-slate-500 focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/25",
-    formButtonPrimary:
-      "bg-cyan-400 text-slate-950 font-semibold hover:bg-cyan-300 shadow-[0_0_28px_rgba(34,211,238,0.35)]",
-    footerActionLink: "text-cyan-300 hover:text-cyan-200",
-    identityPreviewEditButton: "text-cyan-300",
-    formFieldInputShowPasswordButton: "text-slate-400 hover:text-slate-200",
-    alternativeMethodsBlockButton: "border border-white/12 text-slate-200",
-    otpCodeFieldInput: "border border-white/12 bg-slate-950/70 text-slate-50",
-  },
-} as const;
-
 type AuthMode = "sign-in" | "sign-up";
 
 type AuthShellProps = {
@@ -189,12 +149,12 @@ export function AuthShell({ mode, children }: AuthShellProps) {
                 </h2>
                 <p className="mt-1 text-sm text-slate-400">
                   {isSignIn
-                    ? "Use email or a connected account."
+                    ? "Enter your email and password to continue."
                     : "You’ll land on the map right after signup."}
                 </p>
               </div>
 
-              <div className="auth-shell__clerk flex justify-center">{children}</div>
+              <div className="auth-shell__form w-full">{children}</div>
             </div>
 
             <p className="mt-5 text-center text-sm text-slate-500">
@@ -225,5 +185,3 @@ export function AuthShell({ mode, children }: AuthShellProps) {
     </div>
   );
 }
-
-export { clerkAppearance };

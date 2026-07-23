@@ -1,12 +1,12 @@
 import { supabase } from "./supabase";
 import type { DmInboxRow, DmMessageRow } from "./supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { isMissingRpc } from "./rpcErrors";
 
-function rpcMissing(error: { message?: string; code?: string } | null, fnName: string): boolean {
-  if (!error) return false;
-  if (error.code === "PGRST202") return true;
-  const m = (error.message ?? "").toLowerCase();
-  return m.includes("schema cache") || m.includes("could not find the function") || m.includes(fnName.toLowerCase());
+function rpcMissing(error: { message?: string; code?: string; hint?: string | null } | null, _fnName: string): boolean {
+  // Genuinely-absent RPCs only. A 42501 on can_dm previously matched the
+  // fnName substring and failed OPEN ({allowed: true}) — now it surfaces.
+  return error ? isMissingRpc(error) : false;
 }
 
 function isDmMessagesSchemaCacheMissing(error: { message?: string; code?: string } | null): boolean {
