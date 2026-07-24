@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router";
+import { Lock, Mail } from "lucide-react";
 import { AuthShell } from "../components/AuthShell";
 import { signIn } from "../../lib/api";
 
@@ -30,31 +31,37 @@ export default function Login() {
     <AuthShell mode="sign-in">
       <form onSubmit={handleSubmit} className="flex w-full flex-col gap-4">
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-slate-300">Email</span>
-          <input
-            type="email"
-            name="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="min-h-11 rounded-[0.9rem] border border-white/12 bg-slate-950/70 px-3.5 text-slate-50 placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none focus:ring-2 focus:ring-cyan-400/25"
-            placeholder="you@email.com"
-          />
+          <span className="arena-label text-[10px] text-cyan-300/90">Email</span>
+          <span className="relative block">
+            <Mail className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-cyan-400/80" aria-hidden />
+            <input
+              type="email"
+              name="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="arena-input"
+              placeholder="you@email.com"
+            />
+          </span>
         </label>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-slate-300">Password</span>
-          <input
-            type="password"
-            name="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="min-h-11 rounded-[0.9rem] border border-white/12 bg-slate-950/70 px-3.5 text-slate-50 placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none focus:ring-2 focus:ring-cyan-400/25"
-            placeholder="Your password"
-          />
+          <span className="arena-label text-[10px] text-cyan-300/90">Password</span>
+          <span className="relative block">
+            <Lock className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-cyan-400/80" aria-hidden />
+            <input
+              type="password"
+              name="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="arena-input"
+              placeholder="Your password"
+            />
+          </span>
         </label>
 
         {error ? (
@@ -63,13 +70,11 @@ export default function Login() {
           </p>
         ) : null}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="mt-1 min-h-11 rounded-[0.9rem] bg-cyan-400 px-4 text-sm font-semibold text-slate-950 shadow-[0_0_28px_rgba(34,211,238,0.35)] transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {submitting ? "Signing in…" : "Sign in"}
-        </button>
+        <div className="arena-cta-frame mt-2">
+          <button type="submit" disabled={submitting} className="arena-cta px-4 text-sm">
+            {submitting ? "Logging in…" : "Back in the game"}
+          </button>
+        </div>
       </form>
     </AuthShell>
   );
