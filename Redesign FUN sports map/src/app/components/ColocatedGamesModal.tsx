@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import { X, MapPin, ChevronRight, MessageCircle, Share2, Trash2, LogOut } from "lucide-react";
 import { format } from "date-fns";
 import type { GameRow } from "../../lib/supabase";
 import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";
 import { getSportIconEmoji } from "../map/gameSportIcons";
+import { useModalA11y } from "../../hooks/useModalA11y";
 
 type ColocatedGamesModalProps = {
   games: GameRow[];
@@ -44,6 +45,8 @@ export function ColocatedGamesModal({
   onOpenChat,
 }: ColocatedGamesModalProps) {
   const [expandedSport, setExpandedSport] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalA11y(panelRef, true, onClose);
   const g0 = games[0]!;
   const title = commonLocationLabel(games) ?? "Games at this spot";
 
@@ -94,7 +97,9 @@ export function ColocatedGamesModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm max-h-[min(32rem,85vh)] overflow-hidden rounded-2xl border border-slate-600/80 bg-slate-950/95 shadow-2xl"
+        ref={panelRef}
+        tabIndex={-1}
+        className="w-full max-w-sm max-h-[min(32rem,85vh)] overflow-hidden rounded-2xl border border-slate-600/80 bg-slate-950/95 shadow-2xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-4 border-b border-white/10">

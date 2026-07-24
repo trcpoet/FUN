@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useModalA11y } from "../../hooks/useModalA11y";
 import { format, isSameDay, startOfToday } from "date-fns";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -175,6 +176,8 @@ export function CreateGameModal({
   ensureSession,
   prefill = null,
 }: CreateGameModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeModal = useCallback(() => onOpenChange(false), [onOpenChange]);
   const [createKind, setCreateKind] = useState<"game" | "note">("game");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -430,6 +433,8 @@ export function CreateGameModal({
     onSuccess(null);
   };
 
+  useModalA11y(dialogRef, open, closeModal);
+
   if (!open) return null;
 
   const modalWidth = 360;
@@ -471,11 +476,14 @@ export function CreateGameModal({
         onClick={() => onOpenChange(false)}
       />
       <div
+        ref={dialogRef}
         role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
         aria-labelledby="create-game-modal-title"
         aria-describedby="create-game-modal-desc"
         className={glassMessengerPanel(
-          "fixed z-[70] w-[360px] max-h-[88vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl shadow-violet-950/20"
+          "fixed z-[70] w-[360px] max-h-[88vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl shadow-violet-950/20 focus:outline-none"
         )}
         style={
           hasAnchor

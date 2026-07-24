@@ -9,6 +9,7 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+@import './auth-shell.css';
 
 /* mapbox-gl.css is loaded with the map chunk via mapboxGlLoader.ts */
 
@@ -81,6 +82,15 @@
   display: inline-block;
   animation: game-sport-icon-wobble 5.2s ease-in-out infinite alternate;
   transform-origin: center center;
+}
+
+/* Respect the OS "Reduce Motion" setting for the always-on map animations. */
+@media (prefers-reduced-motion: reduce) {
+  .user-marker-ring,
+  .user-marker-avatar,
+  .game-sport-icon-wobble {
+    animation: none;
+  }
 }
 
 /* Profile header — back-to-map (globe): gradient + hover so it reads as a control */

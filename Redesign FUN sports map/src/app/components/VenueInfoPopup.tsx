@@ -25,6 +25,7 @@ import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue"
 import { getSportIconEmoji } from "../map/gameSportIcons";
 import { fetchVenueById, fetchVenueEnrichment } from "../../lib/api";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
+import { useModalA11y } from "../../hooks/useModalA11y";
 import { glassMessengerPanel } from "../styles/glass";
 import {
   prettyLabel,
@@ -112,16 +113,8 @@ export function VenueInfoPopup({
     return () => window.clearInterval(id);
   }, []);
 
-  // Close on Escape; focus the panel on open for keyboard users.
-  useEffect(() => {
-    if (!open) return;
-    panelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  // Focus trap + Escape + focus restore (replaces the manual Escape handler).
+  useModalA11y(panelRef, open, onClose);
 
   // Lightweight load on open: full OSM row (+ any already-cached hero/description).
   // This is a direct table read, NOT the /api/venue-enrich call.
@@ -617,7 +610,7 @@ export function VenueInfoPopup({
                 ) : null}
 
                 {/* Attribution — license requirement, footer text only (no link-out as primary). */}
-                <p className="mt-4 px-4 text-[10px] text-slate-600">
+                <p className="mt-4 px-4 text-[10px] text-slate-400">
                   Data © OpenStreetMap contributors{details.wikidata ? " · Wikidata" : ""}
                 </p>
               </div>
