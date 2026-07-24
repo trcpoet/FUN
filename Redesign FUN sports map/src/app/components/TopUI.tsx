@@ -16,6 +16,11 @@ import type { VenueSportIntent } from "../lib/venueSportIntent";
 import { useAuth } from "../contexts/AuthContext";
 
 /** Glass morphism for map toolbar round controls (search, filter). */
+/** Keyboard focus ring shared by the glass map buttons (invisible on hover/click). */
+const MAP_GLASS_FOCUS_RING =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 " +
+  "focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C] ";
+
 const MAP_GLASS_ICON_BTN =
   "w-12 h-12 rounded-full shrink-0 flex items-center justify-center transition-all duration-200 " +
   "border border-white/20 bg-gradient-to-b from-white/[0.2] to-white/[0.04] " +
@@ -23,7 +28,8 @@ const MAP_GLASS_ICON_BTN =
   "shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_10px_36px_rgba(0,0,0,0.35),0_0_0_1px_rgba(255,255,255,0.05)] " +
   "text-slate-200 hover:text-emerald-300 " +
   "hover:border-emerald-400/45 hover:from-emerald-500/18 hover:to-white/[0.08] " +
-  "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_14px_44px_rgba(16,185,129,0.18)]";
+  "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_14px_44px_rgba(16,185,129,0.18)] " +
+  MAP_GLASS_FOCUS_RING;
 
 /** Same glass look, smaller (location + game chats). */
 const MAP_GLASS_ICON_BTN_SM_BASE =
@@ -31,7 +37,8 @@ const MAP_GLASS_ICON_BTN_SM_BASE =
   "border border-white/20 bg-gradient-to-b from-white/[0.2] to-white/[0.04] " +
   "backdrop-blur-2xl backdrop-saturate-150 " +
   "shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_8px_28px_rgba(0,0,0,0.35),0_0_0_1px_rgba(255,255,255,0.05)] " +
-  "text-slate-200 ";
+  "text-slate-200 " +
+  MAP_GLASS_FOCUS_RING;
 
 const MAP_GLASS_ICON_BTN_SM_EMERALD =
   MAP_GLASS_ICON_BTN_SM_BASE +
@@ -236,7 +243,8 @@ export const TopNavigation = (props: TopNavigationProps) => {
                       <Search className="w-5 h-5 shrink-0" />
                     </div>
                     <input
-                      type="text"
+                      type="search"
+                      aria-label="Search places, sports, and people"
                       placeholder="Places, sports, or people…"
                       autoFocus
                       value={mapSearch?.query ?? ''}
@@ -254,6 +262,18 @@ export const TopNavigation = (props: TopNavigationProps) => {
                       </button>
                     )}
                   </div>
+
+                  {/* Screen-reader-only running count of results. */}
+                  <p className="sr-only" role="status" aria-live="polite">
+                    {mapSearch && !mapSearch.placesLoading && !mapSearch.peopleLoading
+                      ? (() => {
+                          const n =
+                            mapSearch.places.length + mapSearch.sportHits.length + mapSearch.people.length;
+                          if (mapSearch.query.trim().length < 2 && !mapSearch.playersNearMe) return "";
+                          return n === 0 ? "No results" : `${n} result${n === 1 ? "" : "s"} available`;
+                        })()
+                      : ""}
+                  </p>
 
                   {mapSearch && mapSearch.query.trim().length === 1 && !mapSearch.placesLoading && !mapSearch.peopleLoading && (
                     <p className="text-xs text-slate-500 px-3">Type at least 2 characters — results load as you pause typing.</p>
@@ -299,7 +319,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                                         <button
                                           type="button"
                                           onClick={() => mapSearch.onPickPlace(f)}
-                                          className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-slate-200 hover:bg-slate-800/90 transition-colors flex items-start gap-2"
+                                          className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-slate-200 hover:bg-slate-800/90 focus-visible:bg-slate-800/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 transition-colors flex items-start gap-2"
                                         >
                                           <MapPinned className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
                                           <span className="min-w-0">
@@ -329,7 +349,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                                       <button
                                         type="button"
                                         onClick={() => mapSearch.onPickSport(h.sport)}
-                                        className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-slate-200 hover:bg-emerald-500/10 transition-colors flex items-start gap-3"
+                                        className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-slate-200 hover:bg-emerald-500/10 focus-visible:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 transition-colors flex items-start gap-3"
                                       >
                                         <span className="text-lg shrink-0 mt-0.5" aria-hidden>
                                           {sportEmojiFor(h.sport)}
@@ -371,7 +391,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                                         <button
                                           type="button"
                                           onClick={() => mapSearch.onPickPerson(p)}
-                                          className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-slate-200 hover:bg-violet-500/10 transition-colors flex items-start gap-3"
+                                          className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-slate-200 hover:bg-violet-500/10 focus-visible:bg-violet-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 transition-colors flex items-start gap-3"
                                         >
                                           <div className="relative shrink-0 mt-0.5 size-9 rounded-full overflow-hidden bg-slate-800 border border-slate-600/80">
                                             {p.avatar_url?.trim() ? (
