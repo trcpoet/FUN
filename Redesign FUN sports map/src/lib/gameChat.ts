@@ -1,7 +1,7 @@
 import { supabase } from "./supabase";
 import type { GameInboxRow, GameMessageRow } from "./supabase";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { isMissingRpc } from "./rpcErrors";
+import { subscribeWithRetry } from "./realtimeRetry";
 
 /** PostgREST: function genuinely missing — permission failures surface as real errors. */
 function inboxRpcMissing(error: { message?: string; code?: string; hint?: string | null } | null): boolean {
@@ -286,17 +286,17 @@ export async function fetchGameChatMembers(gameId: string): Promise<{
   return { data: members, error: null };
 }
 
-/** Subscribe to new rows for one game. Returns cleanup to unsubscribe. */
+/** Subscribe to new rows for one game. Auto-reconnects. Returns cleanup to unsubscribe. */
 export function subscribeGameMessages(
   gameId: string,
   onInsert: (row: GameMessageRow) => void
 ): () => void {
   if (!supabase) return () => {};
+  const client = supabase;
 
-  const randomSuffix = Math.random().toString(36).substring(2, 10);
-  const channel: RealtimeChannel = supabase
-    .channel(`game-messages:${gameId}-${randomSuffix}`)
-    .on(
+  return subscribeWithRetry(() => {
+    const randomSuffix = Math.random().toString(36).substring(2, 10);
+    return client.channel(`game-messages:${gameId}-${randomSuffix}`).on(
       "postgres_changes",
       {
         event: "INSERT",
@@ -308,10 +308,6 @@ export function subscribeGameMessages(
         const row = payload.new as GameMessageRow;
         if (row?.id) onInsert(row);
       }
-    )
-    .subscribe();
-
-  return () => {
-    supabase?.removeChannel(channel);
-  };
+    );
+  });
 }

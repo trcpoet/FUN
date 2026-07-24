@@ -7,6 +7,7 @@
 
 import { supabase } from "./supabase";
 import { isMissingRpc } from "./rpcErrors";
+import { subscribeWithRetry } from "./realtimeRetry";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
 import { searchPeople } from "./searchPeople";
 import type { LocationVisibilityMode } from "./locationVisibility";
@@ -1471,9 +1472,9 @@ export function subscribeToNotifications(args: {
   const userId = args.userId.trim();
   if (!userId) return null;
 
-  const channel = client
-    .channel(`notifications:${userId}`)
-    .on(
+  return subscribeWithRetry(() => {
+    const randomSuffix = Math.random().toString(36).substring(2, 10);
+    return client.channel(`notifications:${userId}-${randomSuffix}`).on(
       "postgres_changes",
       {
         event: "INSERT",
@@ -1484,12 +1485,8 @@ export function subscribeToNotifications(args: {
       (payload) => {
         args.onInsert(payload.new as NotificationRow);
       }
-    )
-    .subscribe();
-
-  return () => {
-    void client.removeChannel(channel);
-  };
+    );
+  });
 }
 
 function profileNearbyToSearchRow(r: ProfileNearbyRow): ProfileSearchRow {

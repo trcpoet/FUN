@@ -2,6 +2,7 @@ import { supabase } from "./supabase";
 import type { DmInboxRow, DmMessageRow } from "./supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { isMissingRpc } from "./rpcErrors";
+import { subscribeWithRetry } from "./realtimeRetry";
 
 function rpcMissing(error: { message?: string; code?: string; hint?: string | null } | null, _fnName: string): boolean {
   // Genuinely-absent RPCs only. A 42501 on can_dm previously matched the
@@ -130,18 +131,23 @@ export function subscribeDmMessages(args: {
 }): { channel: RealtimeChannel | null; unsubscribe: () => void } {
   if (!supabase) return { channel: null, unsubscribe: () => {} };
   const client = supabase;
-  const channel = client
-    .channel(`dm_messages:${args.threadId}`)
-    .on(
-      "postgres_changes",
-      { event: "INSERT", schema: "public", table: "dm_messages", filter: `thread_id=eq.${args.threadId}` },
-      (payload) => {
-        const row = payload.new as unknown as DmMessageRow;
-        args.onInsert(row);
-      },
-    )
-    .subscribe();
 
-  return { channel, unsubscribe: () => void client.removeChannel(channel) };
+  // Auto-reconnecting. A unique suffix per (re)build avoids the fixed-topic
+  // collision that throws if the same thread is subscribed twice.
+  const unsubscribe = subscribeWithRetry(() => {
+    const randomSuffix = Math.random().toString(36).substring(2, 10);
+    return client
+      .channel(`dm_messages:${args.threadId}-${randomSuffix}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "dm_messages", filter: `thread_id=eq.${args.threadId}` },
+        (payload) => {
+          const row = payload.new as unknown as DmMessageRow;
+          args.onInsert(row);
+        },
+      );
+  });
+
+  return { channel: null, unsubscribe };
 }
 

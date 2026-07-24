@@ -1,7 +1,7 @@
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import type { MapNoteCommentRow, MapNoteRow, NoteInboxRow } from "./supabase";
 import { isMissingRpc } from "./rpcErrors";
+import { subscribeWithRetry } from "./realtimeRetry";
 
 /**
  * Centralized helpers for the perpetual map-notes inbox + realtime fan-out.
@@ -121,7 +121,7 @@ export async function fetchNoteById(
   };
 }
 
-/** Realtime: new comments on one note. Returns cleanup. */
+/** Realtime: new comments on one note. Auto-reconnects. Returns cleanup. */
 export function subscribeNoteComments(
   noteId: string,
   onInsert: (row: MapNoteCommentRow) => void,
@@ -129,10 +129,9 @@ export function subscribeNoteComments(
   const client = supabase;
   if (!client) return () => {};
 
-  const randomSuffix = Math.random().toString(36).substring(2, 10);
-  const channel: RealtimeChannel = client
-    .channel(`map-note-comments:${noteId}-${randomSuffix}`)
-    .on(
+  return subscribeWithRetry(() => {
+    const randomSuffix = Math.random().toString(36).substring(2, 10);
+    return client.channel(`map-note-comments:${noteId}-${randomSuffix}`).on(
       "postgres_changes",
       {
         event: "INSERT",
@@ -144,10 +143,6 @@ export function subscribeNoteComments(
         const row = payload.new as MapNoteCommentRow;
         if (row?.id) onInsert(row);
       },
-    )
-    .subscribe();
-
-  return () => {
-    client.removeChannel(channel);
-  };
+    );
+  });
 }
