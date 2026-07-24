@@ -14,6 +14,8 @@ import { SpeedInsights } from "@vercel/speed-insights/react";
 const App = lazy(() => import("./app/App.tsx"));
 const Login = lazy(() => import("./app/pages/Login.tsx"));
 const SignUp = lazy(() => import("./app/pages/SignUp.tsx"));
+const ForgotPassword = lazy(() => import("./app/pages/ForgotPassword.tsx"));
+const ResetPassword = lazy(() => import("./app/pages/ResetPassword.tsx"));
 const Onboarding = lazy(() => import("./app/pages/Onboarding.tsx"));
 const Profile = lazy(() => import("./app/pages/Profile.tsx"));
 const PublicProfile = lazy(() => import("./app/pages/PublicProfile.tsx"));
@@ -83,6 +85,17 @@ createRoot(document.getElementById("root")!).render(
                 </PublicOnly>
               }
             />
+            <Route
+              path="/forgot-password"
+              element={
+                <PublicOnly>
+                  <ForgotPassword />
+                </PublicOnly>
+              }
+            />
+            {/* Unguarded: the recovery link establishes a session, and PublicOnly
+                would bounce it to "/" before the user can set a new password. */}
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route
               path="/onboarding"
               element={

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { Lock, Mail, ShieldCheck } from "lucide-react";
 import { AuthShell } from "../components/AuthShell";
 import { signUp, validatePassword } from "../../lib/api";
+import { mapAuthError } from "../../lib/rpcErrors";
 
 export default function SignUpPage() {
   const navigate = useNavigate();
@@ -32,7 +33,7 @@ export default function SignUpPage() {
     try {
       const { error: signUpError } = await signUp(email, password);
       if (signUpError) {
-        setError(signUpError.message);
+        setError(mapAuthError(signUpError.message));
         return;
       }
       // If email confirmation is off, session exists → onboarding.

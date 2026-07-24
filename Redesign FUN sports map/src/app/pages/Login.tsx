@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Lock, Mail } from "lucide-react";
 import { AuthShell } from "../components/AuthShell";
 import { signIn } from "../../lib/api";
+import { mapAuthError } from "../../lib/rpcErrors";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -18,7 +19,7 @@ export default function Login() {
     try {
       const { error: signInError } = await signIn(email, password);
       if (signInError) {
-        setError(signInError.message);
+        setError(mapAuthError(signInError.message));
         return;
       }
       navigate("/", { replace: true });
@@ -63,6 +64,15 @@ export default function Login() {
             />
           </span>
         </label>
+
+        <div className="-mt-1 text-right">
+          <Link
+            to="/forgot-password"
+            className="rounded text-xs font-medium text-cyan-300/90 underline-offset-4 transition hover:text-cyan-200 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+          >
+            Forgot password?
+          </Link>
+        </div>
 
         {error ? (
           <p className="rounded-xl border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">

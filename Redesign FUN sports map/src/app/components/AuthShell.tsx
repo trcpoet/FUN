@@ -3,11 +3,13 @@ import { Link } from "react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowLeft, Newspaper, Radar, Swords } from "lucide-react";
 
-type AuthMode = "sign-in" | "sign-up";
+type AuthMode = "sign-in" | "sign-up" | "reset";
 
 type AuthShellProps = {
   mode: AuthMode;
   children: React.ReactNode;
+  /** Overrides the form-panel heading (e.g. the two reset screens). */
+  panelHeading?: string;
 };
 
 const featureCards = [
@@ -31,9 +33,10 @@ const featureCards = [
   },
 ] as const;
 
-export function AuthShell({ mode, children }: AuthShellProps) {
+export function AuthShell({ mode, children, panelHeading }: AuthShellProps) {
   const reduceMotion = useReducedMotion();
   const isSignIn = mode === "sign-in";
+  const isSignUp = mode === "sign-up";
 
   return (
     <div className="auth-shell relative min-h-screen min-h-dvh overflow-hidden bg-[#060b1a] text-slate-100">
@@ -78,22 +81,22 @@ export function AuthShell({ mode, children }: AuthShellProps) {
             className="hidden lg:block"
           >
             <h1 className="arena-display max-w-xl text-4xl xl:text-5xl">
-              {isSignIn ? (
+              {isSignUp ? (
                 <>
-                  <span className="text-white">Back in the </span>
+                  <span className="text-white">Join the </span>
                   <span className="arena-display--gradient">FUN arena</span>
                 </>
               ) : (
                 <>
-                  <span className="text-white">Join the </span>
+                  <span className="text-white">Back in the </span>
                   <span className="arena-display--gradient">FUN arena</span>
                 </>
               )}
             </h1>
             <p className="mt-4 max-w-md text-lg leading-relaxed text-slate-300">
-              {isSignIn
-                ? "Your games, crews, and courts are right where you left them."
-                : "Your ultimate sports network. Connect, compete, and conquer."}
+              {isSignUp
+                ? "Your ultimate sports network. Connect, compete, and conquer."
+                : "Your games, crews, and courts are right where you left them."}
             </p>
 
             <ul className="mt-9 max-w-lg space-y-4">
@@ -122,7 +125,7 @@ export function AuthShell({ mode, children }: AuthShellProps) {
               ))}
             </ul>
 
-            {!isSignIn ? (
+            {isSignUp ? (
               <p className="mt-8 max-w-md text-sm leading-relaxed text-slate-500">
                 FUN's philosophy: the fastest way to make friends is to play. Your city is the arena.
               </p>
@@ -139,27 +142,27 @@ export function AuthShell({ mode, children }: AuthShellProps) {
             {/* Mobile hero */}
             <div className="mb-7 text-center lg:hidden">
               <h1 className="arena-display text-[1.9rem] leading-tight">
-                {isSignIn ? (
+                {isSignUp ? (
                   <>
-                    <span className="text-white">Back in the </span>
+                    <span className="text-white">Join the </span>
                     <span className="arena-display--gradient">FUN arena</span>
                   </>
                 ) : (
                   <>
-                    <span className="text-white">Join the </span>
+                    <span className="text-white">Back in the </span>
                     <span className="arena-display--gradient">FUN arena</span>
                   </>
                 )}
               </h1>
               <p className="mt-2.5 text-sm leading-relaxed text-slate-400">
-                {isSignIn
-                  ? "Your games, crews, and courts are right where you left them."
-                  : "Your ultimate sports network. Connect, compete, and conquer."}
+                {isSignUp
+                  ? "Your ultimate sports network. Connect, compete, and conquer."
+                  : "Your games, crews, and courts are right where you left them."}
               </p>
             </div>
 
             {/* Mobile feature cards (sign-up only, per the mock) */}
-            {!isSignIn ? (
+            {isSignUp ? (
               <ul className="mb-7 space-y-3.5 lg:hidden">
                 {featureCards.map(({ icon: Icon, accent, title, body }, i) => (
                   <motion.li
@@ -190,13 +193,20 @@ export function AuthShell({ mode, children }: AuthShellProps) {
             {/* Form panel */}
             <div className="arena-panel p-5 sm:p-7">
               <h2 className="arena-label mb-6 text-center text-base text-cyan-300 [text-shadow:0_0_14px_rgba(34,211,238,0.45)]">
-                {isSignIn ? "Welcome back" : "Create your profile"}
+                {panelHeading ?? (isSignUp ? "Create your profile" : "Welcome back")}
               </h2>
               <div className="auth-shell__form w-full">{children}</div>
             </div>
 
             <p className="mt-5 text-center text-sm text-slate-500">
-              {isSignIn ? (
+              {isSignUp ? (
+                <>
+                  Already have an account?{" "}
+                  <Link to="/login" className="font-semibold text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline">
+                    Log in
+                  </Link>
+                </>
+              ) : isSignIn ? (
                 <>
                   New player?{" "}
                   <Link to="/signup" className="font-semibold text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline">
@@ -205,7 +215,7 @@ export function AuthShell({ mode, children }: AuthShellProps) {
                 </>
               ) : (
                 <>
-                  Already have an account?{" "}
+                  Remembered your password?{" "}
                   <Link to="/login" className="font-semibold text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline">
                     Log in
                   </Link>

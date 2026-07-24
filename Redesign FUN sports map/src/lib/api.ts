@@ -548,9 +548,20 @@ export async function signOut(): Promise<void> {
 
 export async function resetPassword(email: string): Promise<{ error: Error | null }> {
   if (!supabase) return { error: new Error("Supabase not configured") };
+  // Must NOT be /login — that route is PublicOnly and would bounce the recovery
+  // session to "/" before the user can set a new password.
   const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-    redirectTo: `${window.location.origin}/login`,
+    redirectTo: `${window.location.origin}/reset-password`,
   });
+  return { error: error ? new Error(error.message) : null };
+}
+
+/** Set a new password for the currently-authenticated (recovery) session. */
+export async function updatePassword(password: string): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const validation = validatePassword(password);
+  if (!validation.ok) return { error: new Error(validation.message) };
+  const { error } = await supabase.auth.updateUser({ password });
   return { error: error ? new Error(error.message) : null };
 }
 
