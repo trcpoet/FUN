@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { GameRow, ProfileNearbyRow } from "../lib/supabase";
+import { planNearbyQueries } from "../lib/nearbyQueryPlan";
 
 const PROFILES_LIMIT = 50;
 
@@ -17,6 +18,7 @@ function cacheKey(p: {
   profilesLat: number | null;
   profilesLng: number | null;
   athletesRadiusKm: number;
+  includeProfiles: boolean;
 }): string {
   return [
     p.gamesLat ?? "x",
@@ -25,6 +27,8 @@ function cacheKey(p: {
     p.profilesLat ?? "x",
     p.profilesLng ?? "x",
     p.athletesRadiusKm,
+    // A guest's games-only entry must not be served to a signed-in user (and vice versa).
+    p.includeProfiles ? "p1" : "p0",
   ].join(":");
 }
 
@@ -58,8 +62,18 @@ export function useNearbyMapQueries(params: {
   profilesLat: number | null;
   profilesLng: number | null;
   athletesRadiusKm: number;
+  /** Player profiles/locations are signed-in only (privacy). Defaults to true. */
+  includeProfiles?: boolean;
 }) {
-  const { gamesLat, gamesLng, gamesRadiusKm, profilesLat, profilesLng, athletesRadiusKm } = params;
+  const {
+    gamesLat,
+    gamesLng,
+    gamesRadiusKm,
+    profilesLat,
+    profilesLng,
+    athletesRadiusKm,
+    includeProfiles = true,
+  } = params;
 
   const [games, setGames] = useState<GameRow[]>([]);
   const [profiles, setProfiles] = useState<ProfileNearbyRow[]>([]);
@@ -76,8 +90,11 @@ export function useNearbyMapQueries(params: {
       return;
     }
 
-    const needGames = gamesLat != null && gamesLng != null;
-    const needProfiles = profilesLat != null && profilesLng != null;
+    const { fetchGames: needGames, fetchProfiles: needProfiles } = planNearbyQueries({
+      hasGamesCoords: gamesLat != null && gamesLng != null,
+      hasProfilesCoords: profilesLat != null && profilesLng != null,
+      includeProfiles,
+    });
 
     if (!needGames && !needProfiles) {
       setGames([]);
@@ -94,6 +111,7 @@ export function useNearbyMapQueries(params: {
       profilesLat,
       profilesLng,
       athletesRadiusKm,
+      includeProfiles,
     });
 
     if (refreshTrigger === 0) {
@@ -193,6 +211,7 @@ export function useNearbyMapQueries(params: {
     profilesLat,
     profilesLng,
     athletesRadiusKm,
+    includeProfiles,
     refreshTrigger,
   ]);
 

@@ -32,6 +32,7 @@ import { useTotalUnreadMessages } from "../hooks/useTotalUnreadMessages";
 import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById, fetchVenueById } from "../lib/api";
 import { isPermissionDenied, friendlyRpcError } from "../lib/rpcErrors";
+import { SignInGate, type SignInGateAction } from "./components/SignInGate";
 import { fetchDirections } from "../lib/directions";
 import { fetchMyDmInbox, getOrCreateDmThread } from "../lib/dmChat";
 import { fetchMyGameInbox, sendGameMessage } from "../lib/gameChat";
@@ -133,6 +134,11 @@ export default function App() {
 
   const notesErrorToastedRef = useRef(false);
   const refetchNotes = useCallback(async () => {
+    // Map notes are signed-in only (privacy); guests browse games + venues only.
+    if (!currentUserId) {
+      setMapNotes([]);
+      return;
+    }
     const { data, error } = await fetchNotesNearby({
       lat: gamesFetchLat,
       lng: gamesFetchLng,
@@ -148,7 +154,7 @@ export default function App() {
       }
     }
     setMapNotes(data ?? []);
-  }, [gamesFetchLat, gamesFetchLng, appliedFilters.venueRadiusKm]);
+  }, [currentUserId, gamesFetchLat, gamesFetchLng, appliedFilters.venueRadiusKm]);
 
   const {
     games,
@@ -163,6 +169,8 @@ export default function App() {
     profilesLat: userCoords?.lat ?? effectiveUserCoords.lat,
     profilesLng: userCoords?.lng ?? effectiveUserCoords.lng,
     athletesRadiusKm: appliedFilters.athletesRadiusKm,
+    // Player locations are signed-in only (privacy); guests see games only.
+    includeProfiles: !!currentUserId,
   });
   const [venuesFetchLoading, setVenuesFetchLoading] = useState(false);
   const [filterApplySync, setFilterApplySync] = useState(false);
@@ -476,11 +484,13 @@ export default function App() {
     prefetchMapboxGl();
   }, []);
 
-  const ensureSession = async (): Promise<boolean> => {
+  // Guests get a friendly "sign in to continue" sheet instead of a hard redirect.
+  const [signInGate, setSignInGate] = useState<SignInGateAction | null>(null);
+  const ensureSession = async (action: SignInGateAction = "join"): Promise<boolean> => {
     if (currentUserId) return true;
     const { data: { session } } = await supabase!.auth.getSession();
     if (session?.user) return true;
-    navigate("/login");
+    setSignInGate(action);
     return false;
   };
 
@@ -745,8 +755,15 @@ export default function App() {
   }, [locationError, userCoords]);
 
   useEffect(() => {
-    if (gamesError) {
-      toast.error("Couldn't load games — check the database setup (supabase/schema.sql), then refresh.");
+    if (!gamesError) return;
+    // A permission error here means get_games_nearby isn't granted to the caller's
+    // role — not a "database setup" problem the user can act on. Keep the console
+    // hint for devs, show the user something calm and accurate.
+    if (isPermissionDenied({ message: gamesError })) {
+      console.warn("[FUN] get_games_nearby permission denied — is anon/authenticated EXECUTE granted?", gamesError);
+      toast.error("Couldn't load nearby games right now. Please try again shortly.");
+    } else {
+      toast.error("Couldn't load games. Check your connection, then refresh.");
     }
   }, [gamesError]);
 
@@ -803,7 +820,8 @@ export default function App() {
           onSelectVenue={setSelectedVenue}
           mapCameraRequest={mapCameraRequest}
           gamePopupRequest={gamePopupRequest}
-          onMapLongPress={(lat, lng, viewportPoint) => {
+          onMapLongPress={async (lat, lng, viewportPoint) => {
+            if (!(await ensureSession("create"))) return;
             setCreateGameCoords({ lat, lng });
             setCreateGameAnchorPoint(viewportPoint ?? null);
             setCreateGameLocationLabel(null);
@@ -814,7 +832,8 @@ export default function App() {
             setMapSearchLocation({ lat, lng });
             setMapSearchLocationName(null);
           }}
-          onCreateGameAtVenue={(venue, viewportPoint) => {
+          onCreateGameAtVenue={async (venue, viewportPoint) => {
+            if (!(await ensureSession("create"))) return;
             setCreateGameCoords({ lat: venue.center.lat, lng: venue.center.lng });
             setCreateGameAnchorPoint(viewportPoint ?? null);
             const prettyLabel = (s: string | undefined | null) => {
@@ -981,7 +1000,7 @@ export default function App() {
         focusThread={messengerFocus}
         onFocusThreadChange={setMessengerFocus}
         currentUserId={currentUserId}
-        ensureSession={ensureSession}
+        ensureSession={() => ensureSession("chat")}
         joinedGameIds={joinedGameIds}
         onLeaveThread={handleLeaveGame}
         inboxBootstrap={gameInboxBootstrap}
@@ -1084,6 +1103,8 @@ export default function App() {
           void reloadJoinedGameIds();
         }}
       />
+
+      <SignInGate action={signInGate} onClose={() => setSignInGate(null)} />
     </div>
   );
 }
