@@ -2330,7 +2330,9 @@ export function MapboxMap(props: MapboxMapProps) {
               source: SRC_VENUE_POINTS,
               filter: pointFilter,
               layout: {
-                "icon-image": ["coalesce", ["get", "sport_map_icon"], getGameMapboxIconId("other")],
+                // Venues never fall back to the game pickup pin (🎯); a field with
+                // no exact sport shows the stadium marker.
+                "icon-image": ["coalesce", ["get", "sport_map_icon"], getGameMapboxIconId("recreation")],
                 "icon-size": MapCfg.VENUE_ICON_LAYOUT_BASE,
                 "icon-allow-overlap": true,
                 "icon-ignore-placement": true,

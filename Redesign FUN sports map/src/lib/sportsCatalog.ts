@@ -73,7 +73,7 @@ export const SPORTS_CATALOG: SportDef[] = [
 
   // —— Fitness / studio ——
   { id: "Running", emoji: "🏃", mapboxSuffix: "running", category: "fitness", osmSport: ["running", "athletics"], osmLeisure: ["track", "fitness_centre"], aliases: ["track", "jog", "jogging"], popular: true },
-  { id: "Gym", emoji: "🏋️", mapboxSuffix: "gym", category: "fitness", osmSport: ["fitness", "weight_training", "multi"], osmLeisure: ["fitness_centre", "sports_centre"], aliases: ["fitness", "workout", "weights"], popular: true },
+  { id: "Gym", emoji: "🏋️", mapboxSuffix: "gym", category: "fitness", osmSport: ["fitness", "weight_training"], osmLeisure: ["fitness_centre", "sports_centre"], aliases: ["fitness", "workout", "weights"], popular: true },
   { id: "Yoga", emoji: "🧘", mapboxSuffix: "yoga", category: "fitness", osmSport: ["yoga"], osmLeisure: ["fitness_centre"], popular: true },
   { id: "Pilates", emoji: "🧘‍♀️", mapboxSuffix: "pilates", category: "fitness", osmSport: ["pilates", "yoga"], osmLeisure: ["fitness_centre"] },
   { id: "Dance", emoji: "💃", mapboxSuffix: "dance", category: "fitness", osmSport: ["dance"], osmLeisure: ["dance", "fitness_centre"] },
@@ -85,7 +85,7 @@ export const SPORTS_CATALOG: SportDef[] = [
   { id: "Power", emoji: "🔥", mapboxSuffix: "power", category: "fitness", osmSport: ["fitness", "weight_training"], osmLeisure: ["fitness_centre"] },
 
   // —— Combat ——
-  { id: "Martial Arts", emoji: "🥋", mapboxSuffix: "martial_arts", category: "combat", osmSport: ["martial_arts", "karate", "judo", "taekwondo", "mma", "multi"], osmLeisure: ["sports_centre", "fitness_centre"], aliases: ["mma", "bjj", "jiu jitsu", "karate", "judo", "taekwondo"] },
+  { id: "Martial Arts", emoji: "🥋", mapboxSuffix: "martial_arts", category: "combat", osmSport: ["martial_arts", "karate", "judo", "taekwondo", "mma"], osmLeisure: ["sports_centre", "fitness_centre"], aliases: ["mma", "bjj", "jiu jitsu", "karate", "judo", "taekwondo"] },
   { id: "Boxing", emoji: "🥊", mapboxSuffix: "boxing", category: "combat", osmSport: ["boxing"], osmLeisure: ["fitness_centre", "sports_centre"], aliases: ["box"] },
   { id: "Wrestling", emoji: "🤼", mapboxSuffix: "wrestling", category: "combat", osmSport: ["wrestling"], osmLeisure: ["sports_centre"] },
 

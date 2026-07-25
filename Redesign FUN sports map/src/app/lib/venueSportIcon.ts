@@ -7,6 +7,14 @@ import { osmSportTokens } from "../../lib/osmSportTags";
 import { getGameMapboxIconId, resolveSportMapboxSuffix } from "../map/gameSportIcons";
 import { SPORTS_CATALOG, OTHER_SPORT } from "../../lib/sportsCatalog";
 
+/**
+ * Icon suffix for a physical venue with no exact sport (bare pitch, multi-sport
+ * pitch, sports_centre, recreation_ground…). Reuses the existing "Recreation
+ * Center" 🏟️ marker so a field reads as a venue, not a game "other" pin (🎯).
+ * (Recreation Center is a SPORTS_CATALOG entry, so this icon is registered.)
+ */
+const GENERIC_VENUE_SUFFIX = "recreation";
+
 /** Stable numeric keys for Mapbox `clusterProperties` max aggregation (registry order + other). */
 const SUFFIX_TO_KEY: Record<string, number> = (() => {
   const out: Record<string, number> = {};
@@ -24,6 +32,8 @@ const KEY_TO_MAPBOX_ID: Record<number, string> = {};
 for (const [suffix, key] of Object.entries(SUFFIX_TO_KEY)) {
   KEY_TO_MAPBOX_ID[key] = getGameMapboxIconId(suffix);
 }
+// Clustered venues with no exact sport render the stadium marker, not 🎯.
+KEY_TO_MAPBOX_ID[OTHER_KEY] = getGameMapboxIconId(GENERIC_VENUE_SUFFIX);
 
 /**
  * Specific `leisure=*` venue types → icon suffix, for venues that carry no usable `sport=*`.
@@ -64,7 +74,10 @@ export function primaryVenueSportSuffix(
 }
 
 export function venueSportMapIconId(sport: string | undefined | null, leisure?: string | null): string {
-  return getGameMapboxIconId(primaryVenueSportSuffix(sport, leisure));
+  const suffix = primaryVenueSportSuffix(sport, leisure);
+  // No exact sport → stadium marker (represents the field) instead of 🎯.
+  if (suffix === OTHER_SPORT.mapboxSuffix) return getGameMapboxIconId(GENERIC_VENUE_SUFFIX);
+  return getGameMapboxIconId(suffix);
 }
 
 export function venueSportKey(sport: string | undefined | null, leisure?: string | null): number {
