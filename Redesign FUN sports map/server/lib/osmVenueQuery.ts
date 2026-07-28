@@ -29,6 +29,9 @@ const LEISURE_TOKENS = [
   "disc_golf_course",
   "skatepark",
   "recreation_ground",
+  // Named public parks (e.g. Doug Russell Park) — pickup-sports destinations even
+  // when the green space carries no sport=* tag. Rendered with the stadium marker.
+  "park",
 ] as const;
 
 /** `sport=*` tokens for venues often tagged without a fetched `leisure=*`. */

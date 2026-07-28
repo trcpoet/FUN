@@ -8,5 +8,8 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     include: ["src/**/*.test.ts"],
+    // Forks time out on worker startup when the repo sits on an iCloud-synced
+    // path (heavy I/O). Threads are stable + faster here.
+    pool: "threads",
   },
 });
