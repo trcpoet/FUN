@@ -6,6 +6,7 @@ import { Clock, Trash2, Navigation, Share2, Play, Square, MessageCircle, X, User
 import { sportEmojiFor } from "../../lib/sportDisplay";
 import { glassMessengerPanel } from "../styles/glass";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
+import type { NavigateToOptions } from "../../lib/directions";
 import { directionsHref } from "../lib/venueInfoHelpers";
 
 const SPORT_GRADIENT: Record<string, string> = {
@@ -52,7 +53,7 @@ type GameEventPopupProps = {
   /** Viewer location for distance / directions (browser geolocation). */
   viewerCoords?: { lat: number; lng: number } | null;
   /** Draw Mapbox walking route on the map. */
-  onNavigateTo?: (dest: { lat: number; lng: number }) => void;
+  onNavigateTo?: (dest: { lat: number; lng: number }, opts?: NavigateToOptions) => void;
 };
 
 export function GameEventPopup({
@@ -79,7 +80,11 @@ export function GameEventPopup({
   const liveNow = isLive || optimisticLive;
 
   const dest = hasCoords ? { lat: game.lat, lng: game.lng } : null;
-  const { summary: walkSummary, loading: walkLoading } = useRouteDirections({
+  const {
+    summary: walkSummary,
+    loading: walkLoading,
+    result: walkResult,
+  } = useRouteDirections({
     from: viewerCoords,
     to: dest,
     enabled: hasCoords && Boolean(viewerCoords),
@@ -92,7 +97,8 @@ export function GameEventPopup({
 
   const handleShowRoute = () => {
     if (!dest) return;
-    onNavigateTo?.(dest);
+    // Hand over the route this popup already fetched for its ETA label — no second network call.
+    onNavigateTo?.(dest, { result: walkResult, label: game.title || "Pickup game" });
   };
 
   const handleShare = async () => {

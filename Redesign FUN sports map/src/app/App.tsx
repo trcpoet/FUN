@@ -12,6 +12,7 @@ const MapboxMap = React.lazy(() =>
 );
 import { TopNavigation } from "./components/TopUI";
 import { BottomCarousel } from "./components/BottomCarousel";
+import { ActiveRouteChip } from "./components/ActiveRouteChip";
 import { GameMessengerSheet } from "./components/GameMessengerSheet";
 import type { MessengerThreadFocus, PlanRematchPayload } from "./components/GameMessengerSheet";
 import { CreateGameModal, type CreateGamePrefill } from "./components/CreateGameModal";
@@ -33,7 +34,13 @@ import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById, fetchVenueById } from "../lib/api";
 import { isPermissionDenied, friendlyRpcError } from "../lib/rpcErrors";
 import { SignInGate, type SignInGateAction } from "./components/SignInGate";
-import { fetchDirections } from "../lib/directions";
+import {
+  fetchDirections,
+  formatDirectionsSummary,
+  type DirectionsProfile,
+  type DirectionsResult,
+  type NavigateToOptions,
+} from "../lib/directions";
 import { fetchMyDmInbox, getOrCreateDmThread } from "../lib/dmChat";
 import { fetchMyGameInbox, sendGameMessage } from "../lib/gameChat";
 import { visibilityEnumToLabel } from "../lib/gamePreferenceOptions";
@@ -48,7 +55,7 @@ import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
 import {
   readStoredVenueSportIntent,
-  venueIntentToSportFilter,
+  resolveVenueSportFilter,
   writeStoredVenueSportIntent,
   type VenueSportIntent,
 } from "./lib/venueSportIntent";
@@ -62,6 +69,12 @@ const EXTENDED_GAMES_RADIUS_KM = 120;
 
 const APPLIED_FILTERS_KEY = "fun_applied_f_v1";
 const FILTERS_SEEDED_KEY = "fun_applied_filters_seeded_v1";
+
+/** A route currently drawn on the map, plus what the route chip needs to describe it. */
+type ActiveRoute = DirectionsResult & {
+  profile: DirectionsProfile;
+  destLabel: string | null;
+};
 
 function readPersistedFilters(): FiltersState | null {
   try {
@@ -107,20 +120,19 @@ export default function App() {
   const debouncedSearch = useDebouncedValue(searchQuery, SEARCH_DEBOUNCE_MS);
   const [mapSearchLocation, setMapSearchLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [mapSearchLocationName, setMapSearchLocationName] = useState<string | null>(null);
+  /** Bumped when the user double-taps a spot: forces a fresh venue search even at the same center. */
+  const [mapSearchEpoch, setMapSearchEpoch] = useState(0);
   const [sportFocus, setSportFocus] = useState<{ sport: string } | null>(null);
   const [mapCameraRequest, setMapCameraRequest] = useState<MapCameraRequest | null>(null);
   const mapCameraIdRef = useRef(0);
   const sportCameraSigRef = useRef("");
   const emptySportToastSportRef = useRef<string | null>(null);
 
+  // An explicitly searched/tapped location outranks a lingering sport focus.
   const gamesFetchLat =
-    sportFocus && userCoords
-      ? userCoords.lat
-      : mapSearchLocation?.lat ?? effectiveUserCoords.lat;
+    mapSearchLocation?.lat ?? (sportFocus && userCoords ? userCoords.lat : effectiveUserCoords.lat);
   const gamesFetchLng =
-    sportFocus && userCoords
-      ? userCoords.lng
-      : mapSearchLocation?.lng ?? effectiveUserCoords.lng;
+    mapSearchLocation?.lng ?? (sportFocus && userCoords ? userCoords.lng : effectiveUserCoords.lng);
 
   const [appliedFilters, setAppliedFilters] = useState<FiltersState>(() => readPersistedFilters() ?? DEFAULT_FILTERS);
   const [filtersDraft, setFiltersDraft] = useState<FiltersState>(() => readPersistedFilters() ?? DEFAULT_FILTERS);
@@ -264,23 +276,29 @@ export default function App() {
   const presenceHeartbeatAtRef = useRef(0);
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
   const [selectedVenue, setSelectedVenue] = useState<VenueSelection | null>(null);
-  const [directionsGeometry, setDirectionsGeometry] = useState<GeoJSON.LineString | null>(null);
+  // A shown route outlives the popup that started it — it is only cleared from the route chip's ✕.
+  const [activeRoute, setActiveRoute] = useState<ActiveRoute | null>(null);
 
   const handleNavigateTo = useCallback(
-    async (dest: { lat: number; lng: number }) => {
+    async (dest: { lat: number; lng: number }, opts?: NavigateToOptions) => {
       const from = userCoords ?? lastKnownCoords;
       if (!from) return;
-      const { data } = await fetchDirections({ from, to: dest, profile: "walking" });
-      if (data?.geometry) setDirectionsGeometry(data.geometry);
+      // Popups already fetched this exact route for their ETA label; reuse it when it's ready.
+      const data = opts?.result ?? (await fetchDirections({ from, to: dest, profile: "walking" })).data;
+      if (data?.geometry) {
+        setActiveRoute({ ...data, profile: "walking", destLabel: opts?.label ?? null });
+      }
     },
     [userCoords, lastKnownCoords]
   );
 
-  useEffect(() => {
-    if (!selectedGame && !selectedVenue) {
-      setDirectionsGeometry(null);
-    }
-  }, [selectedGame, selectedVenue]);
+  /** Frame the whole route — the venue camera sits at zoom >= 17, so most of the line is off-screen. */
+  const handleFitActiveRoute = useCallback(() => {
+    const coordinates = activeRoute?.geometry.coordinates as [number, number][] | undefined;
+    if (!coordinates?.length) return;
+    mapCameraIdRef.current += 1;
+    setMapCameraRequest({ id: mapCameraIdRef.current, kind: "fitBounds", coordinates });
+  }, [activeRoute]);
   const [gamePopupRequest, setGamePopupRequest] = useState<{ nonce: number; gameId: string } | null>(null);
   const openGamePopupNonceRef = useRef(0);
   const [createGameOpen, setCreateGameOpen] = useState(false);
@@ -779,8 +797,8 @@ export default function App() {
 
   const venueSportsFilter = useMemo(() => {
     if (!venueIntentReady) return [];
-    return venueIntentToSportFilter(venueSportIntent);
-  }, [venueIntentReady, venueSportIntent]);
+    return resolveVenueSportFilter(venueSportIntent, appliedFilters.sports);
+  }, [venueIntentReady, venueSportIntent, appliedFilters.sports]);
 
   const handleVenueSportIntentChange = useCallback((next: VenueSportIntent) => {
     setVenueSportIntent(next);
@@ -828,9 +846,13 @@ export default function App() {
             setCreateGameOpen(true);
           }}
           onMapDoubleTap={(lat, lng) => {
-            // Reload venues centered on the tapped point (debounced venue fetch).
+            // Abandon whatever the map was showing and search this spot only: bumping the epoch
+            // re-keys the venue fetch, which aborts the in-flight request and clears the old pins.
             setMapSearchLocation({ lat, lng });
-            setMapSearchLocationName(null);
+            setMapSearchLocationName("Pinned area");
+            setSportFocus(null); // an explicit place beats a lingering sport search
+            setMapSearchEpoch((n) => n + 1);
+            refetchGames(); // bypasses the 75s nearby cache
           }}
           onCreateGameAtVenue={async (venue, viewportPoint) => {
             if (!(await ensureSession("create"))) return;
@@ -882,6 +904,7 @@ export default function App() {
             setMessagesOpen(true);
           }}
           venuesCenter={mapSearchLocation}
+          mapSearchEpoch={mapSearchEpoch}
           onVenuesFetchLoadingChange={handleVenuesFetchLoading}
           venueSportsFilter={venueSportsFilter}
           venueFetchEnabled={venueIntentReady}
@@ -889,9 +912,8 @@ export default function App() {
           mapMinuteEpoch={mapMinuteEpoch}
           pauseVenueFetch={messagesOpen}
           mapStyleUrl={satelliteOn ? "mapbox://styles/mapbox/satellite-streets-v12" : null}
-          directionsGeometry={directionsGeometry}
+          directionsGeometry={activeRoute?.geometry ?? null}
           onNavigateTo={handleNavigateTo}
-          onClearDirections={() => setDirectionsGeometry(null)}
         />
       </Suspense>
 
@@ -975,6 +997,14 @@ export default function App() {
       />
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
+        {activeRoute && (
+          <ActiveRouteChip
+            summary={formatDirectionsSummary(activeRoute.profile, activeRoute)}
+            destLabel={activeRoute.destLabel}
+            onFit={handleFitActiveRoute}
+            onClear={() => setActiveRoute(null)}
+          />
+        )}
         <BottomCarousel
           games={liveNowOpen ? liveStripGames : displayGames}
           selectedGame={selectedGame}

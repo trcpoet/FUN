@@ -11,6 +11,7 @@ import type { GameRow } from "../../lib/supabase";
 import type { ProfileNearbyRow } from "../../lib/supabase";
 import type { MapNoteRow } from "../../lib/supabase";
 import { isVenueGame } from "../../lib/mapGameTimer";
+import type { NavigateToOptions } from "../../lib/directions";
 import { gamesToGeoJSON } from "../types/mapGeoJSON";
 import { fetchSportsVenuesWithProgress } from "../lib/sportsVenues";
 import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
@@ -77,6 +78,16 @@ function removeVenueGlLayers(map: import("mapbox-gl").Map): void {
     if (map.getSource(SRC_VENUE_POINTS)) map.removeSource(SRC_VENUE_POINTS);
   } catch (_) {
     /* style swap / already removed */
+  }
+}
+
+/** Remove the directions overlay — map teardown or basemap style swap only (not route swaps). */
+function removeDirectionsOverlay(map: import("mapbox-gl").Map): void {
+  try {
+    if (map.getLayer(DIRECTIONS_LAYER_ID)) map.removeLayer(DIRECTIONS_LAYER_ID);
+    if (map.getSource(DIRECTIONS_SOURCE_ID)) map.removeSource(DIRECTIONS_SOURCE_ID);
+  } catch (_) {
+    /* style reload race */
   }
 }
 
@@ -215,6 +226,11 @@ type MapboxMapProps = {
   onMapLongPress?: (lat: number, lng: number, viewportPoint?: { x: number; y: number }) => void;
   /** Double-tap on empty map → reload venues centered on that point. */
   onMapDoubleTap?: (lat: number, lng: number) => void;
+  /**
+   * Bumped on each explicit "search this spot" (double-tap). Re-keys the venue fetch so the
+   * in-flight request is aborted and the previous pins are wiped, even at an unchanged center.
+   */
+  mapSearchEpoch?: number;
   /** Open Create Game from selected venue popup. */
   onCreateGameAtVenue?: (venue: VenueSelection, viewportPoint?: { x: number; y: number }) => void;
   /** When this value changes, map flies to user location. */
@@ -229,12 +245,10 @@ type MapboxMapProps = {
   venueFetchEnabled?: boolean;
   /** Optional basemap style override (e.g. satellite). */
   mapStyleUrl?: string | null;
-  /** Walking route polyline from Mapbox Directions. */
+  /** Walking route polyline from Mapbox Directions. A route outlives the popup that started it. */
   directionsGeometry?: GeoJSON.LineString | null;
   /** Request in-app route to a destination. */
-  onNavigateTo?: (dest: { lat: number; lng: number }) => void;
-  /** Clear the directions overlay (e.g. when a popup closes). */
-  onClearDirections?: () => void;
+  onNavigateTo?: (dest: { lat: number; lng: number }, opts?: NavigateToOptions) => void;
 };
 
 export function MapboxMap(props: MapboxMapProps) {
@@ -267,6 +281,7 @@ export function MapboxMap(props: MapboxMapProps) {
     userSportsmanship = null,
     onMapLongPress,
     onMapDoubleTap,
+    mapSearchEpoch = 0,
     onCreateGameAtVenue,
     centerOnUserTrigger,
     onVenuesFetchLoadingChange,
@@ -276,7 +291,6 @@ export function MapboxMap(props: MapboxMapProps) {
     mapStyleUrl = null,
     directionsGeometry = null,
     onNavigateTo,
-    onClearDirections,
   } = props;
   const navigate = useNavigate();
 
@@ -366,7 +380,14 @@ export function MapboxMap(props: MapboxMapProps) {
     if ((centerOnUserTrigger ?? 0) < 1 || !venuesFetchCenter) return;
     setDebouncedVenueFetchCenter(venuesFetchCenter);
   }, [centerOnUserTrigger, venuesFetchCenter?.lat, venuesFetchCenter?.lng]);
+  // Double-tap "search this spot": also skip the debounce — the tap is already an explicit commit.
+  useEffect(() => {
+    if (mapSearchEpoch < 1 || !venuesFetchCenter) return;
+    setDebouncedVenueFetchCenter(venuesFetchCenter);
+  }, [mapSearchEpoch, venuesFetchCenter?.lat, venuesFetchCenter?.lng]);
   const venueClustersRef = useRef<VenueClusterPoint[]>([]);
+  /** Last `mapSearchEpoch` whose stale venue pins were wiped — one wipe per double-tap. */
+  const lastWipedSearchEpochRef = useRef(0);
   const onVenuesFetchLoadingChangeRef = useRef(onVenuesFetchLoadingChange);
   onVenuesFetchLoadingChangeRef.current = onVenuesFetchLoadingChange;
 
@@ -867,22 +888,18 @@ export function MapboxMap(props: MapboxMapProps) {
     return () => window.clearTimeout(t);
   }, [mapLoaded, gamePopupRequest, onSelectVenue]);
 
-  /** Mapbox Directions walking route overlay. */
+  /**
+   * Mapbox Directions walking route overlay. A route outlives the popup that started it, so this
+   * paints in place: swapping route A → B updates the existing source instead of dropping and
+   * re-adding the layer (which would flicker). Teardown lives in its own effect below so it only
+   * fires on unmount / style swap, never on a route change.
+   */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
 
-    const removeRoute = () => {
-      try {
-        if (map.getLayer(DIRECTIONS_LAYER_ID)) map.removeLayer(DIRECTIONS_LAYER_ID);
-        if (map.getSource(DIRECTIONS_SOURCE_ID)) map.removeSource(DIRECTIONS_SOURCE_ID);
-      } catch {
-        /* style reload race */
-      }
-    };
-
     if (!directionsGeometry) {
-      removeRoute();
+      removeDirectionsOverlay(map);
       return;
     }
 
@@ -894,23 +911,30 @@ export function MapboxMap(props: MapboxMapProps) {
     const existing = map.getSource(DIRECTIONS_SOURCE_ID) as import("mapbox-gl").GeoJSONSource | undefined;
     if (existing) {
       existing.setData(fc);
-    } else {
-      map.addSource(DIRECTIONS_SOURCE_ID, { type: "geojson", data: fc });
-      map.addLayer({
-        id: DIRECTIONS_LAYER_ID,
-        type: "line",
-        source: DIRECTIONS_SOURCE_ID,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#34d399",
-          "line-width": 4,
-          "line-opacity": 0.88,
-        },
-      });
+      return;
     }
 
-    return removeRoute;
+    map.addSource(DIRECTIONS_SOURCE_ID, { type: "geojson", data: fc });
+    map.addLayer({
+      id: DIRECTIONS_LAYER_ID,
+      type: "line",
+      source: DIRECTIONS_SOURCE_ID,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "#34d399",
+        "line-width": 4,
+        "line-opacity": 0.88,
+      },
+    });
   }, [directionsGeometry, mapLoaded]);
+
+  /** Drop the route overlay when the map goes away or the basemap style is swapped out. */
+  useEffect(() => {
+    return () => {
+      const map = mapRef.current;
+      if (map) removeDirectionsOverlay(map);
+    };
+  }, [mapLoaded]);
 
   /** Venue dot + sport icon paint when selection changes. */
   useEffect(() => {
@@ -1952,6 +1976,9 @@ export function MapboxMap(props: MapboxMapProps) {
       ) {
         return;
       }
+      // Center the tapped point: the search radius is anchored there, so a tap near the screen
+      // edge would otherwise return results that are mostly off-screen. Zoom is left alone.
+      map.easeTo({ center: [e.lngLat.lng, e.lngLat.lat], duration: 500 });
       onMapDoubleTapRef.current(e.lngLat.lat, e.lngLat.lng);
     };
 
@@ -2163,14 +2190,34 @@ export function MapboxMap(props: MapboxMapProps) {
 
   // —— Sports venues: subtle GL polygons + small center dots (no DOM flag markers) ———
   const venueSportSig = venueSportsFilter.slice().sort().join("|");
-  // Data key: location + radius (+ a recenter epoch) — drives the network fetch.
+  // Data key: location + radius (+ a recenter epoch + a search epoch) — drives the network fetch.
   // `centerOnUserTrigger` is bumped by the recenter button even when coords don't change,
-  // so venues can be refreshed on demand.
+  // so venues can be refreshed on demand. `mapSearchEpoch` does the same for a double-tap, which
+  // matters because the center is rounded to 2dp (~1.1km) — two nearby taps would otherwise
+  // produce an identical key and skip the refetch.
   const venueFetchDataKey = debouncedVenueFetchCenter
-    ? `${debouncedVenueFetchCenter.lat.toFixed(2)},${debouncedVenueFetchCenter.lng.toFixed(2)},${venueSearchRadiusKm},${centerOnUserTrigger ?? 0}`
+    ? `${debouncedVenueFetchCenter.lat.toFixed(2)},${debouncedVenueFetchCenter.lng.toFixed(2)},${venueSearchRadiusKm},${centerOnUserTrigger ?? 0},${mapSearchEpoch}`
     : null;
   // Render key: includes sport sig — drives the effect to re-run on filter changes.
   const venueFetchKey = venueFetchDataKey ? `${venueFetchDataKey},${venueSportSig}` : null;
+
+  // On an explicit "search this spot", drop the previous results immediately rather than leaving
+  // them painted for the whole round-trip. Keyed on the epoch alone so ordinary refetches (filter
+  // tweaks, recenter) still update in place instead of flashing empty. The ref guard keeps a
+  // basemap style swap — which also re-runs this effect — from wiping a second time.
+  useEffect(() => {
+    if (mapSearchEpoch < 1 || lastWipedSearchEpochRef.current === mapSearchEpoch) return;
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    lastWipedSearchEpochRef.current = mapSearchEpoch;
+    venueClustersRef.current = [];
+    if (venueGlLayersReady(map)) {
+      (map.getSource(SRC_VENUE_POINTS) as import("mapbox-gl").GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+  }, [mapSearchEpoch, mapLoaded]);
 
   // —— Sports venue fetch + render pipeline ——
   // Fetches OSM sports venues around the (debounced) center, enriches for sport icons,
@@ -2634,8 +2681,8 @@ export function MapboxMap(props: MapboxMapProps) {
               viewerCoords={userCoords}
               onNavigateTo={onNavigateTo}
               onClose={() => {
+                // A shown route deliberately outlives this popup — the route chip's ✕ clears it.
                 setEventPopup(null);
-                onClearDirections?.();
               }}
               onJoin={onJoinGame}
               onLeave={onLeaveGame}
@@ -2671,9 +2718,9 @@ export function MapboxMap(props: MapboxMapProps) {
           onJoinGame={onJoinGame}
           onOpenChat={onOpenMessagesForGame}
           onClose={() => {
+            // A shown route deliberately outlives this modal — the route chip's ✕ clears it.
             onSelectVenue(null);
             setVenuePopupPoint(null);
-            onClearDirections?.();
           }}
           onCreateGame={(venue) => {
             onCreateGameAtVenue?.(venue, venuePopupPoint ?? undefined);

@@ -25,6 +25,7 @@ import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue"
 import { getSportIconEmoji } from "../map/gameSportIcons";
 import { fetchVenueById, fetchVenueEnrichment } from "../../lib/api";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
+import type { NavigateToOptions } from "../../lib/directions";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { glassMessengerPanel } from "../styles/glass";
 import {
@@ -57,7 +58,7 @@ type VenueInfoPopupProps = {
   /** Viewer location for directions shortcut. */
   viewerCoords?: { lat: number; lng: number } | null;
   /** Draw Mapbox walking route on the map. */
-  onNavigateTo?: (dest: { lat: number; lng: number }) => void;
+  onNavigateTo?: (dest: { lat: number; lng: number }, opts?: NavigateToOptions) => void;
 };
 
 const ICON_BTN =
@@ -204,14 +205,22 @@ export function VenueInfoPopup({
     [viewerCoords, details.center.lat, details.center.lng]
   );
 
-  const { summary: walkSummary, loading: walkLoading } = useRouteDirections({
+  const {
+    summary: walkSummary,
+    loading: walkLoading,
+    result: walkResult,
+  } = useRouteDirections({
     from: viewerCoords,
     to: details.center,
     enabled: open && Boolean(viewerCoords),
   });
 
   const handleShowRoute = () => {
-    onNavigateTo?.({ lat: details.center.lat, lng: details.center.lng });
+    // Hand over the route this popup already fetched for its ETA label — no second network call.
+    onNavigateTo?.(
+      { lat: details.center.lat, lng: details.center.lng },
+      { result: walkResult, label: title }
+    );
   };
 
   const handleShare = async () => {

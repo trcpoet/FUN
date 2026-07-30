@@ -42,3 +42,13 @@ export function hasCompletedVenueSportPrompt(): boolean {
 export function venueIntentToSportFilter(intent: VenueSportIntent): string[] {
   return intent === null ? [] : [intent];
 }
+
+/**
+ * Venue sport filter: explicit Filters-modal picks win, the onboarding intent is the fallback.
+ * Override rather than intersect — `[]` already means "all sports" here, so an empty intersection
+ * would be indistinguishable from "no filter" and would silently show everything.
+ * Both inputs are display labels from SPORTS_CATALOG, so no token translation is needed.
+ */
+export function resolveVenueSportFilter(intent: VenueSportIntent, filterSports: string[]): string[] {
+  return filterSports.length > 0 ? filterSports : venueIntentToSportFilter(intent);
+}

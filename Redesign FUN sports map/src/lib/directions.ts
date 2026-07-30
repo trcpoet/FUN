@@ -10,6 +10,15 @@ export type DirectionsResult = {
   geometry: GeoJSON.LineString;
 };
 
+/**
+ * Extras a "show me this route" caller can hand over. Popups already fetch the route to render
+ * their ETA label, so passing `result` back up avoids a second identical Directions call.
+ */
+export type NavigateToOptions = {
+  result?: DirectionsResult | null;
+  label?: string | null;
+};
+
 const PROFILE_LABEL: Record<DirectionsProfile, string> = {
   walking: "walk",
   cycling: "bike",
