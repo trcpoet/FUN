@@ -63,8 +63,12 @@ export function venueMatchesSelectedSports(
   const l = normalizeToken(leisure ?? "");
   if (l) {
     if (expectedLeisureTokensForDisplaySports(displaySports).has(l)) return true;
-    // Multi-sport centres rarely carry sport=*; keep them visible under any filter.
-    if (sportTokens.length === 0 && (l === "sports_centre" || l === "recreation_ground")) return true;
+    // Generic multi-sport venues rarely carry sport=*; keep them visible under any
+    // filter. Parks are only imported when they contain a pitch (see osmVenueQuery),
+    // so a filtered park still has the sport somewhere inside it.
+    if (sportTokens.length === 0 && (l === "sports_centre" || l === "recreation_ground" || l === "park")) {
+      return true;
+    }
   }
 
   return false;

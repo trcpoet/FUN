@@ -12,7 +12,6 @@ const MapboxMap = React.lazy(() =>
 );
 import { TopNavigation } from "./components/TopUI";
 import { BottomCarousel } from "./components/BottomCarousel";
-import { ActiveRouteChip } from "./components/ActiveRouteChip";
 import { GameMessengerSheet } from "./components/GameMessengerSheet";
 import type { MessengerThreadFocus, PlanRematchPayload } from "./components/GameMessengerSheet";
 import { CreateGameModal, type CreateGamePrefill } from "./components/CreateGameModal";
@@ -55,7 +54,7 @@ import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
 import {
   readStoredVenueSportIntent,
-  resolveVenueSportFilter,
+  venueIntentToSportFilter,
   writeStoredVenueSportIntent,
   type VenueSportIntent,
 } from "./lib/venueSportIntent";
@@ -292,13 +291,12 @@ export default function App() {
     [userCoords, lastKnownCoords]
   );
 
-  /** Frame the whole route — the venue camera sits at zoom >= 17, so most of the line is off-screen. */
-  const handleFitActiveRoute = useCallback(() => {
-    const coordinates = activeRoute?.geometry.coordinates as [number, number][] | undefined;
-    if (!coordinates?.length) return;
-    mapCameraIdRef.current += 1;
-    setMapCameraRequest({ id: mapCameraIdRef.current, kind: "fitBounds", coordinates });
-  }, [activeRoute]);
+  /** Tooltip for the rail's clear-route button; non-null is also the "a route is drawn" signal. */
+  const routeSummary = activeRoute
+    ? `${formatDirectionsSummary(activeRoute.profile, activeRoute)}${
+        activeRoute.destLabel ? ` to ${activeRoute.destLabel}` : ""
+      }`
+    : null;
   const [gamePopupRequest, setGamePopupRequest] = useState<{ nonce: number; gameId: string } | null>(null);
   const openGamePopupNonceRef = useRef(0);
   const [createGameOpen, setCreateGameOpen] = useState(false);
@@ -795,10 +793,13 @@ export default function App() {
     [liveNowOpen, liveStripGames, displayGames]
   );
 
+  // Venue layer follows ONLY the dedicated venue sport menu — NOT the game sport
+  // filter. Coupling them hid parks + other-sport pitches whenever a game filter
+  // was applied.
   const venueSportsFilter = useMemo(() => {
     if (!venueIntentReady) return [];
-    return resolveVenueSportFilter(venueSportIntent, appliedFilters.sports);
-  }, [venueIntentReady, venueSportIntent, appliedFilters.sports]);
+    return venueIntentToSportFilter(venueSportIntent);
+  }, [venueIntentReady, venueSportIntent]);
 
   const handleVenueSportIntentChange = useCallback((next: VenueSportIntent) => {
     setVenueSportIntent(next);
@@ -988,23 +989,17 @@ export default function App() {
           onPickSport: handlePickSport,
           onPickPerson: handlePickPerson,
         }}
-        liveGamesCount={games.filter(g => g.status === 'live').length}
+        liveGamesCount={liveStripGames.length}
         mapSearchLocationName={mapSearchLocationName}
         onClearMapSearch={clearMapSearch}
+        routeSummary={routeSummary}
+        onClearRoute={() => setActiveRoute(null)}
         venueSportIntent={venueSportIntent}
         venueSportIntentReady={venueIntentReady}
         onVenueSportIntentChange={handleVenueSportIntentChange}
       />
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
-        {activeRoute && (
-          <ActiveRouteChip
-            summary={formatDirectionsSummary(activeRoute.profile, activeRoute)}
-            destLabel={activeRoute.destLabel}
-            onFit={handleFitActiveRoute}
-            onClear={() => setActiveRoute(null)}
-          />
-        )}
         <BottomCarousel
           games={liveNowOpen ? liveStripGames : displayGames}
           selectedGame={selectedGame}

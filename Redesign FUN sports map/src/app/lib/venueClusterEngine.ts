@@ -12,6 +12,10 @@ import type {
 } from "./sportsVenueTypes";
 import { VENUE_AREA_RADIUS_METERS } from "../map/mapConfig";
 import { primaryVenueSportSuffix, venueSportKey, venueSportMapIconId } from "./venueSportIcon";
+import { getGameMapboxIconId, resolveSportMapboxSuffix } from "../map/gameSportIcons";
+
+/** A park that contains a filtered sport shows that sport's icon if a matching pitch is within this radius of its centroid. */
+export const PARK_FILTER_ICON_RADIUS_M = 300;
 
 // Builds a circle (as a many-sided polygon) around a lng/lat point, sized in real-world meters.
 // Used to draw the round "footprint" area around each venue cluster on the map.
@@ -69,19 +73,60 @@ export type ClusterVenueResult = {
   clusters: VenueClusterPoint[]; // the raw merged cluster centers
 };
 
+/**
+ * When a venue sport filter is active, a park that contains a pitch of a filtered
+ * sport shows THAT sport's icon (nearest matching pitch within
+ * PARK_FILTER_ICON_RADIUS_M of the park centroid) instead of the generic stadium —
+ * so a filtered park signals which of your sports it has. Proximity-based: parks
+ * store no sport, and true containment needs polygons we don't carry client-side.
+ */
+export function parkFilteredSportIconId(
+  parkLng: number,
+  parkLat: number,
+  allPoints: Feature<Point, SportsVenueProperties>[],
+  filterSuffixes: Set<string>,
+): string | null {
+  let bestSuffix: string | null = null;
+  let bestDist = Infinity;
+  for (const p of allPoints) {
+    if (p.properties.leisure === "park") continue; // parks don't seed other parks
+    const suffix = primaryVenueSportSuffix(p.properties.sport, p.properties.leisure);
+    if (!filterSuffixes.has(suffix)) continue;
+    const [lng, lat] = p.geometry.coordinates;
+    const d = distanceMeters(parkLat, parkLng, lat, lng);
+    if (d <= PARK_FILTER_ICON_RADIUS_M && d < bestDist) {
+      bestDist = d;
+      bestSuffix = suffix;
+    }
+  }
+  return bestSuffix ? getGameMapboxIconId(bestSuffix) : null;
+}
+
 /** Enrich raw OSM points with icon ids for Mapbox symbol layers / native clustering. */
 export function enrichVenueGeoJSON(geojson: SportsVenueGeoJSON, venueSportsFilter: string[]): SportsVenueGeoJSON {
-  const features = geojson.features
-    .filter((f) => f.geometry?.type === "Point")
+  const points = geojson.features.filter((f) => f.geometry?.type === "Point");
+  const filterSuffixes =
+    venueSportsFilter.length > 0 ? new Set(venueSportsFilter.map(resolveSportMapboxSuffix)) : null;
+
+  const features = points
     .filter((f) => venueMatchesSelectedSports(f.properties.sport, venueSportsFilter, f.properties.leisure))
-    .map((f) => ({
-      ...f,
-      properties: {
-        ...f.properties,
-        sport_map_icon: venueSportMapIconId(f.properties.sport, f.properties.leisure),
-        sport_key: venueSportKey(f.properties.sport, f.properties.leisure),
-      },
-    }));
+    .map((f) => {
+      let sportMapIcon = venueSportMapIconId(f.properties.sport, f.properties.leisure);
+      // A filtered park shows the contained filtered sport's icon.
+      if (filterSuffixes && f.properties.leisure === "park") {
+        const [lng, lat] = f.geometry.coordinates;
+        const sportIcon = parkFilteredSportIconId(lng, lat, points, filterSuffixes);
+        if (sportIcon) sportMapIcon = sportIcon;
+      }
+      return {
+        ...f,
+        properties: {
+          ...f.properties,
+          sport_map_icon: sportMapIcon,
+          sport_key: venueSportKey(f.properties.sport, f.properties.leisure),
+        },
+      };
+    });
   return { type: "FeatureCollection", features };
 }
 
