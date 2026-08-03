@@ -31,6 +31,7 @@ import {
   LEVEL_OPTIONS,
   AGE_RANGE_OPTIONS,
   MATCH_TYPE_OPTIONS,
+  SAME_GENDER_MATCH_TYPE,
   VISIBILITY_OPTIONS,
   emptyGameRequirements,
   durationPresetsForSport,
@@ -49,6 +50,14 @@ import type { MapNoteVisibility } from "../../lib/supabase";
 
 const MIN_SPOTS = 2;
 const MAX_SPOTS = 20;
+
+/** One-tap start offsets for the "When" picker, in minutes from now. */
+const QUICK_START_PRESETS = [
+  { label: "In 15 min", minutes: 15 },
+  { label: "In 30 min", minutes: 30 },
+  { label: "In 1 hour", minutes: 60 },
+  { label: "In 2 hours", minutes: 120 },
+] as const;
 
 export type CreateGamePrefill = {
   /** Sport id used as the initial selection. */
@@ -295,8 +304,10 @@ export function CreateGameModal({
     setWhenPickerOpen(false);
   }, [pickDate, pickTime, combineLocalDateTime]);
 
-  const clearWhen = useCallback(() => {
-    const t = new Date(Date.now() + 60 * 60 * 1000);
+  /** One-tap start times. "Starts in 15 minutes" has to be a real choice —
+   *  previously the only shortcut was a ghost button that silently set +1h. */
+  const applyQuickStart = useCallback((minutesFromNow: number) => {
+    const t = new Date(Date.now() + minutesFromNow * 60 * 1000);
     setDateTime(format(t, "yyyy-MM-dd'T'HH:mm"));
     setError(null);
     setWhenPickerOpen(false);
@@ -752,6 +763,28 @@ export function CreateGameModal({
                   align="start"
                   className="z-[100] w-auto max-w-[min(100vw-1.5rem,20rem)] border border-slate-700 bg-slate-900 p-0 text-slate-100 shadow-xl"
                 >
+                  {/* Starting soon is the common case — make it one tap, above the calendar. */}
+                  <div className="border-b border-slate-800 p-3">
+                    <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                      Starting soon
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {QUICK_START_PRESETS.map(({ label, minutes }) => (
+                        <button
+                          key={minutes}
+                          type="button"
+                          onClick={() => applyQuickStart(minutes)}
+                          className={cn(
+                            "rounded-full border border-white/10 bg-slate-950/60 px-3 py-1 text-[12px] font-semibold text-slate-300 transition-colors",
+                            "hover:border-violet-400/60 hover:text-violet-100",
+                            "focus:outline-none focus:ring-1 focus:ring-violet-500/40",
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="border-b border-slate-800 p-1">
                     <Calendar
                       mode="single"
@@ -784,9 +817,9 @@ export function CreateGameModal({
                         type="button"
                         variant="ghost"
                         className="h-8 text-xs text-slate-400 hover:text-slate-200"
-                        onClick={clearWhen}
+                        onClick={() => setWhenPickerOpen(false)}
                       >
-                        +1h from now
+                        Cancel
                       </Button>
                       <Button
                         type="button"
@@ -809,7 +842,7 @@ export function CreateGameModal({
               <Timer className="w-3.5 h-3.5 text-violet-400/80" />
               Duration
               <span className="ml-1 normal-case tracking-normal text-[10px] font-normal text-slate-600">
-                (when the pin disappears)
+                (how long it runs, not when it starts)
               </span>
             </div>
             <div className="rounded-xl border border-white/5 bg-slate-900/40 p-3 space-y-3">
@@ -1016,7 +1049,7 @@ export function CreateGameModal({
               </div>
 
               <div className="space-y-2">
-                <Label className="text-[11px] uppercase tracking-wide text-slate-500">Match Type</Label>
+                <Label className="text-[11px] uppercase tracking-wide text-slate-500">Who can join</Label>
                 <div className="flex flex-wrap gap-1.5">
                   {MATCH_TYPE_OPTIONS.map((opt) => (
                     <button
@@ -1034,6 +1067,11 @@ export function CreateGameModal({
                     </button>
                   ))}
                 </div>
+                <p className="text-[10px] leading-snug text-slate-600">
+                  {req.matchType === SAME_GENDER_MATCH_TYPE
+                    ? "Only players whose gender matches yours will see this game on the map."
+                    : "Anyone can find and join this game."}
+                </p>
               </div>
 
               <div className="space-y-2">

@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { getMyProfile, updateMyAvatarId, updateMyProfile } from "../lib/api";
 import type { AthleteProfilePayload } from "../lib/athleteProfile";
 import { emptyAthleteProfile, parseAthleteProfile } from "../lib/athleteProfile";
+import type { Gender } from "../lib/gamePreferenceOptions";
 
 export function useMyProfile() {
   const [avatarId, setAvatarId] = useState<string | null>(null);
@@ -10,6 +11,8 @@ export function useMyProfile() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [athleteProfile, setAthleteProfile] = useState<AthleteProfilePayload>(() => emptyAthleteProfile());
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(true);
+  const [gender, setGender] = useState<Gender | null>(null);
+  const [discoverableForMatching, setDiscoverableForMatching] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,6 +26,8 @@ export function useMyProfile() {
     setAvatarUrl(res.avatarUrl ?? null);
     setAthleteProfile(res.error ? emptyAthleteProfile() : res.athleteProfile ?? parseAthleteProfile(null));
     setOnboardingCompleted(res.onboardingCompleted);
+    setGender(res.error ? null : res.gender);
+    setDiscoverableForMatching(res.error ? false : res.discoverableForMatching);
     setError(res.error?.message ?? null);
     setLoading(false);
   }, []);
@@ -48,7 +53,9 @@ export function useMyProfile() {
       avatar_url?: string | null;
       avatar_id?: string | null;
       onboarding_completed?: boolean;
+      gender?: Gender | null;
       athlete_profile?: AthleteProfilePayload;
+      discoverable_for_matching?: boolean;
     }) => {
       const err = await updateMyProfile(updates);
       if (!err) await refetch();
@@ -63,6 +70,8 @@ export function useMyProfile() {
     avatarUrl,
     athleteProfile,
     onboardingCompleted,
+    gender,
+    discoverableForMatching,
     loading,
     error,
     refetch,

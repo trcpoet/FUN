@@ -5,9 +5,11 @@ import type { AthleteProfilePayload } from "../../lib/athleteProfile";
 import {
   LEVEL_OPTIONS,
   MATCH_TYPE_OPTIONS,
+  SAME_GENDER_MATCH_TYPE,
   isAnyPreference,
   ageRangesOverlap,
   normalizeAgeRange,
+  type Gender,
 } from "../../lib/gamePreferenceOptions";
 
 export type ParsedRequirements = {
@@ -36,8 +38,17 @@ export function parseRequirements(raw: GameRow["requirements"]): ParsedRequireme
  * Inclusive matching: a game shows unless its explicit requirement conflicts with an
  * active (non-"Any") filter. Sports use game.sport; skill/age/matchType use requirements.
  * Games with missing/"Any"/unknown requirements always pass.
+ *
+ * `viewerGender` is a defense-in-depth check only. Same-gender games are filtered
+ * out server-side by `get_games_nearby`, so a game reaching this function is
+ * already gender-appropriate for the caller — this just guarantees a viewer with
+ * no gender on file never renders one if the RPC guard is ever bypassed.
  */
-export function gameMatchesFilters(game: GameRow, filters: FiltersState): boolean {
+export function gameMatchesFilters(
+  game: GameRow,
+  filters: FiltersState,
+  viewerGender: Gender | null = null
+): boolean {
   // Sports: explicit allow-list (game.sport is always present). Empty list = all sports.
   if (filters.sports.length > 0) {
     const allow = new Set(filters.sports.map((s) => s.toLowerCase()));
@@ -45,6 +56,9 @@ export function gameMatchesFilters(game: GameRow, filters: FiltersState): boolea
   }
 
   const req = parseRequirements(game.requirements);
+
+  // No gender on file => never show a gender-restricted game, whatever the filter says.
+  if (req.matchType === SAME_GENDER_MATCH_TYPE && viewerGender == null) return false;
 
   // Skill: equality (not a hierarchy) — filter "Intermediate" hides "Advanced"-only games.
   if (!isAnyPreference(filters.skillLevel) && !isAnyPreference(req.skillLevel)) {
@@ -62,9 +76,13 @@ export function gameMatchesFilters(game: GameRow, filters: FiltersState): boolea
 }
 
 /** Count games passing the filters (used for the live preview footer). */
-export function countMatchingGames(games: GameRow[], filters: FiltersState): number {
+export function countMatchingGames(
+  games: GameRow[],
+  filters: FiltersState,
+  viewerGender: Gender | null = null
+): number {
   let n = 0;
-  for (const g of games) if (gameMatchesFilters(g, filters)) n++;
+  for (const g of games) if (gameMatchesFilters(g, filters, viewerGender)) n++;
   return n;
 }
 

@@ -9,6 +9,7 @@ import { supabase } from "./supabase";
 import { isMissingRpc } from "./rpcErrors";
 import { subscribeWithRetry } from "./realtimeRetry";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
+import { parseGender, type Gender } from "./gamePreferenceOptions";
 import { searchPeople } from "./searchPeople";
 import type { LocationVisibilityMode } from "./locationVisibility";
 import type {
@@ -19,6 +20,7 @@ import type {
   MapNoteVisibility,
   ProfileNearbyRow,
   ProfileSearchRow,
+  SimilarAthleteRow,
   UserStatsRow,
   BadgeRow,
   UserBadgeRow,
@@ -917,6 +919,24 @@ export async function getProfilesNearby(
   return { data: (data as ProfileNearbyRow[]) ?? null, error: error ? new Error(error.message) : null };
 }
 
+/** Nearby athletes who've opted into `discoverable_for_matching`, ranked by shared sports/availability. */
+export async function getSimilarAthletes(params: {
+  lat: number;
+  lng: number;
+  radiusKm?: number;
+  limit?: number;
+}): Promise<{ data: SimilarAthleteRow[] | null; error: Error | null }> {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { lat, lng, radiusKm = 25, limit = 20 } = params;
+  const { data, error } = await supabase.rpc("get_similar_athletes", {
+    lat,
+    lng,
+    radius_km: radiusKm,
+    limit_count: limit,
+  });
+  return { data: (data as SimilarAthleteRow[]) ?? null, error: error ? new Error(error.message) : null };
+}
+
 // ---------------------------------------------------------------------------
 // Presence (System A) — who sees YOU on the map. Persists to profile_locations
 // via the update_my_presence RPC (own row only, enforced server-side).
@@ -1126,9 +1146,9 @@ export async function getFollowCounts(userId: string): Promise<{ followers: numb
 
 /** Full profile row when `athlete_profile` migration has been applied. */
 const PROFILE_SELECT_WITH_ATHLETE =
-  "avatar_id, display_name, avatar_url, onboarding_completed, athlete_profile";
+  "avatar_id, display_name, avatar_url, onboarding_completed, gender, athlete_profile, discoverable_for_matching";
 /** Works on older DBs before the athlete_profile jsonb column exists. */
-const PROFILE_SELECT_BASE = "avatar_id, display_name, avatar_url, onboarding_completed";
+const PROFILE_SELECT_BASE = "avatar_id, display_name, avatar_url, onboarding_completed, gender, discoverable_for_matching";
 const PROFILE_SELECT_MIN = "avatar_id, display_name, avatar_url";
 
 const ATHLETE_PROFILE_COLUMN_LS_KEY = "fun_profiles_athlete_column";
@@ -1323,7 +1343,9 @@ export async function getMyProfile(): Promise<{
   displayName: string | null;
   avatarUrl: string | null;
   onboardingCompleted: boolean;
+  gender: Gender | null;
   athleteProfile: AthleteProfilePayload;
+  discoverableForMatching: boolean;
   error: Error | null;
 }> {
   if (!supabase) {
@@ -1332,7 +1354,9 @@ export async function getMyProfile(): Promise<{
       displayName: null,
       avatarUrl: null,
       onboardingCompleted: false,
+      gender: null,
       athleteProfile: parseAthleteProfile(null),
+      discoverableForMatching: false,
       error: new Error("Supabase not configured"),
     };
   }
@@ -1343,7 +1367,9 @@ export async function getMyProfile(): Promise<{
       displayName: null,
       avatarUrl: null,
       onboardingCompleted: false,
+      gender: null,
       athleteProfile: parseAthleteProfile(null),
+      discoverableForMatching: false,
       error: new Error("Not signed in"),
     };
   }
@@ -1355,7 +1381,9 @@ export async function getMyProfile(): Promise<{
       displayName: null,
       avatarUrl: null,
       onboardingCompleted: false,
+      gender: null,
       athleteProfile: parseAthleteProfile(null),
+      discoverableForMatching: false,
       error: error ?? new Error("Profile not found"),
     };
   }
@@ -1365,7 +1393,9 @@ export async function getMyProfile(): Promise<{
     displayName: (row.display_name as string | undefined) ?? null,
     avatarUrl: (row.avatar_url as string | undefined) ?? null,
     onboardingCompleted: (row.onboarding_completed as boolean | undefined) ?? true,
+    gender: parseGender(row.gender),
     athleteProfile: parseAthleteProfile(athleteProfileRaw),
+    discoverableForMatching: (row.discoverable_for_matching as boolean | undefined) ?? false,
     error: null,
   };
 }
@@ -1375,7 +1405,9 @@ export async function updateMyProfile(updates: {
   avatar_url?: string | null;
   avatar_id?: string | null;
   onboarding_completed?: boolean;
+  gender?: Gender | null;
   athlete_profile?: AthleteProfilePayload;
+  discoverable_for_matching?: boolean;
 }): Promise<Error | null> {
   if (!supabase) return new Error("Supabase not configured");
   const user = await getAuthUserDeduped();
@@ -1385,7 +1417,9 @@ export async function updateMyProfile(updates: {
   if (updates.avatar_url !== undefined) set.avatar_url = updates.avatar_url;
   if (updates.avatar_id !== undefined) set.avatar_id = updates.avatar_id;
   if (updates.onboarding_completed !== undefined) set.onboarding_completed = updates.onboarding_completed;
+  if (updates.gender !== undefined) set.gender = updates.gender;
   if (updates.athlete_profile !== undefined) set.athlete_profile = updates.athlete_profile;
+  if (updates.discoverable_for_matching !== undefined) set.discoverable_for_matching = updates.discoverable_for_matching;
 
   const { error } = await supabase.from("profiles").update(set).eq("id", user.id);
 

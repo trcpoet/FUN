@@ -66,7 +66,7 @@ const LOCATION_SEARCH_ZOOM = 12.5;
 const FAR_SPORT_ZOOM = 11.5;
 const EXTENDED_GAMES_RADIUS_KM = 120;
 
-const APPLIED_FILTERS_KEY = "fun_applied_f_v1";
+const APPLIED_FILTERS_KEY = "fun_applied_f_v2";
 const FILTERS_SEEDED_KEY = "fun_applied_filters_seeded_v1";
 
 /** A route currently drawn on the map, plus what the route chip needs to describe it. */
@@ -214,7 +214,16 @@ export default function App() {
 
   const showMapLoadingBanner = venuesFetchLoading || filterApplySync;
 
-  const { avatarId, avatarUrl, athleteProfile } = useMyProfile();
+  const {
+    avatarId,
+    avatarUrl,
+    athleteProfile,
+    gender: viewerGender,
+    loading: profileLoading,
+  } = useMyProfile();
+
+  /** Auth must be settled first, or the prompt flashes on every cold load. */
+  const showGenderGatePrompt = !authLoading && !profileLoading && viewerGender == null;
 
   // Seed filter defaults from the user's profile prefs once (skill/age/matchType), filling only unset
   // fields. Guarded by localStorage so user Apply / persisted filters always win afterwards.
@@ -752,15 +761,15 @@ export default function App() {
     let list = filterGamesVisibleOnMap(games, Date.now());
     // Precedence = intersection: TopUI search (sportFocus) AND applied filters must both pass.
     if (sportFocus) list = gamesMatchingSport(list, sportFocus.sport);
-    list = list.filter((g) => gameMatchesFilters(g, appliedFilters)); // sports + skill + age + matchType
+    list = list.filter((g) => gameMatchesFilters(g, appliedFilters, viewerGender)); // sports + skill + age + matchType
     list = list.filter((g) => gameVisibleToViewer(g, currentUserId, followedIds)); // System C: friends/invite-only pins
     return list;
-  }, [games, sportFocus, appliedFilters, mapMinuteEpoch, currentUserId, followedIds]);
+  }, [games, sportFocus, appliedFilters, mapMinuteEpoch, currentUserId, followedIds, viewerGender]);
 
   // Live preview for the FiltersModal footer — uses the draft, not appliedFilters.
   const filtersPreviewCount = useMemo(
-    () => countMatchingGames(filterGamesVisibleOnMap(games, Date.now()), filtersDraft),
-    [games, filtersDraft, mapMinuteEpoch]
+    () => countMatchingGames(filterGamesVisibleOnMap(games, Date.now()), filtersDraft, viewerGender),
+    [games, filtersDraft, mapMinuteEpoch, viewerGender]
   );
 
   // Surface hard errors (location / DB) as brief transient toasts instead of persistent map banners.
@@ -927,6 +936,31 @@ export default function App() {
           aria-label="Map updating"
         >
           <Loader2 className="size-5 shrink-0 animate-spin text-emerald-400" aria-hidden />
+        </div>
+      )}
+
+      {/* Games are gender-gated server-side, so a viewer with no gender on file
+          gets an empty map. Say why instead of looking broken. */}
+      {showGenderGatePrompt && (
+        <div className="pointer-events-none absolute inset-x-0 top-24 z-[54] flex justify-center px-4">
+          <div className="pointer-events-auto max-w-sm rounded-2xl border border-white/12 bg-slate-950/92 px-4 py-3 text-center shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-md">
+            <p className="text-sm font-semibold text-slate-100">Games are hidden</p>
+            <p className="mt-1 text-[13px] leading-snug text-slate-400">
+              {currentUserId
+                ? "Add your gender to see games. Games open to one gender are only shown to matching players."
+                : "Sign in and add your gender to see games near you."}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                if (currentUserId) navigate("/profile?settings=1");
+                else setSignInGate("join");
+              }}
+              className="mt-3 inline-flex min-h-9 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+            >
+              {currentUserId ? "Set my gender" : "Sign in"}
+            </button>
+          </div>
         </div>
       )}
 

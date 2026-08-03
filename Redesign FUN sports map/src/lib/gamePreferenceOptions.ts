@@ -5,10 +5,33 @@ import { resolveCatalogSport } from "./sportsCatalog";
 
 export const LEVEL_OPTIONS = ["Any", "Beginner", "Intermediate", "Advanced", "Competitive"] as const;
 export const AGE_RANGE_OPTIONS = ["Any", "13–17", "18–24", "25–34", "35–44", "45+"] as const;
-export const MATCH_TYPE_OPTIONS = ["Co-ed", "Men's", "Women's"] as const;
+/**
+ * Who a game is open to. "Same gender" resolves against the *host's* profile
+ * gender at query time — it is deliberately not a named gender, so a game's
+ * audience follows whoever created it and can't be spoofed from the client.
+ */
+export const MATCH_TYPE_OPTIONS = ["Co-ed", "Same gender"] as const;
+export const SAME_GENDER_MATCH_TYPE = "Same gender";
 export const VISIBILITY_OPTIONS = ["Public (Map)", "Friends Only", "Invite Only"] as const;
 
 export type VisibilityLabel = (typeof VISIBILITY_OPTIONS)[number];
+
+/** Profile gender. Gates which same-gender games a viewer may see at all. */
+export const GENDER_OPTIONS = [
+  { value: "woman", label: "Woman" },
+  { value: "man", label: "Man" },
+  { value: "nonbinary", label: "Non-binary" },
+] as const;
+
+export type Gender = (typeof GENDER_OPTIONS)[number]["value"];
+
+const GENDER_VALUES = new Set<string>(GENDER_OPTIONS.map((o) => o.value));
+
+/** Narrow an arbitrary DB/localStorage value to a known gender, else null. */
+export function parseGender(v: unknown): Gender | null {
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  return GENDER_VALUES.has(s) ? (s as Gender) : null;
+}
 
 export type GameRequirementsPayload = {
   skillLevel: string;

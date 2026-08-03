@@ -191,6 +191,19 @@ export type ProfileNearbyRow = {
   distance_km: number;
 };
 
+/** Row from `get_similar_athletes` RPC — opted-in nearby athletes ranked by shared sports + availability. */
+export type SimilarAthleteRow = {
+  profile_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  avatar_id?: string | null;
+  sportsmanship?: number | null;
+  shared_sports: string[];
+  availability: string | null;
+  distance_km: number;
+  final_score: number;
+};
+
 /** Public-safe row from `search_profiles` RPC (no lat/lng). */
 export type ProfileSearchRow = {
   profile_id: string;

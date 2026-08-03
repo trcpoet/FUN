@@ -281,6 +281,9 @@ export function FiltersModal(props: FiltersModalProps) {
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    “Same gender” shows games open only to players of your gender.
+                  </p>
                 </div>
               </AccordionContent>
             </AccordionItem>

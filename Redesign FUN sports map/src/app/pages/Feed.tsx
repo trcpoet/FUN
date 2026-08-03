@@ -18,6 +18,7 @@ import { useLocation, useNavigate } from "react-router";
 import { cn } from "../components/ui/utils";
 import { useNotifications } from "../../hooks/useNotifications";
 import { useGeolocation } from "../../hooks/useGeolocation";
+import { useMyProfile } from "../../hooks/useMyProfile";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import {
@@ -25,13 +26,15 @@ import {
   fetchLocalNews,
   fetchFeedMediaPosts,
   fetchUnifiedFeed,
+  getSimilarAthletes,
   mergeGlobalNetworkChronological,
   type GlobalNetworkItem,
   type LiveFeedItem,
   type LocalNewsItem,
   type UnifiedFeedItem,
 } from "../../lib/api";
-import type { FeedMediaPostRow } from "../../lib/supabase";
+import type { FeedMediaPostRow, SimilarAthleteRow } from "../../lib/supabase";
+import { AVAILABILITY_OPTIONS } from "../../lib/athleteProfile";
 import {
   GameFeedCard,
   MediaFeedCard,
@@ -43,6 +46,7 @@ import { LocalNewsSection } from "../components/feed/LocalNewsSection";
 import { glassMessengerPage } from "../styles/glass";
 import { useAuth } from "../contexts/AuthContext";
 import { reverseGeocodeLabel } from "../../lib/geocoding";
+import { friendlyRpcError } from "../../lib/rpcErrors";
 
 function notificationLabel(n: { type: string; payload?: unknown }): string {
   const p = (n.payload ?? {}) as Record<string, unknown>;
@@ -102,6 +106,11 @@ function handleNotificationNavigate(
 }
 
 type TabId = "discovery" | "activity" | "similar" | "friends" | "notifications";
+
+function availabilityLabel(value: string | null): string | null {
+  if (!value) return null;
+  return AVAILABILITY_OPTIONS.find((a) => a.value === value)?.label ?? null;
+}
 
 function LiveSectionSkeleton() {
   return (
@@ -228,6 +237,11 @@ export default function Feed() {
   const { user } = useAuth();
   const { notifications, markRead } = useNotifications({ limit: 12 });
   const { coords } = useGeolocation();
+  const {
+    discoverableForMatching,
+    loading: myProfileLoading,
+    updateProfile: updateMyProfileFields,
+  } = useMyProfile();
   const unreadCount = notifications.filter((n) => !n.is_read).length;
   const [unified, setUnified] = useState<UnifiedFeedItem[]>([]);
   const [unifiedLoading, setUnifiedLoading] = useState(false);
@@ -241,6 +255,10 @@ export default function Feed() {
   const [localNewsLoadingMore, setLocalNewsLoadingMore] = useState(false);
   const [localNewsError, setLocalNewsError] = useState<Error | null>(null);
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
+  const [similarAthletes, setSimilarAthletes] = useState<SimilarAthleteRow[]>([]);
+  const [similarLoading, setSimilarLoading] = useState(false);
+  const [similarError, setSimilarError] = useState<Error | null>(null);
+  const [enablingDiscovery, setEnablingDiscovery] = useState(false);
 
   const refreshFeeds = useCallback(() => {
     setMediaLoading(true);
@@ -313,6 +331,28 @@ export default function Feed() {
   useEffect(() => {
     refreshFeeds();
   }, [refreshFeeds]);
+
+  useEffect(() => {
+    if (tab !== "similar" || !coords || !discoverableForMatching) return;
+    let cancelled = false;
+    setSimilarLoading(true);
+    setSimilarError(null);
+    void getSimilarAthletes({ lat: coords.lat, lng: coords.lng, radiusKm: 25, limit: 20 }).then((r) => {
+      if (cancelled) return;
+      setSimilarLoading(false);
+      setSimilarAthletes(r.data ?? []);
+      setSimilarError(r.error);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, coords?.lat, coords?.lng, discoverableForMatching]);
+
+  const handleEnableDiscovery = useCallback(async () => {
+    setEnablingDiscovery(true);
+    await updateMyProfileFields({ discoverable_for_matching: true });
+    setEnablingDiscovery(false);
+  }, [updateMyProfileFields]);
 
   useEffect(() => {
     if (!coords) {
@@ -700,12 +740,83 @@ export default function Feed() {
         )}
 
         {tab === "similar" && (
-          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 text-center py-20">
-            <div className="size-20 bg-white/[0.03] border border-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Users className="size-8 text-muted-foreground" />
-            </div>
-            <h2 className="text-xl font-black italic uppercase text-white mb-2">Finding Rivals</h2>
-            <p className="text-sm text-muted-foreground max-w-xs mx-auto">We're scanning the city for athletes that match your vibe and skill level.</p>
+          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {!coords ? (
+              <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90 text-center">
+                Turn on location to find athletes like you nearby.
+              </div>
+            ) : myProfileLoading ? (
+              <div className="flex justify-center py-20" aria-hidden>
+                <Loader2 className="size-6 animate-spin text-primary" />
+              </div>
+            ) : !discoverableForMatching ? (
+              <div className="text-center py-20">
+                <div className="size-20 bg-white/[0.03] border border-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Users className="size-8 text-muted-foreground" />
+                </div>
+                <h2 className="text-xl font-black italic uppercase text-white mb-2">Find Your Rivals</h2>
+                <p className="text-sm text-muted-foreground max-w-xs mx-auto mb-6">
+                  Opt in to show up in other athletes&apos; Similar lists and see who nearby shares your sports and
+                  availability. This is separate from your map visibility.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleEnableDiscovery}
+                  disabled={enablingDiscovery}
+                  className="rounded-2xl bg-primary px-6 py-2.5 text-xs font-bold uppercase tracking-widest text-white shadow-[0_8px_16px_-4px_rgba(225,29,72,0.4)] transition-opacity disabled:opacity-60"
+                >
+                  {enablingDiscovery ? "Enabling…" : "Enable discovery"}
+                </button>
+              </div>
+            ) : similarLoading ? (
+              <LiveSectionSkeleton />
+            ) : similarError ? (
+              <p className="text-xs text-rose-300 px-1 text-center py-20">
+                {friendlyRpcError(similarError, "athlete matching")}
+              </p>
+            ) : similarAthletes.length === 0 ? (
+              <div className="text-center py-20">
+                <div className="size-20 bg-white/[0.03] border border-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Users className="size-8 text-muted-foreground" />
+                </div>
+                <h2 className="text-xl font-black italic uppercase text-white mb-2">Finding Rivals</h2>
+                <p className="text-sm text-muted-foreground max-w-xs mx-auto">We're scanning the city for athletes that match your vibe and skill level.</p>
+              </div>
+            ) : (
+              <ul className="grid gap-4">
+                {similarAthletes.map((a) => (
+                  <li key={a.profile_id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/athlete/${encodeURIComponent(a.profile_id)}`)}
+                      className="w-full flex items-center gap-4 rounded-3xl border border-white/[0.08] bg-white/[0.02] p-4 text-left transition-all hover:border-primary/40"
+                    >
+                      <div className="size-12 shrink-0 rounded-2xl bg-white/10 overflow-hidden flex items-center justify-center">
+                        {a.avatar_url ? (
+                          <img src={a.avatar_url} alt="" className="size-full object-cover" />
+                        ) : (
+                          <Users className="size-5 text-muted-foreground" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-white truncate">{a.display_name ?? "Athlete"}</p>
+                        {a.shared_sports.length > 0 && (
+                          <p className="text-[10px] text-primary font-semibold uppercase tracking-wide truncate">
+                            {a.shared_sports.slice(0, 3).join(" · ")}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground font-medium mt-0.5 flex items-center gap-1">
+                          <MapPin className="size-3" />
+                          {a.distance_km < 1 ? "< 1 km away" : `${a.distance_km.toFixed(1)} km away`}
+                          {availabilityLabel(a.availability) ? ` · ${availabilityLabel(a.availability)}` : ""}
+                        </p>
+                      </div>
+                      <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         )}
 

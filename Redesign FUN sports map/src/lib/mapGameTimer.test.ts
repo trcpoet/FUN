@@ -561,3 +561,56 @@ describe("filterGamesVisibleOnMap", () => {
     ]);
   });
 });
+
+// Regression: the host presses "Start game" on a game scheduled for later, and
+// the map pin keeps counting down to the original start instead of going LIVE.
+// Reported against game ab56b33a — created 02:22, starts_at 03:21, Start pressed
+// at 02:22:39, pin still showed a ~1h countdown.
+describe("host-started games (status='live')", () => {
+  it("isGameLive is true even when starts_at is still in the future", () => {
+    const g = makeGame({ status: "live", starts_at: iso(59 * MIN), duration_minutes: 15 });
+    expect(isGameLive(g, NOW)).toBe(true);
+  });
+
+  it("getCountdownRemainingMs stops counting down to the old start time", () => {
+    const g = makeGame({ status: "live", starts_at: iso(59 * MIN), duration_minutes: 15 });
+    expect(getCountdownRemainingMs(g, NOW)).toBeNull();
+  });
+
+  it("an unscheduled live game ends duration minutes after live_started_at", () => {
+    const g = makeGame({
+      status: "live",
+      starts_at: null,
+      live_started_at: iso(-30 * MIN),
+      duration_minutes: 60,
+    });
+    expect(getGameEndsAtMs(g)).toBe(NOW + 30 * MIN);
+    expect(isGameEnded(g, NOW)).toBe(false);
+  });
+
+  // The stale-Live bug: status stays 'live' forever unless the host presses
+  // "End game", so liveness must be derived from the window, not the status.
+  it("an unscheduled live game past its window counts as ended", () => {
+    const g = makeGame({
+      status: "live",
+      starts_at: null,
+      live_started_at: iso(-4 * HOUR),
+      duration_minutes: 60,
+    });
+    expect(isGameEnded(g, NOW)).toBe(true);
+    expect(isGameLive(g, NOW)).toBe(false);
+    expect(isGameInLiveWindow(g, NOW)).toBe(false);
+    expect(filterGamesVisibleOnMap([g], NOW)).toEqual([]);
+  });
+
+  it("live strip copy reports the remaining window for an unscheduled live game", () => {
+    const g = makeGame({
+      status: "live",
+      starts_at: null,
+      live_started_at: iso(-20 * MIN),
+      duration_minutes: 60,
+      spots_remaining: 2,
+    });
+    expect(formatLiveStripCardSummary(g, NOW)).toBe("Live · 40:00 left · 2 spots");
+  });
+});

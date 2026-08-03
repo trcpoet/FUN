@@ -7,7 +7,13 @@ import {
   AVAILABILITY_OPTIONS,
   emptyAthleteProfile,
 } from "../../../lib/athleteProfile";
-import { AGE_RANGE_OPTIONS, MATCH_TYPE_OPTIONS } from "../../../lib/gamePreferenceOptions";
+import {
+  AGE_RANGE_OPTIONS,
+  MATCH_TYPE_OPTIONS,
+  GENDER_OPTIONS,
+  parseGender,
+  type Gender,
+} from "../../../lib/gamePreferenceOptions";
 import { SPORT_OPTIONS } from "../../../lib/sports";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -53,6 +59,9 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   editDisplayName: string;
   onEditDisplayNameChange: (v: string) => void;
+  /** Profile gender — a real `profiles` column, not part of the athlete_profile jsonb. */
+  editGender: Gender | null;
+  onEditGenderChange: (v: Gender | null) => void;
   currentAvatarUrl: string | null;
   athleteProfile: AthleteProfilePayload;
   onSaveAthleteProfile: (
@@ -127,6 +136,8 @@ export function ProfileEditSheet({
   onOpenChange,
   editDisplayName,
   onEditDisplayNameChange,
+  editGender,
+  onEditGenderChange,
   currentAvatarUrl,
   athleteProfile,
   onSaveAthleteProfile,
@@ -506,6 +517,30 @@ export function ProfileEditSheet({
                               ))}
                             </SelectContent>
                           </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                            Gender <span className="text-emerald-400">*</span>
+                          </Label>
+                          <Select
+                            value={editGender ?? ""}
+                            onValueChange={(v) => onEditGenderChange(parseGender(v))}
+                          >
+                            <SelectTrigger className="h-12 rounded-2xl bg-white/[0.03] border-white/5 text-white text-[11px] font-bold">
+                              <SelectValue placeholder="Select…" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#0D1117] border-white/10 rounded-2xl">
+                              {GENDER_OPTIONS.map((o) => (
+                                <SelectItem key={o.value} value={o.value} className="text-[11px] font-bold">
+                                  {o.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-[10px] leading-snug text-slate-500">
+                            Required to see games. Same-gender games are only shown to matching
+                            players — this is what keeps them private.
+                          </p>
                         </div>
                         <div className="space-y-2">
                           <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Match type</Label>

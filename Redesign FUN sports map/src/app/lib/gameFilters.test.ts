@@ -68,7 +68,7 @@ describe("parseRequirements", () => {
   it("returns all-Any for an array (object-typed but missing keys)", () => {
     // Arrays are typeof 'object', so they are accepted as the source object,
     // but none of the string keys resolve, so everything falls back to Any.
-    const raw = ["Men's", "Advanced"] as unknown as GameRow["requirements"];
+    const raw = ["Same gender", "Advanced"] as unknown as GameRow["requirements"];
     expect(parseRequirements(raw)).toEqual({
       skillLevel: "Any",
       matchType: "Any",
@@ -78,8 +78,8 @@ describe("parseRequirements", () => {
 
   it("canonicalises valid skill / match / age values", () => {
     expect(
-      parseRequirements({ skillLevel: "Intermediate", matchType: "Men's", ageRange: "18–24" })
-    ).toEqual({ skillLevel: "Intermediate", matchType: "Men's", ageRange: "18–24" });
+      parseRequirements({ skillLevel: "Intermediate", matchType: "Same gender", ageRange: "18–24" })
+    ).toEqual({ skillLevel: "Intermediate", matchType: "Same gender", ageRange: "18–24" });
   });
 
   it("trims surrounding whitespace before matching canonical values", () => {
@@ -210,22 +210,44 @@ describe("gameMatchesFilters — age", () => {
 describe("gameMatchesFilters — match type", () => {
   it("passes when the match type equals the filter", () => {
     const game = makeGame({ sport: "Soccer", requirements: { matchType: "Co-ed" } });
-    expect(gameMatchesFilters(game, makeFilters({ matchType: "Co-ed" }))).toBe(true);
+    expect(gameMatchesFilters(game, makeFilters({ matchType: "Co-ed" }), "woman")).toBe(true);
   });
 
   it("hides a game whose match type differs from the filter", () => {
-    const game = makeGame({ sport: "Soccer", requirements: { matchType: "Men's" } });
-    expect(gameMatchesFilters(game, makeFilters({ matchType: "Women's" }))).toBe(false);
+    const game = makeGame({ sport: "Soccer", requirements: { matchType: "Same gender" } });
+    expect(gameMatchesFilters(game, makeFilters({ matchType: "Co-ed" }), "woman")).toBe(false);
   });
 
   it("passes any match type when the filter is Any", () => {
-    const game = makeGame({ sport: "Soccer", requirements: { matchType: "Men's" } });
-    expect(gameMatchesFilters(game, makeFilters({ matchType: "Any" }))).toBe(true);
+    const game = makeGame({ sport: "Soccer", requirements: { matchType: "Same gender" } });
+    expect(gameMatchesFilters(game, makeFilters({ matchType: "Any" }), "woman")).toBe(true);
   });
 
   it("passes a game with no match-type requirement under an active filter", () => {
     const game = makeGame({ sport: "Soccer", requirements: {} });
-    expect(gameMatchesFilters(game, makeFilters({ matchType: "Women's" }))).toBe(true);
+    expect(gameMatchesFilters(game, makeFilters({ matchType: "Co-ed" }), "woman")).toBe(true);
+  });
+
+  // Retired options degrade to "Any" (= visible to everyone), which is exactly why
+  // migration 20260801130000 rewrites those rows before this code ships.
+  it("treats the retired Men's / Women's values as unconstrained", () => {
+    for (const legacy of ["Men's", "Women's"]) {
+      const game = makeGame({ sport: "Soccer", requirements: { matchType: legacy } });
+      expect(parseRequirements(game.requirements).matchType).toBe("Any");
+    }
+  });
+
+  // Defense in depth: the RPC already withholds these rows, but a viewer with no
+  // gender must never render a gender-restricted game even if one slips through.
+  it("hides same-gender games from a viewer with no gender on file", () => {
+    const game = makeGame({ sport: "Soccer", requirements: { matchType: "Same gender" } });
+    expect(gameMatchesFilters(game, makeFilters({ matchType: "Any" }), null)).toBe(false);
+    expect(gameMatchesFilters(game, makeFilters({ matchType: "Same gender" }), null)).toBe(false);
+  });
+
+  it("shows same-gender games to a viewer who has a gender", () => {
+    const game = makeGame({ sport: "Soccer", requirements: { matchType: "Same gender" } });
+    expect(gameMatchesFilters(game, makeFilters({ matchType: "Same gender" }), "man")).toBe(true);
   });
 });
 
@@ -408,12 +430,12 @@ describe("deriveDefaultFiltersFromProfile", () => {
 
   it("passes age and match-type preferences through WITHOUT normalising them", () => {
     const profile = {
-      gameMatchPreferences: { ageRange: "18-24", matchType: "Men's" },
+      gameMatchPreferences: { ageRange: "18-24", matchType: "Co-ed" },
     } as AthleteProfilePayload;
     // Note: ageRange is NOT normalised here — the raw hyphen label passes through.
     expect(deriveDefaultFiltersFromProfile(profile)).toEqual({
       ageRange: "18-24",
-      matchType: "Men's",
+      matchType: "Co-ed",
     });
   });
 
@@ -426,12 +448,12 @@ describe("deriveDefaultFiltersFromProfile", () => {
 
   it("derives all three fields from explicit non-Any preferences", () => {
     const profile = {
-      gameMatchPreferences: { skillLevel: "Intermediate", ageRange: "25–34", matchType: "Women's" },
+      gameMatchPreferences: { skillLevel: "Intermediate", ageRange: "25–34", matchType: "Same gender" },
     } as AthleteProfilePayload;
     expect(deriveDefaultFiltersFromProfile(profile)).toEqual({
       skillLevel: "Intermediate",
       ageRange: "25–34",
-      matchType: "Women's",
+      matchType: "Same gender",
     });
   });
 });

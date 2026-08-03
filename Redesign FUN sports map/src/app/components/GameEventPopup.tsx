@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { GameRow } from "../../lib/supabase";
-import { cn } from "./MapCanvas";
+import { cn } from "./ui/utils";
 import { format } from "date-fns";
 import { Clock, Trash2, Navigation, Share2, Play, Square, MessageCircle, X, Users } from "lucide-react";
 import { sportEmojiFor } from "../../lib/sportDisplay";

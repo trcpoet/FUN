@@ -28,7 +28,7 @@ describe("option constant arrays", () => {
   it("expose the exact UI option lists", () => {
     expect(LEVEL_OPTIONS).toEqual(["Any", "Beginner", "Intermediate", "Advanced", "Competitive"]);
     expect(AGE_RANGE_OPTIONS).toEqual(["Any", "13–17", "18–24", "25–34", "35–44", "45+"]);
-    expect(MATCH_TYPE_OPTIONS).toEqual(["Co-ed", "Men's", "Women's"]);
+    expect(MATCH_TYPE_OPTIONS).toEqual(["Co-ed", "Same gender"]);
     expect(VISIBILITY_OPTIONS).toEqual(["Public (Map)", "Friends Only", "Invite Only"]);
   });
 });

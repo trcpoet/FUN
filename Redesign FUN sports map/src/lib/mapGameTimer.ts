@@ -43,14 +43,25 @@ export function getGameEndsAtMs(game: GameRow): number | null {
     const t = new Date(dbEnd).getTime();
     if (!Number.isNaN(t)) return t;
   }
-  if (!game.starts_at) return null;
-  const startMs = new Date(game.starts_at).getTime();
-  if (Number.isNaN(startMs)) return null;
   const dur = (game.duration_minutes ?? DEFAULT_GAME_DURATION_MIN) * 60_000;
-  return startMs + dur;
+
+  if (game.starts_at) {
+    const startMs = new Date(game.starts_at).getTime();
+    if (!Number.isNaN(startMs)) return startMs + dur;
+  }
+
+  // Host-started pickup game with no schedule: the press is the anchor. Without
+  // this these rows have no end at all and stay "live" forever.
+  const liveStart = game.live_started_at?.trim();
+  if (liveStart) {
+    const liveMs = new Date(liveStart).getTime();
+    if (!Number.isNaN(liveMs)) return liveMs + dur;
+  }
+
+  return null;
 }
 
-/** True once `starts_at + duration` has passed; map should hide the pin. */
+/** True once the game window has passed; map should hide the pin. */
 export function isGameEnded(game: GameRow, nowMs: number): boolean {
   if (game.status === "completed" || game.status === "cancelled") return true;
   const ends = getGameEndsAtMs(game);
@@ -86,6 +97,9 @@ export function formatUrgentCountdown(totalMs: number): string {
 
 /** Remaining ms until scheduled start, or until map TTL for untimed random games. Null = no countdown (live / expired). */
 export function getCountdownRemainingMs(game: GameRow, nowMs: number): number | null {
+  // The host hit "Start game" — there is nothing left to count down to, even if
+  // the originally scheduled `starts_at` is still in the future.
+  if (game.status === "live") return null;
   if (game.starts_at) {
     const t = new Date(game.starts_at).getTime();
     if (t <= nowMs) return null;
@@ -98,8 +112,10 @@ export function getCountdownRemainingMs(game: GameRow, nowMs: number): number | 
 }
 
 export function isGameLive(game: GameRow, nowMs: number): boolean {
-  if (!game.starts_at) return false;
   if (isGameEnded(game, nowMs)) return false;
+  // Host-started: live now, regardless of the originally scheduled start.
+  if (game.status === "live") return true;
+  if (!game.starts_at) return false;
   return new Date(game.starts_at).getTime() <= nowMs;
 }
 
@@ -111,7 +127,7 @@ export function minCountdownAmongRandomGames(games: GameRow[], nowMs: number): {
   let best: number | null = null;
   let anyLive = false;
   for (const g of relevant) {
-    if (g.starts_at && new Date(g.starts_at).getTime() <= nowMs) {
+    if (isGameLive(g, nowMs)) {
       anyLive = true;
       continue;
     }
@@ -137,7 +153,7 @@ export function formatVenueGameTimerSummary(game: GameRow, nowMs: number): strin
       minute: "2-digit",
     });
     if (isGameEnded(game, nowMs)) return `${dateStr} · Ended`;
-    if (t <= nowMs) {
+    if (isGameLive(game, nowMs)) {
       const ends = getGameEndsAtMs(game);
       if (ends != null) {
         return `${dateStr} · Live · ${formatUrgentCountdown(ends - nowMs)} left`;
@@ -199,6 +215,17 @@ export function formatLiveStripCardSummary(game: GameRow, nowMs: number): string
 
   if (isGameEnded(game, nowMs)) {
     return `Game ended · ${spots}`;
+  }
+
+  // Host-started games report their remaining window even when they have no
+  // schedule at all, so handle "live" before the `starts_at` branch.
+  if (isGameLive(game, nowMs)) {
+    const ends = getGameEndsAtMs(game);
+    if (ends != null) {
+      const left = Math.max(0, ends - nowMs);
+      return `Live · ${formatUrgentCountdown(left)} left · ${spots}`;
+    }
+    return `Live now · ${spots}`;
   }
 
   if (game.starts_at?.trim()) {

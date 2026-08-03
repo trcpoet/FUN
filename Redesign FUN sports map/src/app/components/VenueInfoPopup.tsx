@@ -27,6 +27,7 @@ import { fetchVenueById, fetchVenueEnrichment } from "../../lib/api";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
 import type { NavigateToOptions } from "../../lib/directions";
 import { useModalA11y } from "../../hooks/useModalA11y";
+import { usePressAnimation } from "../../hooks/usePressAnimation";
 import { glassMessengerPanel } from "../styles/glass";
 import {
   prettyLabel,
@@ -214,6 +215,12 @@ export function VenueInfoPopup({
     to: details.center,
     enabled: open && Boolean(viewerCoords),
   });
+
+  // One press scope per footer action — each animates its own element.
+  const showRoutePress = usePressAnimation();
+  const directionsPress = usePressAnimation();
+  const mapsPress = usePressAnimation();
+  const createGamePress = usePressAnimation();
 
   const handleShowRoute = () => {
     // Hand over the route this popup already fetched for its ETA label — no second network call.
@@ -430,39 +437,47 @@ export function VenueInfoPopup({
                 ) : null}
                 <div className="flex items-center gap-2">
                   {onNavigateTo && viewerCoords ? (
-                    <button
+                    <motion.button
+                      {...showRoutePress}
                       type="button"
+                      initial={{ scale: 1 }}
                       onClick={handleShowRoute}
                       className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/15 cursor-pointer"
                     >
                       <Navigation className="w-4 h-4" aria-hidden />
                       Show route
-                    </button>
+                    </motion.button>
                   ) : (
-                    <a
+                    <motion.a
+                      {...directionsPress}
                       href={mapsHref}
                       target="_blank"
                       rel="noopener noreferrer"
+                      initial={{ scale: 1 }}
                       className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm font-medium text-emerald-300 transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/15 cursor-pointer"
                     >
                       <Navigation className="w-4 h-4" aria-hidden />
                       Directions
-                    </a>
+                    </motion.a>
                   )}
                   {onNavigateTo && viewerCoords ? (
-                    <a
+                    <motion.a
+                      {...mapsPress}
                       href={mapsHref}
                       target="_blank"
                       rel="noopener noreferrer"
+                      initial={{ scale: 1 }}
                       className="inline-flex shrink-0 items-center justify-center rounded-xl border border-white/10 px-3 py-2.5 text-xs font-medium text-slate-400 transition-colors hover:text-white hover:bg-white/5"
                       title="Open in Google Maps"
                     >
                       Maps
-                    </a>
+                    </motion.a>
                   ) : null}
                   {onCreateGame ? (
-                    <button
+                    <motion.button
+                      {...createGamePress}
                       type="button"
+                      initial={{ scale: 1 }}
                       onClick={() => {
                         onCreateGame(details);
                         onClose();
@@ -470,7 +485,7 @@ export function VenueInfoPopup({
                       className="inline-flex flex-1 items-center justify-center rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 cursor-pointer"
                     >
                       Create game
-                    </button>
+                    </motion.button>
                   ) : null}
                 </div>
               </div>

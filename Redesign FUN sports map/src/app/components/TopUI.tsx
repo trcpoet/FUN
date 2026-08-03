@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Filter, Navigation, MapPinned, X, MessageCircle, Rss, EyeOff, Shield, Globe, Bell, UserRound, Satellite } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { useIsMobile } from './ui/use-mobile';
 import { Link, useNavigate } from "react-router";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
@@ -49,6 +49,12 @@ const MAP_GLASS_ICON_BTN_SM_SKY =
   MAP_GLASS_ICON_BTN_SM_BASE +
   "hover:text-sky-300 hover:border-sky-400/45 hover:from-sky-500/18 hover:to-white/[0.08] " +
   "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_40px_rgba(14,165,233,0.18)]";
+
+/** Destructive variant — clearing the drawn route should not read as emerald. */
+const MAP_GLASS_ICON_BTN_SM_ROSE =
+  MAP_GLASS_ICON_BTN_SM_BASE +
+  "hover:text-rose-300 hover:border-rose-400/45 hover:from-rose-500/18 hover:to-white/[0.08] " +
+  "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_40px_rgba(244,63,94,0.18)]";
 
 export type SportSearchHitRow = {
   sport: string;
@@ -107,6 +113,10 @@ export type TopNavigationProps = {
   mapSearchLocationName?: string | null;
   /** Clears the map search anchor and resets to user GPS. */
   onClearMapSearch?: () => void;
+  /** Trip summary while a route is drawn on the map; non-null is the "route active" signal. */
+  routeSummary?: string | null;
+  /** Removes the drawn route. */
+  onClearRoute?: () => void;
   /** Courts/venues sport filter (shown as dropdown under messages when ready). */
   venueSportIntent?: VenueSportIntent | null;
   venueSportIntentReady?: boolean;
@@ -163,6 +173,8 @@ export const TopNavigation = (props: TopNavigationProps) => {
     liveGamesCount = 0,
     mapSearchLocationName = null,
     onClearMapSearch,
+    routeSummary = null,
+    onClearRoute,
     venueSportIntent = null,
     venueSportIntentReady = false,
     onVenueSportIntentChange,
@@ -173,6 +185,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const reduceMotion = useReducedMotion();
 
   const FEED_TOOLBAR_HINT_KEY = "fun_map_feed_toolbar_hint_v1";
   useEffect(() => {
@@ -680,6 +693,30 @@ export const TopNavigation = (props: TopNavigationProps) => {
         )}
       >
         <div className="flex flex-col items-center gap-2 pointer-events-auto">
+          {/* Only affordance that clears a drawn route — it outlives the popup that started it. */}
+          <AnimatePresence initial={false}>
+            {routeSummary && onClearRoute ? (
+              <motion.div
+                key="clear-route"
+                className="flex flex-col items-center gap-0.5"
+                initial={reduceMotion ? false : { opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+                transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
+              >
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.95 }}
+                  onClick={onClearRoute}
+                  className={MAP_GLASS_ICON_BTN_SM_ROSE}
+                  aria-label="Clear route"
+                  title={`Clear route · ${routeSummary}`}
+                >
+                  <X className="w-5 h-5" />
+                </motion.button>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
           {onCenterOnUser && (
             <div className="flex flex-col items-center gap-0.5">
               <motion.button

@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import React, { useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import {
   Flame,
   MapPin,
@@ -11,7 +11,7 @@ import {
   Clock,
 } from "lucide-react";
 import { format } from "date-fns";
-import { cn } from "./MapCanvas";
+import { cn } from "./ui/utils";
 import { useIsMobile } from "./ui/use-mobile";
 import { useNavigate } from "react-router";
 import type { GameRow } from "../../lib/supabase";
@@ -73,6 +73,30 @@ export const BottomCarousel = ({
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [radialMenuOpen, setRadialMenuOpen] = useState(false);
+  const radialRef = useRef<HTMLDivElement | null>(null);
+  const reduceMotion = useReducedMotion();
+
+  // Dismiss without capturing input. A full-screen backdrop would swallow every
+  // pointer gesture and freeze the map underneath; listening on the document
+  // instead lets the same drag both close the menu and pan the map.
+  useEffect(() => {
+    if (!radialMenuOpen) return;
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (radialRef.current?.contains(e.target as Node)) return;
+      setRadialMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRadialMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true });
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, { capture: true });
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [radialMenuOpen]);
 
   const handleNav = (id: string) => {
     setRadialMenuOpen(false);
@@ -229,21 +253,28 @@ export const BottomCarousel = ({
         </>
       )}
 
-      {/* Mobile only: circular nav — center Map button reveals four others on press */}
+      {/* Mobile only: circular nav — center Map button reveals four others on press.
+          pointer-events stay off the full-width row and the 112px cluster box — only
+          the actual controls take input, so the map is draggable right up to the edge
+          of each button. */}
       {isMobile && (
-        <div className="flex justify-center mt-4 mb-4 pointer-events-auto relative z-[50]">
-          <div className="relative w-28 h-28">
-            {/* Backdrop: tap to close radial menu */}
+        <div className="flex justify-center mt-4 mb-4 pointer-events-none relative z-[50]">
+          <div className="pointer-events-none relative w-28 h-28" ref={radialRef}>
+            {/* Legibility scrim behind the cluster only — never intercepts pointers,
+                so the map keeps every pan/pinch gesture while the menu is open. */}
             <AnimatePresence>
               {radialMenuOpen && (
                 <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                  className="fixed inset-0 z-[45]"
+                  initial={{ opacity: 0, scale: 0.85 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.85 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.16, 1, 0.3, 1] }}
+                  className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-36 w-36 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                  style={{
+                    background:
+                      "radial-gradient(circle, rgba(10,15,28,0.72) 0%, rgba(10,15,28,0.45) 45%, transparent 70%)",
+                  }}
                   aria-hidden
-                  onClick={() => setRadialMenuOpen(false)}
                 />
               )}
             </AnimatePresence>
@@ -251,8 +282,10 @@ export const BottomCarousel = ({
             {/* Center = Map (active); press to open/close radial menu */}
             <motion.button
               type="button"
-              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-14 rounded-full bg-slate-800/95 border-2 border-emerald-500/50 shadow-xl flex items-center justify-center text-emerald-400 hover:border-emerald-500 transition-colors z-10"
+              className="pointer-events-auto absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-14 rounded-full bg-slate-800/95 border-2 border-emerald-500/50 shadow-xl flex items-center justify-center text-emerald-400 hover:border-emerald-500 transition-colors z-10"
               aria-label={radialMenuOpen ? "Close menu" : "Map"}
+              aria-haspopup="menu"
+              aria-expanded={radialMenuOpen}
               onClick={() => setRadialMenuOpen((v) => !v)}
               whileTap={{ scale: 0.95 }}
             >
@@ -260,6 +293,12 @@ export const BottomCarousel = ({
             </motion.button>
 
             {/* Four items: hidden until center is pressed; wrapper handles position so motion doesn't override translate */}
+            <div
+              className="pointer-events-none absolute inset-0"
+              role="menu"
+              aria-label="Navigation"
+              aria-hidden={!radialMenuOpen}
+            >
             <AnimatePresence>
               {radialMenuOpen &&
                 NAV_ITEMS.filter((i) => i.id !== "map").map(({ id, label, Icon }, i) => {
@@ -270,7 +309,8 @@ export const BottomCarousel = ({
                   return (
                     <div
                       key={id}
-                      className="absolute w-11 h-11 flex items-center justify-center z-10"
+                      className="pointer-events-auto absolute w-11 h-11 flex items-center justify-center z-10"
+                      role="none"
                       style={{
                         left: `calc(50% + ${x}px)`,
                         top: `calc(50% + ${y}px)`,
@@ -279,15 +319,20 @@ export const BottomCarousel = ({
                     >
                       <motion.button
                         type="button"
-                        initial={{ scale: 0, opacity: 0 }}
+                        role="menuitem"
+                        initial={reduceMotion ? false : { scale: 0, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0, opacity: 0 }}
-                        transition={{
-                          type: "spring",
-                          stiffness: 400,
-                          damping: 24,
-                          delay: 0.03 * i,
-                        }}
+                        exit={reduceMotion ? { opacity: 0 } : { scale: 0, opacity: 0 }}
+                        transition={
+                          reduceMotion
+                            ? { duration: 0.12 }
+                            : {
+                                type: "spring",
+                                stiffness: 400,
+                                damping: 24,
+                                delay: 0.03 * i,
+                              }
+                        }
                         className="w-11 h-11 rounded-full bg-slate-800/95 border border-slate-600 shadow-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 transition-colors"
                         title={label}
                         aria-label={label}
@@ -299,6 +344,7 @@ export const BottomCarousel = ({
                   );
                 })}
             </AnimatePresence>
+            </div>
           </div>
         </div>
       )}

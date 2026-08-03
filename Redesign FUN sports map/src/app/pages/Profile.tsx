@@ -4,6 +4,7 @@ import { useMyProfile } from "../../hooks/useMyProfile";
 import { useUserStats } from "../../hooks/useUserStats";
 import { useNotifications } from "../../hooks/useNotifications";
 import { signOut, getMyBadges, uploadAvatarImage, getFollowCounts } from "../../lib/api";
+import type { Gender } from "../../lib/gamePreferenceOptions";
 import { useIsMobile } from "../components/ui/use-mobile";
 import {
   ProfileEditSheet,
@@ -79,7 +80,7 @@ class ProfileSettingsErrorBoundary extends React.Component<
 
 export default function Profile() {
   const { user } = useAuth();
-  const { displayName, avatarUrl, updateProfile, refetch, athleteProfile, loading } = useMyProfile();
+  const { displayName, avatarUrl, updateProfile, refetch, athleteProfile, gender, loading } = useMyProfile();
   const { stats } = useUserStats();
   const { notifications, markRead } = useNotifications({ limit: 12 });
   const isMobile = useIsMobile();
@@ -108,6 +109,7 @@ export default function Profile() {
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [shareCopiedAt, setShareCopiedAt] = useState<number | null>(null);
   const [editDisplayName, setEditDisplayName] = useState("");
+  const [editGender, setEditGender] = useState<Gender | null>(null);
   const [repAvg, setRepAvg] = useState<number | null>(null);
   const [repCount, setRepCount] = useState<number>(0);
   const [statusText, setStatusText] = useState<string | null>(null);
@@ -129,6 +131,10 @@ export default function Profile() {
   useEffect(() => {
     if (editOpen) setEditDisplayName(displayName ?? "");
   }, [editOpen, displayName]);
+
+  useEffect(() => {
+    if (editOpen) setEditGender(gender);
+  }, [editOpen, gender]);
 
   useEffect(() => {
     const qs = new URLSearchParams(location.search);
@@ -568,6 +574,8 @@ export default function Profile() {
             }}
             editDisplayName={editDisplayName}
             onEditDisplayNameChange={setEditDisplayName}
+            editGender={editGender}
+            onEditGenderChange={setEditGender}
             currentAvatarUrl={avatarUrl}
             athleteProfile={athleteProfile}
             profileLevel={stats?.level ?? 1}
@@ -583,6 +591,7 @@ export default function Profile() {
               const err = await updateProfile({
                 display_name: editDisplayName.trim() || null,
                 ...(avatar_url !== undefined ? { avatar_url } : {}),
+                gender: editGender,
                 athlete_profile: next,
               });
               if (err) throw new Error(err.message);
