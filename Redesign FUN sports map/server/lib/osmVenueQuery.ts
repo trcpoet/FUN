@@ -29,6 +29,10 @@ const LEISURE_TOKENS = [
   "disc_golf_course",
   "skatepark",
   "recreation_ground",
+  // All named parks — with OR without a pitch. Parks that contain pitches also
+  // import those pitches (separate rows), so both the park 🏟️ and each pitch's
+  // sport icon render.
+  "park",
 ] as const;
 
 /** `sport=*` tokens for venues often tagged without a fetched `leisure=*`. */
@@ -47,15 +51,7 @@ const SPORT_TOKENS = [
   "darts",
 ] as const;
 
-/**
- * Build the bounded Overpass query for a bbox string (`minLat,minLng,maxLat,maxLng`).
- *
- * Named parks are handled separately from the flat tag union: instead of pulling
- * in every `leisure=park` (mostly empty green space), we keep only parks that
- * actually CONTAIN a sports pitch. The containment sub-query maps pitches → their
- * nodes → the areas enclosing them → the ones tagged `leisure=park` → back to the
- * park ways (`pivot`). Verified live: returns Doug Russell Park, drops empty parks.
- */
+/** Build the bounded Overpass query for a bbox string (`minLat,minLng,maxLat,maxLng`). */
 export function buildVenueOverpassQuery(bboxStr: string): string {
   const leisureRe = LEISURE_TOKENS.join("|");
   const sportRe = SPORT_TOKENS.join("|");
@@ -66,13 +62,7 @@ export function buildVenueOverpassQuery(bboxStr: string): string {
       way["leisure"~"^(${leisureRe})$"](${bboxStr});
       node["sport"~"^(${sportRe})$"](${bboxStr});
       way["sport"~"^(${sportRe})$"](${bboxStr});
-    )->.base;
-    way["leisure"="pitch"](${bboxStr})->.pitches;
-    node(w.pitches)->.pnodes;
-    .pnodes is_in->.enclosing;
-    area.enclosing["leisure"="park"]->.parkAreas;
-    way(pivot.parkAreas)->.sportyParks;
-    (.base; .sportyParks;);
+    );
     out center;
   `.replace(/\n\s+/g, " ");
 }
