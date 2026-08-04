@@ -20,7 +20,8 @@ import { venueSelectionFromProperties } from "../lib/venueSelection";
 import { enrichVenueGeoJSON } from "../lib/venueClusterEngine";
 import { venueClusterIconImageExpression } from "../lib/venueSportIcon";
 import { openGamesNearPoint } from "../lib/gamesAtVenue";
-import { splitColocatedGames } from "../lib/colocateGames";
+import { splitColocated } from "../lib/colocateGames";
+import { partitionNotesByVenue } from "../lib/notesAtVenue";
 import { limitGamesForMapViewport } from "../map/mapBounds";
 import {
   getViewportMetrics,
@@ -39,9 +40,12 @@ const Avatar3DOverlay = React.lazy(() =>
 );
 import { GameEventPopup } from "./GameEventPopup";
 import { VenueInfoPopup } from "./VenueInfoPopup";
+import type { SignInGateAction } from "./SignInGate";
 import { ColocatedGamesPin } from "./ColocatedGamesPin";
+import { NoteClusterPin } from "./NoteClusterPin";
 import { RandomLocationGamePin } from "./RandomLocationGamePin";
 import { ColocatedGamesModal } from "./ColocatedGamesModal";
+import { ColocatedNotesModal } from "./ColocatedNotesModal";
 import { GameMapCountdownPill } from "./GameMapCountdownPill";
 import { MapLongPressIndicator } from "./MapLongPressIndicator";
 import { useIsMobile } from "./ui/use-mobile";
@@ -63,12 +67,15 @@ const L_VENUE_DOTS = "venue-dots-core";
 /** Dark bluish-purple halos (outer + inner gradient) — animated via rAF */
 const L_VENUE_DOTS_PULSE = "venue-dots-pulse";
 const L_VENUE_DOTS_PULSE_INNER = "venue-dots-pulse-inner";
+/** Cyan count of notes left at a venue, driven by the `note_count` feature state. */
+const L_VENUE_NOTE_BADGE = "venue-note-badge";
 const DIRECTIONS_SOURCE_ID = "fun-directions-route";
 const DIRECTIONS_LAYER_ID = "fun-directions-route-line";
 
 /** Remove venue GL layers/sources — map teardown or basemap style swap only (not venue-fetch effect re-runs). */
 function removeVenueGlLayers(map: import("mapbox-gl").Map): void {
   try {
+    if (map.getLayer(L_VENUE_NOTE_BADGE)) map.removeLayer(L_VENUE_NOTE_BADGE);
     if (map.getLayer(L_VENUE_SPORT_ICON)) map.removeLayer(L_VENUE_SPORT_ICON);
     if (map.getLayer(L_VENUE_GL_CLUSTER_ICON)) map.removeLayer(L_VENUE_GL_CLUSTER_ICON);
     if (map.getLayer(L_VENUE_GL_CLUSTERS)) map.removeLayer(L_VENUE_GL_CLUSTERS);
@@ -221,6 +228,12 @@ type MapboxMapProps = {
   /** Your rating out of 5 (shown under your 2D map avatar). */
   userSportsmanship?: number | null;
   currentUserId?: string | null;
+  /**
+   * Opens App's sign-in gate for a guest action. Threaded through purely for
+   * VenueInfoPopup, which is rendered here rather than in App and needs it for
+   * reviews, comments, and photo uploads.
+   */
+  ensureSession?: (action: SignInGateAction) => Promise<boolean>;
   /** (lat, lng, viewportPoint) when user presses-and-holds the map to create a game */
   /** Long-press on empty map → open Create Game at that point. */
   onMapLongPress?: (lat: number, lng: number, viewportPoint?: { x: number; y: number }) => void;
@@ -313,6 +326,10 @@ export function MapboxMap(props: MapboxMapProps) {
   );
   /** Pulsating note markers, keyed by note id (no React root — plain DOM). */
   const noteMarkerEntriesRef = useRef<Map<string, { marker: import("mapbox-gl").Marker; root: HTMLButtonElement; dispose: () => void }>>(new Map());
+  /** HTML markers for several notes at the same coordinates (React root, so zoom-scalable). */
+  const noteClusterMarkerEntriesRef = useRef<{ marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[]>([]);
+  /** Last enriched venue FeatureCollection, so note counts can be re-injected without a refetch. */
+  const venueEnrichedRef = useRef<SportsVenueGeoJSON | null>(null);
   const userMarker2dRef = useRef<import("mapbox-gl").Marker | null>(null); // your own avatar (2D mode)
   const userMarker2dScaleElRef = useRef<HTMLDivElement | null>(null); // inner div we scale with zoom
 
@@ -324,6 +341,9 @@ export function MapboxMap(props: MapboxMapProps) {
   const [venuePopupPoint, setVenuePopupPoint] = useState<{ x: number; y: number } | null>(null);
   const [bumpGameId, setBumpGameId] = useState<string | null>(null); // game id currently playing the tap-pulse
   const [colocatedModalGames, setColocatedModalGames] = useState<GameRow[] | null>(null); // games stacked at one spot
+  const [colocatedModalNotes, setColocatedModalNotes] = useState<MapNoteRow[] | null>(null); // notes stacked at one spot
+  /** Bumped whenever the venue point list is rebuilt, so note↔venue matching re-runs. */
+  const [venuePointsEpoch, setVenuePointsEpoch] = useState(0);
   // Press-and-hold (long-press) Create Game: progress ring (0→1) drawn at the contact point.
   const [longPress, setLongPress] = useState<{ x: number; y: number; progress: number } | null>(null);
   // Latest create-game callback, read by the long-press effect so it never re-binds canvas listeners.
@@ -878,6 +898,7 @@ export function MapboxMap(props: MapboxMapProps) {
     gameInteractionTsRef.current = Date.now();
     setEventPopup(null);
     setColocatedModalGames(null);
+    setColocatedModalNotes(null);
 
     // Wait for the camera to recenter, then pulse the icon and open the game card.
     const t = window.setTimeout(() => {
@@ -1209,6 +1230,10 @@ export function MapboxMap(props: MapboxMapProps) {
       ent.scaleEl.style.transform = `scale(${s})`;
       ent.scaleEl.style.transformOrigin = "center";
     }
+    for (const ent of noteClusterMarkerEntriesRef.current) {
+      ent.scaleEl.style.transform = `scale(${s})`;
+      ent.scaleEl.style.transformOrigin = "center";
+    }
     for (const ent of playerMarkerEntriesRef.current) {
       ent.scaleEl.style.transform = `scale(${s})`;
       ent.scaleEl.style.transformOrigin = "center";
@@ -1437,7 +1462,29 @@ export function MapboxMap(props: MapboxMapProps) {
   }, [mapLoaded, basemapStyleEpoch, games, selectedGameId, mapMinuteEpoch, applyMapLayerVisibility]);
 
   /**
-   * Render notes as pulsating DOM markers (Letter/Note icon).
+   * Split notes into those sitting on a venue and those standing alone.
+   *
+   * Note markers are DOM elements, so they always paint above the GL venue layers and
+   * swallow the click that would open the venue. Notes at a venue therefore get no pin of
+   * their own — the venue carries a count badge and lists them in its modal instead.
+   */
+  const { anchored: notesByVenueId, floating: floatingNotes } = useMemo(() => {
+    const venues = venueClustersRef.current.map((c) => ({
+      id: c.properties.id,
+      lat: c.lat,
+      lng: c.lng,
+    }));
+    return partitionNotesByVenue(notes, venues, MapCfg.NOTE_VENUE_ABSORB_RADIUS_METERS);
+    // venuePointsEpoch stands in for venueClustersRef, which is a ref and can't be a dep.
+  }, [notes, venuePointsEpoch]);
+
+  const { singles: floatingNoteSingles, groups: floatingNoteGroups } = useMemo(
+    () => splitColocated(floatingNotes),
+    [floatingNotes]
+  );
+
+  /**
+   * Render standalone notes as pulsating DOM markers (Letter/Note icon).
    * One `mapboxgl.Marker` per note, diffed by id across renders.
    */
   useEffect(() => {
@@ -1450,6 +1497,7 @@ export function MapboxMap(props: MapboxMapProps) {
       const Marker = mapboxgl.Marker;
 
       const existing = noteMarkerEntriesRef.current; // markers already on the map, keyed by note id
+      const notes = floatingNoteSingles; // venue-anchored and stacked notes are drawn elsewhere
       const nextById = new Map<string, MapNoteRow>(notes.map((n) => [n.id, n])); // notes we want now
 
       // Drop markers whose notes are no longer present.
@@ -1503,7 +1551,85 @@ export function MapboxMap(props: MapboxMapProps) {
     return () => {
       cancelled = true;
     };
-  }, [mapLoaded, basemapStyleEpoch, notes, onOpenNoteThread]);
+  }, [mapLoaded, basemapStyleEpoch, floatingNoteSingles, onOpenNoteThread]);
+
+  /** Same-coordinate notes: one stacked-paper pin that opens a chooser, like colocated games. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    let cancelled = false;
+    if (floatingNoteGroups.length > 0) {
+      void loadMapboxGl().then((mapboxgl) => {
+        if (cancelled || mapRef.current !== map) return;
+        const Marker = mapboxgl.Marker;
+        const next: { marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }[] = [];
+
+        for (const group of floatingNoteGroups) {
+          const outer = document.createElement("div");
+          outer.style.pointerEvents = "auto";
+          const scaleEl = document.createElement("div");
+          scaleEl.style.willChange = "transform";
+          outer.appendChild(scaleEl);
+          const root = createRoot(scaleEl);
+          const n0 = group[0]!;
+          root.render(<NoteClusterPin notes={group} onPress={() => setColocatedModalNotes(group)} />);
+          const marker = new Marker({ element: outer, anchor: "center" })
+            .setLngLat([n0.lng, n0.lat])
+            .addTo(map);
+          next.push({ marker, root, scaleEl });
+        }
+        noteClusterMarkerEntriesRef.current = next;
+        applyDomMarkerScale();
+      });
+    } else {
+      applyDomMarkerScale();
+    }
+
+    return () => {
+      cancelled = true;
+      const snapshot = [...noteClusterMarkerEntriesRef.current];
+      noteClusterMarkerEntriesRef.current = [];
+      for (const { marker } of snapshot) {
+        try {
+          marker.remove();
+        } catch (_) { /* noop */ }
+      }
+      // Deferred so React can finish the current commit before these roots unmount.
+      const roots = snapshot.map((s) => s.root);
+      window.setTimeout(() => {
+        for (const root of roots) {
+          try {
+            root.unmount();
+          } catch (_) { /* noop */ }
+        }
+      }, 0);
+    };
+  }, [mapLoaded, basemapStyleEpoch, floatingNoteGroups, applyDomMarkerScale]);
+
+  /**
+   * Note count badge on venue pins.
+   *
+   * Counts are baked into the venue feature properties rather than pushed as feature state:
+   * `text-field` is a layout property, and Mapbox only resolves ["feature-state"] in paint
+   * properties, so a state-driven label would never render.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    const enriched = venueEnrichedRef.current;
+    if (!enriched) return;
+    const src = map.getSource(SRC_VENUE_POINTS) as import("mapbox-gl").GeoJSONSource | undefined;
+    if (!src?.setData) return;
+
+    src.setData({
+      ...enriched,
+      features: enriched.features.map((f) => {
+        const count = notesByVenueId.get(f.properties.id)?.length ?? 0;
+        return count > 0 ? { ...f, properties: { ...f.properties, note_count: count } } : f;
+      }),
+    });
+  }, [mapLoaded, basemapStyleEpoch, notesByVenueId, venuePointsEpoch]);
 
   /** Same-coordinate games: single HTML cluster pin (avoids overlapping GL sport icons). */
   // When several games sit at the exact same spot, draw one combined HTML pin that opens
@@ -1513,7 +1639,7 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map || !mapLoaded) return;
 
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
-    const { groups } = splitColocatedGames(capped); // groups = sets of games sharing one location
+    const { groups } = splitColocated(capped); // groups = sets of games sharing one location
 
     let cancelled = false;
     if (groups.length > 0) {
@@ -1583,7 +1709,7 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map || !mapLoaded) return;
 
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
-    const { singles } = splitColocatedGames(capped); // games that are alone at their spot
+    const { singles } = splitColocated(capped); // games that are alone at their spot
     const randomSingles = singles.filter((g) => !isVenueGame(g)); // ...and not tied to a venue
 
     let cancelled = false;
@@ -1658,7 +1784,7 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map || !mapLoaded) return;
 
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
-    const { singles } = splitColocatedGames(capped);
+    const { singles } = splitColocated(capped);
     const venueSingles = singles.filter((g) => isVenueGame(g)); // games attached to a venue
     const nextById = new Map<string, GameRow>(venueSingles.map((g) => [g.id, g])); // desired set, by id
 
@@ -1816,6 +1942,7 @@ export function MapboxMap(props: MapboxMapProps) {
       if (Date.now() - gameInteractionTsRef.current < 250) return;
       setEventPopup(null);
       setColocatedModalGames(null);
+      setColocatedModalNotes(null);
       onSelectVenue(null);
       setVenuePopupPoint(null);
     };
@@ -1881,6 +2008,7 @@ export function MapboxMap(props: MapboxMapProps) {
       // Clear popups/selection so Create Game opens on a clean map.
       setEventPopup(null);
       setColocatedModalGames(null);
+      setColocatedModalNotes(null);
       onSelectVenue(null);
       setVenuePopupPoint(null);
       map.easeTo({
@@ -2254,6 +2382,10 @@ export function MapboxMap(props: MapboxMapProps) {
           lat: f.geometry.coordinates[1]!,
           properties: f.properties,
         }));
+        // Kept so note counts can be re-injected on note changes without another fetch, and
+        // bumped so the note↔venue matching memo re-runs against the new venue list.
+        venueEnrichedRef.current = enriched;
+        setVenuePointsEpoch((e) => e + 1);
 
         const beforeGames = mapInstance.getLayer(L_GAME_CLUSTERS) ? L_GAME_CLUSTERS : undefined;
         const pointFilter: import("mapbox-gl").Expression = ["!", ["has", "point_count"]];
@@ -2385,6 +2517,37 @@ export function MapboxMap(props: MapboxMapProps) {
                 "icon-ignore-placement": true,
                 "icon-pitch-alignment": "viewport",
                 "icon-rotation-alignment": "viewport",
+              },
+              minzoom: 10,
+            },
+            beforeGames
+          );
+
+          // Cyan count of notes left at this venue. Those notes deliberately have no pin of
+          // their own (they would cover the venue and eat its click), so this badge is the
+          // only thing on the map saying they exist — it must stay legible.
+          mapInstance.addLayer(
+            {
+              id: L_VENUE_NOTE_BADGE,
+              type: "symbol",
+              source: SRC_VENUE_POINTS,
+              filter: [
+                "all",
+                pointFilter,
+                [">", ["coalesce", ["get", "note_count"], 0], 0],
+              ] as unknown as import("mapbox-gl").Expression,
+              layout: {
+                "text-field": ["to-string", ["get", "note_count"]],
+                "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Regular"],
+                "text-size": 11,
+                "text-offset": [1.05, -0.95],
+                "text-allow-overlap": true,
+                "text-ignore-placement": true,
+              },
+              paint: {
+                "text-color": "#082f49",
+                "text-halo-color": "#22d3ee",
+                "text-halo-width": 2,
               },
               minzoom: 10,
             },
@@ -2626,6 +2789,13 @@ export function MapboxMap(props: MapboxMapProps) {
 
   const openGamesNearbyCount = gamesAtSelectedVenue.length;
 
+  // Notes absorbed by the selected venue — these have no pin of their own, so the modal is
+  // where they live.
+  const notesAtSelectedVenue = useMemo(() => {
+    if (!selectedVenue) return [];
+    return notesByVenueId.get(selectedVenue.id) ?? [];
+  }, [notesByVenueId, selectedVenue]);
+
   // —— Render ——
   // Error/empty state: no token or the map failed to load.
   if (!MAPBOX_TOKEN || mapError) {
@@ -2712,7 +2882,15 @@ export function MapboxMap(props: MapboxMapProps) {
           open
           openGamesNearbyCount={openGamesNearbyCount}
           gamesNearby={gamesAtSelectedVenue}
+          notesAtVenue={notesAtSelectedVenue}
+          onOpenNote={(note) => {
+            onSelectVenue(null);
+            setVenuePopupPoint(null);
+            onOpenNoteThread?.(note);
+          }}
           joinedGameIds={joinedSet}
+          currentUserId={currentUserId}
+          ensureSession={props.ensureSession ? () => props.ensureSession!("review") : undefined}
           viewerCoords={userCoords}
           onNavigateTo={onNavigateTo}
           onJoinGame={onJoinGame}
@@ -2753,6 +2931,19 @@ export function MapboxMap(props: MapboxMapProps) {
           onOpenChat={(g) => {
             onOpenMessagesForGame?.(g);
             setColocatedModalGames(null);
+          }}
+        />
+      )}
+
+      {/* Chooser modal listing all notes stacked at one spot. */}
+      {colocatedModalNotes && colocatedModalNotes.length > 0 && (
+        <ColocatedNotesModal
+          notes={colocatedModalNotes}
+          viewerCoords={userCoords}
+          onClose={() => setColocatedModalNotes(null)}
+          onOpenNote={(note) => {
+            setColocatedModalNotes(null);
+            onOpenNoteThread?.(note);
           }}
         />
       )}

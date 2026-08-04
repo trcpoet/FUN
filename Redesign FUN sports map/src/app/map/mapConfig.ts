@@ -141,6 +141,15 @@ export const VENUE_DOT_PULSE_HZ_SMOOTHING = 6;
 /** Polygon footprint radius around clustered venue (meters) — smaller = subtler */
 export const VENUE_AREA_RADIUS_METERS = 42;
 
+/**
+ * A note within this radius of a venue is shown ON the venue (badge + Notes tab) instead of
+ * getting its own map pin. Note markers are DOM elements and always paint above the GL venue
+ * layers, so a note left at a venue's coordinates would otherwise cover it and swallow the
+ * click. Deliberately tighter than the 120 m used for "games near this venue" — only notes
+ * that genuinely overlap the icon get absorbed; one across the park keeps its own pin.
+ */
+export const NOTE_VENUE_ABSORB_RADIUS_METERS = VENUE_AREA_RADIUS_METERS;
+
 /** Mapbox venue clustering — above this zoom, individual venue points emit. */
 export const VENUE_CLUSTER_MAX_ZOOM = 16;
 

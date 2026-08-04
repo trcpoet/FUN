@@ -6,6 +6,7 @@
 import { expectedOsmTokensForDisplaySports } from "../../lib/osmSportTags";
 import { supabase } from "../../lib/supabase";
 import type { OsmSportsVenueRow } from "../../lib/supabase";
+import { OSM_VENUE_MAP_SELECT } from "../../lib/osmVenueColumns";
 import type { SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 import { dbRowToVenueProperties } from "./venueSelection";
 
@@ -247,9 +248,7 @@ export async function fetchSportsVenuesFromDb(
 
   let query = supabase
     .from("osm_sports_venues")
-    .select(
-      "id, lat, lng, name, sport, leisure, osm_type, osm_id, surface, lit, access, opening_hours, website, operator, wikidata, hero_image_url, wikidata_label, wikidata_description, photo_attributions, enrichment_source"
-    )
+    .select(OSM_VENUE_MAP_SELECT)
     .gte("lat", minLat)
     .lte("lat", maxLat)
     .gte("lng", minLng)
@@ -278,7 +277,8 @@ export async function fetchSportsVenuesFromDb(
   const features: SportsVenueFeature[] = [];
   for (const row of data) {
     throwIfAborted(options?.signal);
-    const typed = row as OsmSportsVenueRow;
+    // Via unknown: the client is untyped, so PostgREST hands back a loose row shape.
+    const typed = row as unknown as OsmSportsVenueRow;
     const leisure = typed.leisure ?? "";
     const sport = typed.sport ?? "";
     if (sportTokens && leisure === "pitch") {

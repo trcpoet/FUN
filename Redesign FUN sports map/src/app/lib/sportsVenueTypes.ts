@@ -11,6 +11,8 @@ export type SportsVenueProperties = {
   sport_map_icon?: string;
   /** Numeric sport key for Mapbox cluster aggregation. */
   sport_key?: number;
+  /** Notes left at this venue. Injected client-side, not imported from OSM. */
+  note_count?: number;
   /** OSM tags when importer captures them (optional). */
   surface?: string;
   lit?: string;

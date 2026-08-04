@@ -50,6 +50,120 @@ export function normalizeWebsite(value: string | undefined | null): string | nul
   return /^https?:\/\//i.test(v) ? v : `https://${v}`;
 }
 
+/**
+ * OpenStreetMap page for a venue.
+ *
+ * Built from the venue id itself ("way/12345"), which is already carried
+ * everywhere — no extra plumbing. Gives people a way to fix bad venue data at
+ * the source, which is the only way most of these fields ever improve.
+ */
+export function osmHref(venueId: string | undefined | null): string | null {
+  const v = venueId?.trim();
+  if (!v || !/^(node|way|relation)\/\d+$/.test(v)) return null;
+  return `https://www.openstreetmap.org/${v}`;
+}
+
+/** Phone tag → tel: URI, or null when there are no dialable digits. */
+export function telHref(phone: string | undefined | null): string | null {
+  const raw = phone?.trim();
+  if (!raw) return null;
+  const cleaned = raw.replace(/[^\d+]/g, "");
+  return cleaned.replace(/\D/g, "").length >= 7 ? `tel:${cleaned}` : null;
+}
+
+/**
+ * OSM `fee` → "Free" / "Paid".
+ *
+ * Note the inversion: fee=no is the *good* news, so callers should style this
+ * by meaning rather than by the raw value.
+ */
+export function formatFee(value: string | undefined | null): string | null {
+  const v = value?.trim().toLowerCase();
+  if (!v) return null;
+  if (v === "no" || v === "free") return "Free";
+  if (v === "yes") return "Paid";
+  return formatSurface(v);
+}
+
+/** OSM `wheelchair` → accessibility phrase. */
+export function formatWheelchair(value: string | undefined | null): string | null {
+  const v = value?.trim().toLowerCase();
+  if (!v) return null;
+  if (v === "yes" || v === "designated") return "Wheelchair accessible";
+  if (v === "limited") return "Partly accessible";
+  if (v === "no") return "Not wheelchair accessible";
+  return null;
+}
+
+/** OSM `covered`/`indoor` → "Covered" / "Outdoor". */
+export function formatCovered(value: string | undefined | null): string | null {
+  const v = value?.trim().toLowerCase();
+  if (!v) return null;
+  if (v === "yes" || v === "roof") return "Covered";
+  if (v === "no") return "Outdoor";
+  return null;
+}
+
+/** OSM `capacity` → "Seats 500". Non-numeric values are passed through. */
+export function formatCapacity(value: string | undefined | null): string | null {
+  const v = value?.trim();
+  if (!v) return null;
+  const n = Number.parseInt(v, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return `Seats ${n.toLocaleString()}`;
+}
+
+/**
+ * Countable court features — `hoops` on basketball, `lanes` on a pool or track.
+ * Both are plain integers in OSM.
+ */
+export function formatCount(
+  value: string | undefined | null,
+  singular: string,
+  plural = `${singular}s`
+): string | null {
+  const v = value?.trim();
+  if (!v) return null;
+  const n = Number.parseInt(v, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return `${n} ${n === 1 ? singular : plural}`;
+}
+
+/**
+ * Amenity tags that are only worth showing when present.
+ *
+ * An absent tag means "nobody mapped it", NOT "this venue has none", so a
+ * negative value is dropped rather than rendered — claiming "no toilets" from
+ * missing data would be worse than saying nothing.
+ */
+export function formatAmenity(value: string | undefined | null, label: string): string | null {
+  const v = value?.trim().toLowerCase();
+  if (!v) return null;
+  if (v === "no" || v === "none") return null;
+  return label;
+}
+
+/** Nested addr:* fragments → a single line. */
+export function formatAddress(
+  addr: { housenumber?: string; street?: string; city?: string; state?: string; postcode?: string } | undefined | null
+): string | null {
+  if (!addr) return null;
+  const street = [addr.housenumber, addr.street].filter(Boolean).join(" ").trim();
+  const region = [addr.city, addr.state].filter(Boolean).join(", ").trim();
+  const line = [street, region, addr.postcode].filter(Boolean).join(", ").trim();
+  return line || null;
+}
+
+/** Google aggregate → "4.2 (128)". Returns null when nobody has rated it. */
+export function formatGoogleRating(
+  rating: number | null | undefined,
+  count: number | null | undefined
+): string | null {
+  if (typeof rating !== "number" || Number.isNaN(rating)) return null;
+  const n = typeof count === "number" && count > 0 ? ` (${count.toLocaleString()})` : "";
+  return `${rating.toFixed(1)}${n}`;
+}
+
 /** Google Maps directions URL (or a place search when the viewer location is unknown). */
 export function directionsHref(
   dest: { lat: number; lng: number },
@@ -59,6 +173,27 @@ export function directionsHref(
     return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${dest.lat},${dest.lng}&travelmode=driving`;
   }
   return `https://www.google.com/maps/search/?api=1&query=${dest.lat},${dest.lng}`;
+}
+
+/**
+ * Next value for the lazy-enrichment fetch key.
+ *
+ * The key is set by the *event* that opens the details view, never derived from
+ * render state, because an effect that both sets and depends on a flag tears
+ * itself down on the resulting re-render and cancels its own in-flight request.
+ * That is exactly what left the hero image pulsing forever.
+ *
+ * Reopening the same venue returns the identical key so the effect does not
+ * re-run; a venue change clears it so the next open refetches.
+ */
+export function nextEnrichKey(
+  currentKey: string | null,
+  venueId: string | null,
+  event: "open-details" | "venue-changed"
+): string | null {
+  if (event === "venue-changed") return null;
+  if (!venueId) return currentKey;
+  return currentKey === venueId ? currentKey : venueId;
 }
 
 const DAY_NAMES: Record<string, string> = {

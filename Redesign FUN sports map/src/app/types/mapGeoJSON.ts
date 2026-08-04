@@ -7,7 +7,7 @@
 import type { Feature, FeatureCollection, Point } from "geojson";
 import type { GameRow } from "../../lib/supabase";
 import { isVenueGame } from "../../lib/mapGameTimer";
-import { colocatedGroupId, splitColocatedGames } from "../lib/colocateGames";
+import { colocatedGroupId, splitColocated } from "../lib/colocateGames";
 import { getGameMapboxIconId, getSportIconEmoji, resolveSportMapboxSuffix } from "../map/gameSportIcons";
 
 /** Game status for glow color: live => red, soon => orange, scheduled => green */
@@ -116,7 +116,7 @@ function colocatedGroupToFeature(games: GameRow[]): GameFeature {
  * Random-location singles (no `location_label`) are rendered as HTML markers with a countdown pill.
  */
 export function gamesToGeoJSON(games: GameRow[], selectedGameId: string | null): GamesGeoJSON {
-  const { singles, groups } = splitColocatedGames(games);
+  const { singles, groups } = splitColocated(games);
   const venueSingles = singles.filter(isVenueGame);
   const features: GameFeature[] = [
     ...venueSingles.map((g) => gameToFeature(g, selectedGameId)),

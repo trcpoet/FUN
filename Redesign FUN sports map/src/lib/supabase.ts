@@ -286,4 +286,43 @@ export type OsmSportsVenueRow = {
   google_photo_name: string | null;
   photo_attributions: string[] | null;
   enrichment_source: string | null;
+  /** Long-tail OSM tags (amenities, capacity, contact, address). Absent key = unknown. */
+  tags: VenueTagBag | null;
+};
+
+/** Address fragments, folded out of the flat `addr:*` OSM keys at import. */
+export type VenueAddress = {
+  housenumber?: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  postcode?: string;
+};
+
+/**
+ * Mirror of OsmVenueTagBag in server/lib/osmVenueTags.ts.
+ *
+ * Values are raw OSM strings ("yes" / "no" / "customers" / "wlan" / …). A key that is
+ * absent means the tag was never mapped — which is not the same as "this venue has none".
+ */
+export type VenueTagBag = {
+  hoops?: string;
+  lanes?: string;
+  capacity?: string;
+  fee?: string;
+  covered?: string;
+  wheelchair?: string;
+  phone?: string;
+  description?: string;
+  image?: string;
+  wikimedia_commons?: string;
+  wikipedia?: string;
+  addr?: VenueAddress;
+  toilets?: string;
+  drinking_water?: string;
+  shower?: string;
+  changing_room?: string;
+  internet_access?: string;
+  parking?: string;
+  bench?: string;
 };

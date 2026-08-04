@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
+import { formatDistanceToNow } from "date-fns";
 import {
   X,
   MapPin,
@@ -13,13 +14,10 @@ import {
   Clock,
   Globe,
   ExternalLink,
-  Sun,
-  Lock,
-  Layers,
-  Building2,
 } from "lucide-react";
+import { toast } from "sonner";
 import type { VenueSelection } from "./mapboxMapTypes";
-import type { GameRow } from "../../lib/supabase";
+import type { GameRow, MapNoteRow } from "../../lib/supabase";
 import { formatVenueGameTimerSummary } from "../../lib/mapGameTimer";
 import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";
 import { getSportIconEmoji } from "../map/gameSportIcons";
@@ -31,16 +29,27 @@ import { usePressAnimation } from "../../hooks/usePressAnimation";
 import { glassMessengerPanel } from "../styles/glass";
 import {
   prettyLabel,
-  formatSurface,
-  formatLit,
-  formatAccess,
   formatCoords,
   normalizeWebsite,
   directionsHref,
   formatOpeningHours,
+  formatGoogleRating,
+  nextEnrichKey,
+  osmHref,
 } from "../lib/venueInfoHelpers";
+import type { VenueGoogleDetails, VenuePhoto } from "../../lib/api";
+import { deleteVenuePhoto, fetchVenuePhotos, reportVenuePhoto } from "../../lib/venueSocial";
+import type { VenuePhotoRow } from "../../lib/venueSocial";
+import { mergeVenuePhotos } from "../lib/venuePhotos";
+import { StarRating } from "./ui/StarRating";
+import { VenuePhotoCarousel } from "./venue/VenuePhotoCarousel";
+import { VenuePhotoUploadPanel } from "./venue/VenuePhotoUploadPanel";
+import { VenueFactGrid } from "./venue/VenueFactGrid";
+import { VenueReviewsSection } from "./venue/VenueReviewsSection";
+import { VenueCommentsSection } from "./venue/VenueCommentsSection";
 
 type View = "actions" | "details";
+type Tab = "games" | "notes";
 
 type VenueInfoPopupProps = {
   /** Whether the modal is mounted/visible. */
@@ -49,6 +58,14 @@ type VenueInfoPopupProps = {
   openGamesNearbyCount: number;
   /** Open games within radius of venue (for per-sport list). */
   gamesNearby?: GameRow[];
+  /**
+   * Notes left at this venue. They intentionally have no pin of their own — a note marker
+   * is a DOM element and would cover the venue's GL icon and swallow its click — so this
+   * modal is the only place they can be read.
+   */
+  notesAtVenue?: MapNoteRow[];
+  /** Open a note's comment thread. */
+  onOpenNote?: (note: MapNoteRow) => void;
   joinedGameIds?: Set<string>;
   onClose: () => void;
   onCreateGame?: (venue: VenueSelection) => void;
@@ -60,11 +77,28 @@ type VenueInfoPopupProps = {
   viewerCoords?: { lat: number; lng: number } | null;
   /** Draw Mapbox walking route on the map. */
   onNavigateTo?: (dest: { lat: number; lng: number }, opts?: NavigateToOptions) => void;
+  /** Marks the viewer's own reviews, comments and photos. */
+  currentUserId?: string | null;
+  /** Opens the sign-in gate for guests instead of failing a write. */
+  ensureSession?: () => Promise<boolean>;
 };
 
 const ICON_BTN =
   "p-2 rounded-full text-slate-300 hover:bg-white/10 hover:text-white transition-colors cursor-pointer " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40";
+
+/** Matches the wording in NoteThreadDialog so a note reads the same wherever it appears. */
+function noteVisibilityLabel(v: MapNoteRow["visibility"]): string {
+  if (v === "friends") return "Friends";
+  if (v === "private") return "Private";
+  return "Public";
+}
+
+function noteCreatedLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Recently";
+  return formatDistanceToNow(d, { addSuffix: true });
+}
 
 /**
  * Centered venue modal with two views inside one surface:
@@ -79,6 +113,8 @@ export function VenueInfoPopup({
   venue,
   openGamesNearbyCount,
   gamesNearby = [],
+  notesAtVenue = [],
+  onOpenNote,
   joinedGameIds = new Set(),
   onClose,
   onCreateGame,
@@ -86,10 +122,13 @@ export function VenueInfoPopup({
   onOpenChat,
   viewerCoords = null,
   onNavigateTo,
+  currentUserId = null,
+  ensureSession,
 }: VenueInfoPopupProps) {
   const reduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>("actions");
+  const [tab, setTab] = useState<Tab>("games");
   const [details, setDetails] = useState<VenueSelection>(venue);
   const [now, setNow] = useState(() => Date.now());
   const [heroImageUrl, setHeroImageUrl] = useState<string | null>(venue.hero_image_url ?? null);
@@ -97,16 +136,27 @@ export function VenueInfoPopup({
     venue.photo_attributions ?? []
   );
   const [enriching, setEnriching] = useState(false);
-  const [enrichRequested, setEnrichRequested] = useState(false);
+  const [enrichKey, setEnrichKey] = useState<string | null>(null);
+  const [enrichPhotos, setEnrichPhotos] = useState<VenuePhoto[]>([]);
+  const [googleDetails, setGoogleDetails] = useState<VenueGoogleDetails | null>(null);
+  const [userPhotos, setUserPhotos] = useState<VenuePhotoRow[]>([]);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   // Reset per-venue state if the selected venue changes while the modal stays mounted.
   useEffect(() => {
     setView("actions");
+    // Open on whichever tab actually has something in it: a venue with notes and no games
+    // would otherwise greet you with an empty list.
+    setTab(gamesNearby.length === 0 && notesAtVenue.length > 0 ? "notes" : "games");
     setDetails(venue);
     setHeroImageUrl(venue.hero_image_url ?? null);
     setPhotoAttributions(venue.photo_attributions ?? []);
     setEnriching(false);
-    setEnrichRequested(false);
+    setEnrichKey((k) => nextEnrichKey(k, venue.id, "venue-changed"));
+    setEnrichPhotos([]);
+    setGoogleDetails(null);
+    setUserPhotos([]);
+    setUploadOpen(false);
   }, [venue.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tick for live game countdowns.
@@ -134,16 +184,22 @@ export function VenueInfoPopup({
   }, [open, venue.id]);
 
   // Lazy Wikidata enrichment — only the first time the details view is opened.
+  //
+  // Driven by `enrichKey`, which only the open-details handler writes. Nothing
+  // this effect sets appears in its own dep array: an earlier version depended
+  // on a flag it set itself, so the re-render tore the effect down and the
+  // cleanup cancelled the in-flight fetch before it could ever resolve.
   useEffect(() => {
-    if (view !== "details" || enrichRequested) return;
-    setEnrichRequested(true);
+    if (!enrichKey) return;
     setEnriching(true);
     let cancelled = false;
-    void fetchVenueEnrichment(venue.id)
+    void fetchVenueEnrichment(enrichKey)
       .then(({ data }) => {
         if (cancelled || !data) return;
         if (data.heroImageUrl) setHeroImageUrl(data.heroImageUrl);
         if (data.photoAttributions?.length) setPhotoAttributions(data.photoAttributions);
+        if (data.photos?.length) setEnrichPhotos(data.photos);
+        if (data.google) setGoogleDetails(data.google);
         setDetails((prev) => ({
           ...prev,
           hero_image_url: data.heroImageUrl ?? prev.hero_image_url,
@@ -159,7 +215,86 @@ export function VenueInfoPopup({
     return () => {
       cancelled = true;
     };
-  }, [view, enrichRequested, venue.id]);
+  }, [enrichKey]);
+
+  // Opening details is the only thing that arms enrichment.
+  const openDetails = useCallback(() => {
+    setView("details");
+    setEnrichKey((k) => nextEnrichKey(k, venue.id, "open-details"));
+  }, [venue.id]);
+
+  // Member photos load alongside enrichment, on the same open-details trigger.
+  useEffect(() => {
+    if (!enrichKey) return;
+    let cancelled = false;
+    void fetchVenuePhotos(enrichKey).then(({ data }) => {
+      if (!cancelled) setUserPhotos(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [enrichKey]);
+
+  /**
+   * The gallery, merged from every source.
+   *
+   * `heroImageUrl` is the pre-v2 single-photo path and still feeds slide 0 for
+   * rows that haven't been re-enriched yet; once `photos` arrives it supersedes
+   * it, and mergeVenuePhotos de-duplicates by URL so the two cannot double up.
+   */
+  const gallery = useMemo(() => {
+    const legacy: VenuePhoto[] =
+      enrichPhotos.length === 0 && heroImageUrl
+        ? [
+            {
+              source: (details.enrichment_source as VenuePhoto["source"]) || "google",
+              url: heroImageUrl,
+              attribution: photoAttributions[0] ?? null,
+              attribution_url: null,
+            },
+          ]
+        : [];
+    return mergeVenuePhotos({
+      enrichmentPhotos: enrichPhotos.length > 0 ? enrichPhotos : legacy,
+      userPhotos,
+      currentUserId,
+    });
+  }, [
+    enrichPhotos,
+    userPhotos,
+    currentUserId,
+    heroImageUrl,
+    photoAttributions,
+    details.enrichment_source,
+  ]);
+
+  const googleRating = formatGoogleRating(googleDetails?.rating, googleDetails?.userRatingCount);
+  const osmLink = osmHref(details.id);
+
+  const handleAddPhoto = async () => {
+    if (ensureSession && !(await ensureSession())) return;
+    setUploadOpen(true);
+  };
+
+  const handleDeletePhoto = async (photoId: string) => {
+    const prev = userPhotos;
+    setUserPhotos((p) => p.filter((x) => x.id !== photoId));
+    const { error } = await deleteVenuePhoto(photoId);
+    if (error) {
+      setUserPhotos(prev);
+      toast.error("Couldn't delete that photo", { description: error.message });
+    }
+  };
+
+  const handleReportPhoto = async (photoId: string) => {
+    if (ensureSession && !(await ensureSession())) return;
+    const { error } = await reportVenuePhoto({ photoId });
+    if (error) {
+      toast.error("Couldn't report that photo", { description: error.message });
+      return;
+    }
+    toast.success("Reported — thanks", { description: "We'll hide it if others agree." });
+  };
 
   const name = prettyLabel(details.name) ?? prettyLabel(details.wikidata_label);
   const sportLabel = prettyLabel(details.sport);
@@ -174,23 +309,26 @@ export function VenueInfoPopup({
     return s || l || "Pickup games nearby";
   }, [details.sport, details.leisure]);
 
-  const chips = useMemo(() => {
-    const items: { key: string; label: string; icon: React.ReactNode }[] = [];
-    const surface = formatSurface(details.surface);
-    if (surface) items.push({ key: "surface", label: surface, icon: <Layers className="w-3 h-3" /> });
-    const lit = formatLit(details.lit);
-    if (lit) items.push({ key: "lit", label: lit, icon: <Sun className="w-3 h-3" /> });
-    const access = formatAccess(details.access);
-    if (access) items.push({ key: "access", label: access, icon: <Lock className="w-3 h-3" /> });
-    return items;
-  }, [details.surface, details.lit, details.access]);
-
   const operator = prettyLabel(details.operator);
   const hours = useMemo(() => formatOpeningHours(details.opening_hours), [details.opening_hours]);
   const websiteHref = normalizeWebsite(details.website);
-  const description = details.wikidata_description?.trim() || null;
+  // Google's editorial summary is a real sentence about the place; Wikidata's
+  // is usually a bare classifier ("sports venue in Texas"), so it plays backup.
+  const description =
+    googleDetails?.editorialSummary?.trim() || details.wikidata_description?.trim() || null;
+  // Chips and amenity rows now live in VenueFactGrid; this only decides whether
+  // to show the "nothing here yet" line, so it asks about the same inputs.
   const hasAnyDetails = Boolean(
-    chips.length || operator || hours.length || websiteHref || description || heroImageUrl
+    details.surface ||
+      details.lit ||
+      details.access ||
+      details.tags ||
+      googleDetails ||
+      operator ||
+      hours.length ||
+      websiteHref ||
+      description ||
+      gallery.length
   );
 
   const bySport = useMemo(() => groupGamesBySport(gamesNearby), [gamesNearby]);
@@ -293,7 +431,7 @@ export function VenueInfoPopup({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setView("details");
+                      openDetails();
                     }}
                     className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-300 transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/15 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
                     aria-label="Venue info"
@@ -322,7 +460,97 @@ export function VenueInfoPopup({
 
               {/* Scrollable body */}
               <div className="min-h-0 flex-1 overflow-y-auto px-4 scrollbar-hide">
-                <div className="flex items-center gap-2 text-slate-300 text-sm">
+                {/* Games are violet and notes are cyan everywhere else in the app (the create
+                    modal's toggle, the note map marker) — these tabs inherit that, so colour
+                    alone tells you which list you are looking at. */}
+                <div role="tablist" aria-label="Venue activity" className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    role="tab"
+                    id="venue-tab-games"
+                    aria-selected={tab === "games"}
+                    aria-controls="venue-panel-games"
+                    onClick={() => setTab("games")}
+                    className={
+                      "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer " +
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/40 " +
+                      (tab === "games"
+                        ? "border-violet-400/50 bg-violet-500/20 text-violet-100"
+                        : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]")
+                    }
+                  >
+                    Active games
+                    <span className={tab === "games" ? "ml-1.5 text-violet-200/80" : "ml-1.5 text-slate-500"}>
+                      {gamesNearby.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    id="venue-tab-notes"
+                    aria-selected={tab === "notes"}
+                    aria-controls="venue-panel-notes"
+                    onClick={() => setTab("notes")}
+                    className={
+                      "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer " +
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 " +
+                      (tab === "notes"
+                        ? "border-cyan-400/45 bg-cyan-400/12 text-cyan-100"
+                        : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]")
+                    }
+                  >
+                    Notes
+                    <span className={tab === "notes" ? "ml-1.5 text-cyan-200/80" : "ml-1.5 text-slate-500"}>
+                      {notesAtVenue.length}
+                    </span>
+                  </button>
+                </div>
+
+                {tab === "notes" ? (
+                  <div
+                    id="venue-panel-notes"
+                    role="tabpanel"
+                    aria-labelledby="venue-tab-notes"
+                    className="mt-3 border-t border-white/10 pt-3"
+                  >
+                    {notesAtVenue.length > 0 ? (
+                      <ul className="space-y-2">
+                        {notesAtVenue.map((n) => (
+                          <li key={n.id}>
+                            <button
+                              type="button"
+                              onClick={() => onOpenNote?.(n)}
+                              className="flex w-full items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2 py-2 text-left transition-colors hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="line-clamp-2 text-sm text-slate-100">{n.body}</p>
+                                <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+                                  {noteVisibilityLabel(n.visibility)}
+                                  <span aria-hidden>·</span>
+                                  {noteCreatedLabel(n.created_at)}
+                                  {(n.comment_count ?? 0) > 0 ? (
+                                    <>
+                                      <span aria-hidden>·</span>
+                                      <MessageCircle className="h-3 w-3 shrink-0" aria-hidden />
+                                      {n.comment_count}
+                                    </>
+                                  ) : null}
+                                </p>
+                              </div>
+                              <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-slate-500">
+                        No notes here yet. Leave the first one from the map.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                <div id="venue-panel-games" role="tabpanel" aria-labelledby="venue-tab-games">
+                <div className="mt-3 flex items-center gap-2 text-slate-300 text-sm">
                   <span
                     className={`inline-block w-2 h-2 rounded-full ${openGamesNearbyCount > 0 ? "bg-emerald-400" : "bg-slate-600"}`}
                     aria-hidden
@@ -394,6 +622,8 @@ export function VenueInfoPopup({
                     No open games here yet — start one below.
                   </p>
                 )}
+                </div>
+                )}
 
                 {hours.length > 0 || websiteHref ? (
                   <div className="mt-3 flex flex-col gap-2 border-t border-white/10 pt-3">
@@ -418,7 +648,7 @@ export function VenueInfoPopup({
                     ) : null}
                     <button
                       type="button"
-                      onClick={() => setView("details")}
+                      onClick={openDetails}
                       className="inline-flex w-fit items-center gap-1 text-sm font-medium text-emerald-400 transition-colors hover:text-emerald-300 cursor-pointer"
                     >
                       More details
@@ -527,83 +757,45 @@ export function VenueInfoPopup({
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hide pb-[max(1rem,env(safe-area-inset-bottom))]">
-                {/* Hero — gradient fallback, skeleton while enriching, image when available */}
-                <div className="relative mx-4 aspect-[16/9] overflow-hidden rounded-xl bg-gradient-to-br from-emerald-900/40 via-slate-900 to-violet-900/30">
-                  {heroImageUrl ? (
-                    <img
-                      src={heroImageUrl}
-                      alt={`Photo of ${title}`}
-                      className="absolute inset-0 h-full w-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : enriching ? (
-                    <div className="absolute inset-0 animate-pulse bg-white/5" />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center text-3xl opacity-80" aria-hidden>
-                      {getSportIconEmoji(details.sport || details.leisure || "")}
-                    </div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-transparent to-transparent" />
-                </div>
-                {photoAttributions.length > 0 ? (
-                  <p className="mx-4 mt-1 text-[10px] leading-snug text-slate-500">
-                    Photo: {photoAttributions.join(", ")}
-                  </p>
+                <VenuePhotoCarousel
+                  photos={gallery}
+                  fallbackEmoji={getSportIconEmoji(details.sport || details.leisure || "")}
+                  title={title}
+                  loading={enriching && gallery.length === 0}
+                  onAddPhoto={() => void handleAddPhoto()}
+                  onDeletePhoto={(photoId) => void handleDeletePhoto(photoId)}
+                  onReportPhoto={(photoId) => void handleReportPhoto(photoId)}
+                />
+
+                {uploadOpen ? (
+                  <VenuePhotoUploadPanel
+                    venue={details}
+                    onUploaded={(photo) => setUserPhotos((prev) => [photo, ...prev])}
+                    onClose={() => setUploadOpen(false)}
+                  />
                 ) : null}
 
                 <div className="px-4 pt-3">
                   <h2 className="text-lg font-semibold text-white">{title}</h2>
                   <p className="text-sm text-slate-400 mt-0.5">{sub}</p>
-                </div>
-
-                {/* Chips */}
-                {chips.length > 0 ? (
-                  <div className="mt-3 flex flex-wrap gap-2 px-4">
-                    {chips.map((chip) => (
-                      <span
-                        key={chip.key}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-xs font-medium text-slate-200"
-                      >
-                        <span className="text-emerald-400">{chip.icon}</span>
-                        {chip.label}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-
-                {/* Fact rows */}
-                <div className="mt-3 space-y-2.5 px-4 text-sm text-slate-300">
-                  {operator ? (
-                    <div className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4 shrink-0 text-slate-500" aria-hidden />
-                      <span className="text-slate-400">Operated by</span>
-                      <span className="font-medium text-slate-200 truncate">{operator}</span>
-                    </div>
+                  {googleRating ? (
+                    // Google's aggregate stays visually separate from FUN's own
+                    // reviews and is always labelled — Places terms forbid
+                    // presenting the two as interchangeable.
+                    <a
+                      href={googleDetails?.googleMapsUri ?? mapsHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-xs text-slate-300 transition-colors hover:border-white/20 hover:text-white"
+                    >
+                      <StarRating value={googleDetails?.rating ?? null} size={10} />
+                      <span className="tabular-nums">{googleRating}</span>
+                      <span className="text-slate-500">on Google</span>
+                    </a>
                   ) : null}
-
-                  <div className="flex items-start gap-2">
-                    <Clock className="w-4 h-4 shrink-0 text-slate-500 mt-0.5" aria-hidden />
-                    {hours.length > 0 ? (
-                      <div className="min-w-0">
-                        <p className="text-slate-400 text-xs uppercase tracking-wide font-medium">Hours</p>
-                        <div className="mt-0.5 font-mono text-[12px] leading-relaxed text-slate-200">
-                          {hours.map((line, i) => (
-                            <div key={i} className="break-words">
-                              {line}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <span className="text-slate-500">Hours not listed</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-4 h-4 shrink-0 text-slate-500" aria-hidden />
-                    <span className="text-slate-400">{formatCoords(details.center.lat, details.center.lng)}</span>
-                  </div>
                 </div>
+
+                <VenueFactGrid venue={details} google={googleDetails} />
 
                 {/* Description */}
                 {description ? (
@@ -633,9 +825,39 @@ export function VenueInfoPopup({
                   </div>
                 ) : null}
 
+                <VenueReviewsSection
+                  venue={details}
+                  currentUserId={currentUserId}
+                  ensureSession={ensureSession}
+                />
+
+                <VenueCommentsSection
+                  venue={details}
+                  currentUserId={currentUserId}
+                  ensureSession={ensureSession}
+                />
+
+                {/* Fix-it-at-the-source link: most of the facts above come from
+                    OSM, and editing there is the only way they ever improve. */}
+                {osmLink ? (
+                  <div className="mt-3 px-4">
+                    <a
+                      href={osmLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-slate-400 transition-colors hover:text-slate-200"
+                    >
+                      <MapPin className="h-3.5 w-3.5" aria-hidden />
+                      View on OpenStreetMap
+                      <ExternalLink className="h-3 w-3 opacity-60" aria-hidden />
+                    </a>
+                  </div>
+                ) : null}
+
                 {/* Attribution — license requirement, footer text only (no link-out as primary). */}
                 <p className="mt-4 px-4 text-[10px] text-slate-400">
                   Data © OpenStreetMap contributors{details.wikidata ? " · Wikidata" : ""}
+                  {googleDetails ? " · Places data © Google" : ""}
                 </p>
               </div>
             </motion.div>

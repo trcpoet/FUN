@@ -31,6 +31,7 @@ import type {
 } from "./supabase";
 import type { VenueSelection } from "../app/components/mapboxMapTypes";
 import { venueSelectionFromDbRow } from "../app/lib/venueSelection";
+import { OSM_VENUE_DETAIL_SELECT } from "./osmVenueColumns";
 import { cachedAsync, cacheClear } from "./requestCache";
 import { getAuthUserDeduped, getAuthUserIdCached } from "./authDedup";
 
@@ -171,6 +172,30 @@ export {
   fetchNoteById,
   subscribeNoteComments,
 } from "./mapNotes";
+
+// Venue reviews / comments / photos live in `./venueSocial.ts`. Same reason:
+// components import data helpers from the centralized API layer only.
+export {
+  fetchVenueReviews,
+  upsertVenueReview,
+  deleteVenueReview,
+  fetchVenueComments,
+  addVenueComment,
+  deleteVenueComment,
+  toggleVenueCommentLike,
+  fetchVenuePhotos,
+  uploadVenuePhoto,
+  deleteVenuePhoto,
+  reportVenuePhoto,
+  venueStorageSlug,
+} from "./venueSocial";
+export type {
+  VenueReviewRow,
+  VenueReviewSummary,
+  VenueCommentRow,
+  VenuePhotoRow,
+  VenuePhotoReportReason,
+} from "./venueSocial";
 
 let missingUnifiedFeedUntilMs = 0;
 
@@ -1602,16 +1627,50 @@ export function avatarIdToGlbUrl(avatarId: string | null, quality: "low" | "medi
 
 // —— Venues ——
 
+/** One gallery slide. `url` is always loadable — Google refs are resolved server-side. */
+export type VenuePhoto = {
+  source: "google" | "osm" | "wikimedia" | "wikidata";
+  url?: string;
+  attribution: string | null;
+  attribution_url: string | null;
+};
+
+/**
+ * Google's non-photo content. Mirrors GooglePlaceDetails in
+ * server/lib/googlePlaces.ts.
+ *
+ * There is no review field by design: Places terms forbid commingling Google
+ * review text with first-party reviews, so it is never requested. Only the
+ * aggregate is kept, and the UI must label it as Google's.
+ */
+export type VenueGoogleDetails = {
+  rating: number | null;
+  userRatingCount: number | null;
+  formattedAddress: string | null;
+  phone: string | null;
+  openingHours: string[] | null;
+  openNow: boolean | null;
+  editorialSummary: string | null;
+  wheelchairAccessible: boolean | null;
+  freeParking: boolean | null;
+  businessStatus: string | null;
+  googleMapsUri: string | null;
+  fetchedAt: string;
+};
+
 export type VenueEnrichment = {
+  /** photos[0] resolved to a URL. Retained for callers that only show a hero. */
   heroImageUrl: string | null;
   label: string | null;
   description: string | null;
   photoAttributions?: string[];
-  source?: "google" | "wikidata" | null;
+  source?: VenuePhoto["source"] | null;
+  photos?: VenuePhoto[];
+  google?: VenueGoogleDetails | null;
+  version?: number;
 };
 
-const OSM_VENUE_SELECT =
-  "id, lat, lng, name, sport, leisure, osm_type, osm_id, surface, lit, access, opening_hours, website, operator, wikidata, hero_image_url, wikidata_label, wikidata_description, photo_attributions, enrichment_source";
+const OSM_VENUE_SELECT = OSM_VENUE_DETAIL_SELECT;
 
 export async function fetchVenueById(
   id: string
@@ -1624,7 +1683,8 @@ export async function fetchVenueById(
     .maybeSingle();
   if (error) return { data: null, error: new Error(error.message) };
   if (!data) return { data: null, error: null };
-  return { data: venueSelectionFromDbRow(data as OsmSportsVenueRow), error: null };
+  // Via unknown: the client is untyped, so PostgREST hands back a loose row shape.
+  return { data: venueSelectionFromDbRow(data as unknown as OsmSportsVenueRow), error: null };
 }
 
 export async function fetchVenueEnrichment(

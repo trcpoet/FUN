@@ -5,10 +5,43 @@
 
 const PLACES_BASE = "https://places.googleapis.com/v1";
 
+/** Max photos captured per place. Google returns up to 10; six fills a carousel. */
+export const MAX_GOOGLE_PHOTOS = 6;
+
+/** One Places photo. `name` is a resource name, never a URL — /api/venue-photo resolves it. */
+export type GooglePhotoRef = {
+  name: string;
+  attribution: string | null;
+  attributionUrl: string | null;
+};
+
+/**
+ * Google's non-photo content.
+ *
+ * Deliberately has no review field: Places terms forbid commingling Google
+ * review text with first-party reviews, so we never request it. Only the
+ * aggregate rating is kept, and it is displayed as a separately-labelled chip.
+ */
+export type GooglePlaceDetails = {
+  rating: number | null;
+  userRatingCount: number | null;
+  formattedAddress: string | null;
+  phone: string | null;
+  /** Human-readable weekday lines, straight from Google. */
+  openingHours: string[] | null;
+  openNow: boolean | null;
+  editorialSummary: string | null;
+  wheelchairAccessible: boolean | null;
+  freeParking: boolean | null;
+  businessStatus: string | null;
+  googleMapsUri: string | null;
+  /** ISO timestamp — drives the 24h details TTL. */
+  fetchedAt: string;
+};
+
 export type GooglePlacesEnrichment = {
   googlePlaceId: string;
-  googlePhotoName: string;
-  photoAttributions: string[];
+  photos: GooglePhotoRef[];
   label: string | null;
 };
 
@@ -16,7 +49,7 @@ type PlacesLocation = { latitude: number; longitude: number };
 
 type PlacePhoto = {
   name?: string;
-  authorAttributions?: Array<{ displayName?: string }>;
+  authorAttributions?: Array<{ displayName?: string; uri?: string }>;
 };
 
 type PlaceResult = {
@@ -25,6 +58,19 @@ type PlaceResult = {
   displayName?: { text?: string };
   location?: PlacesLocation;
   photos?: PlacePhoto[];
+};
+
+type PlaceDetailsResult = PlaceResult & {
+  rating?: number;
+  userRatingCount?: number;
+  formattedAddress?: string;
+  internationalPhoneNumber?: string;
+  regularOpeningHours?: { openNow?: boolean; weekdayDescriptions?: string[] };
+  editorialSummary?: { text?: string };
+  accessibilityOptions?: { wheelchairAccessibleEntrance?: boolean };
+  parkingOptions?: { freeParkingLot?: boolean; freeStreetParking?: boolean };
+  businessStatus?: string;
+  googleMapsUri?: string;
 };
 
 type SearchResponse = { places?: PlaceResult[] };
@@ -129,25 +175,50 @@ function pickBestPlace(
   return best;
 }
 
-function enrichmentFromPlace(place: PlaceResult): GooglePlacesEnrichment | null {
-  const photo = place.photos?.[0];
-  const photoName = photo?.name?.trim();
-  const placeId = place.id?.trim();
-  if (!photo || !photoName || !placeId) return null;
-  const attributions =
-    photo.authorAttributions
-      ?.map((a) => a.displayName?.trim())
-      .filter((n): n is string => Boolean(n)) ?? [];
-  const label = place.displayName?.text?.trim() ?? place.name?.trim() ?? null;
+function photoRef(photo: PlacePhoto): GooglePhotoRef | null {
+  const name = photo.name?.trim();
+  if (!name) return null;
+  const author = photo.authorAttributions?.[0];
   return {
-    googlePlaceId: placeId,
-    googlePhotoName: photoName,
-    photoAttributions: attributions,
-    label,
+    name,
+    attribution: author?.displayName?.trim() || null,
+    attributionUrl: author?.uri?.trim() || null,
   };
 }
 
+function enrichmentFromPlace(place: PlaceResult): GooglePlacesEnrichment | null {
+  const placeId = place.id?.trim();
+  if (!placeId) return null;
+  // Keep the whole strip, not just photos[0] — that single-photo read is why
+  // the venue modal could never show a carousel.
+  const photos = (place.photos ?? [])
+    .slice(0, MAX_GOOGLE_PHOTOS)
+    .map(photoRef)
+    .filter((p): p is GooglePhotoRef => p !== null);
+  if (photos.length === 0) return null;
+  const label = place.displayName?.text?.trim() ?? place.name?.trim() ?? null;
+  return { googlePlaceId: placeId, photos, label };
+}
+
+// Search stays on this narrow mask on purpose. Adding rating/hours here would
+// promote every searchText/searchNearby call to a pricier SKU across up to 8
+// results; the richer fields come from ONE Place Details call on the winner.
 const FIELD_MASK = "places.id,places.displayName,places.location,places.photos";
+
+const DETAILS_FIELD_MASK = [
+  "id",
+  "displayName",
+  "formattedAddress",
+  "internationalPhoneNumber",
+  "rating",
+  "userRatingCount",
+  "regularOpeningHours",
+  "editorialSummary",
+  "accessibilityOptions",
+  "parkingOptions",
+  "businessStatus",
+  "googleMapsUri",
+].join(",");
 
 export async function fetchGooglePlacesEnrichment(
   apiKey: string,
@@ -198,9 +269,61 @@ export async function fetchGooglePlacesEnrichment(
   return enrichmentFromPlace(best);
 }
 
-/** Build a same-origin hero image URL served by /api/venue-photo (no API key in browser). */
-export function venuePhotoProxyUrl(venueId: string): string {
-  return `/api/venue-photo?venueId=${encodeURIComponent(venueId)}`;
+/**
+ * One Place Details lookup for the place the search already picked.
+ *
+ * Kept separate from the search so the richer fields cost a single call
+ * instead of being billed across every search result.
+ */
+export async function fetchGooglePlaceDetails(
+  apiKey: string,
+  placeId: string
+): Promise<GooglePlaceDetails | null> {
+  const res = await fetch(`${PLACES_BASE}/places/${encodeURIComponent(placeId)}`, {
+    method: "GET",
+    headers: { "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": DETAILS_FIELD_MASK },
+  });
+  if (!res.ok) {
+    console.warn("[googlePlaces] details failed", placeId, res.status);
+    return null;
+  }
+  const place = (await res.json()) as PlaceDetailsResult;
+  const parking = place.parkingOptions;
+  return {
+    rating: typeof place.rating === "number" ? place.rating : null,
+    userRatingCount: typeof place.userRatingCount === "number" ? place.userRatingCount : null,
+    formattedAddress: place.formattedAddress?.trim() || null,
+    phone: place.internationalPhoneNumber?.trim() || null,
+    openingHours: place.regularOpeningHours?.weekdayDescriptions?.length
+      ? place.regularOpeningHours.weekdayDescriptions
+      : null,
+    openNow:
+      typeof place.regularOpeningHours?.openNow === "boolean"
+        ? place.regularOpeningHours.openNow
+        : null,
+    editorialSummary: place.editorialSummary?.text?.trim() || null,
+    wheelchairAccessible:
+      typeof place.accessibilityOptions?.wheelchairAccessibleEntrance === "boolean"
+        ? place.accessibilityOptions.wheelchairAccessibleEntrance
+        : null,
+    freeParking:
+      parking && (parking.freeParkingLot || parking.freeStreetParking) ? true : null,
+    businessStatus: place.businessStatus?.trim() || null,
+    googleMapsUri: place.googleMapsUri?.trim() || null,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Same-origin photo URL served by /api/venue-photo, so the API key never
+ * reaches the browser.
+ *
+ * `i` selects the slide; `v` is the enrichment version, present only to bust
+ * the CDN entry when the pipeline changes (nothing reads it server-side).
+ */
+export function venuePhotoProxyUrl(venueId: string, index = 0, version = 0): string {
+  const q = `venueId=${encodeURIComponent(venueId)}&i=${index}`;
+  return version > 0 ? `/api/venue-photo?${q}&v=${version}` : `/api/venue-photo?${q}`;
 }
 
 export async function fetchGooglePlacePhotoBytes(

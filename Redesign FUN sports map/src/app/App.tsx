@@ -846,6 +846,7 @@ export default function App() {
           selectedVenue={selectedVenue}
           onSelectGame={setSelectedGame}
           onSelectVenue={setSelectedVenue}
+          ensureSession={ensureSession}
           mapCameraRequest={mapCameraRequest}
           gamePopupRequest={gamePopupRequest}
           onMapLongPress={async (lat, lng, viewportPoint) => {

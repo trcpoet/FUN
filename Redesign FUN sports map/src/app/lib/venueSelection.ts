@@ -1,6 +1,6 @@
 import type { VenueSelection } from "../components/mapboxMapTypes";
 import type { SportsVenueProperties } from "./sportsVenueTypes";
-import type { OsmSportsVenueRow } from "../../lib/supabase";
+import type { OsmSportsVenueRow, VenueTagBag } from "../../lib/supabase";
 
 function optionalField(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -28,7 +28,14 @@ export function venueSelectionFromProperties(
     | "wikidata_description"
     | "photo_attributions"
     | "enrichment_source"
-  >,
+  > & {
+    /**
+     * Deliberately not part of SportsVenueProperties: `tags` is jsonb and the
+     * map path selects up to 8000 rows, so it only ever arrives on the
+     * single-row DB read (venueSelectionFromDbRow).
+     */
+    tags?: VenueTagBag;
+  },
   center: { lat: number; lng: number }
 ): VenueSelection {
   return {
@@ -51,6 +58,7 @@ export function venueSelectionFromProperties(
     wikidata_description: props.wikidata_description,
     photo_attributions: props.photo_attributions,
     enrichment_source: props.enrichment_source,
+    tags: props.tags,
   };
 }
 
@@ -77,6 +85,7 @@ export function venueSelectionFromDbRow(row: OsmSportsVenueRow): VenueSelection 
         ? row.photo_attributions.filter((v): v is string => typeof v === "string")
         : undefined,
       enrichment_source: optionalField(row.enrichment_source),
+      tags: row.tags ?? undefined,
     },
     { lat: row.lat, lng: row.lng }
   );

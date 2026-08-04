@@ -2,7 +2,7 @@ import { useLocation, useNavigate } from "react-router";
 import { LogIn, UserPlus } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "./ui/sheet";
 
-export type SignInGateAction = "join" | "create" | "chat" | "note";
+export type SignInGateAction = "join" | "create" | "chat" | "note" | "review" | "photo";
 
 const COPY: Record<SignInGateAction, { title: string; body: string }> = {
   join: {
@@ -20,6 +20,14 @@ const COPY: Record<SignInGateAction, { title: string; body: string }> = {
   note: {
     title: "Sign in to drop a note",
     body: "Map notes are for signed-in players. Join to add yours.",
+  },
+  review: {
+    title: "Sign in to review this spot",
+    body: "Ratings and comments come from real accounts, so players can trust them.",
+  },
+  photo: {
+    title: "Sign in to add a photo",
+    body: "Photos are tied to your account so they can be credited and moderated.",
   },
 };
 

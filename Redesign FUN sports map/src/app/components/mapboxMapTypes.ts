@@ -1,4 +1,5 @@
 /** Shared map types — keep out of MapboxMap.tsx so App can import without pulling the map chunk graph. */
+import type { VenueTagBag } from "../../lib/supabase";
 
 export type MapCameraRequest =
   | { id: number; kind: "fly"; lat: number; lng: number; zoom?: number }
@@ -24,4 +25,6 @@ export type VenueSelection = {
   wikidata_description?: string;
   photo_attributions?: string[];
   enrichment_source?: string;
+  /** Long-tail OSM tags (amenities, capacity, contact). Absent key = unknown, not "no". */
+  tags?: VenueTagBag;
 };
