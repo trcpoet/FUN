@@ -4,7 +4,6 @@ import { formatDistanceToNow } from "date-fns";
 import {
   X,
   MapPin,
-  Activity,
   ChevronRight,
   ChevronLeft,
   MessageCircle,
@@ -18,9 +17,10 @@ import {
 import { toast } from "sonner";
 import type { VenueSelection } from "./mapboxMapTypes";
 import type { GameRow, MapNoteRow } from "../../lib/supabase";
-import { formatVenueGameTimerSummary } from "../../lib/mapGameTimer";
-import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue";
+import { formatVenueGameTimerSummary, isGameLive } from "../../lib/mapGameTimer";
+import { haversineDistanceMeters } from "../lib/gamesAtVenue";
 import { getSportIconEmoji } from "../map/gameSportIcons";
+import { venueSportEmoji } from "../lib/venueSportIcon";
 import { fetchVenueById, fetchVenueEnrichment } from "../../lib/api";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
 import type { NavigateToOptions } from "../../lib/directions";
@@ -55,9 +55,17 @@ type VenueInfoPopupProps = {
   /** Whether the modal is mounted/visible. */
   open: boolean;
   venue: VenueSelection;
-  openGamesNearbyCount: number;
-  /** Open games within radius of venue (for per-sport list). */
+  /**
+   * Games sitting *on* this venue — the exact set its composite map pin absorbed, so the
+   * badge on the map and the "At this venue" list here can never disagree. Pre-sorted
+   * live-first by the caller.
+   */
   gamesNearby?: GameRow[];
+  /**
+   * Games in the wider discovery ring around the venue. These keep their own map pins, so
+   * they are listed under a separate "Nearby" heading rather than claimed as this venue's.
+   */
+  gamesNearbyRing?: GameRow[];
   /**
    * Notes left at this venue. They intentionally have no pin of their own — a note marker
    * is a DOM element and would cover the venue's GL icon and swallow its click — so this
@@ -87,6 +95,11 @@ const ICON_BTN =
   "p-2 rounded-full text-slate-300 hover:bg-white/10 hover:text-white transition-colors cursor-pointer " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40";
 
+/** Same button, but sitting on the hero image — needs its own scrim to stay legible. */
+const HERO_ICON_BTN =
+  "p-2 rounded-full bg-slate-950/70 text-slate-200 backdrop-blur-md hover:bg-slate-900/90 hover:text-white " +
+  "transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40";
+
 /** Matches the wording in NoteThreadDialog so a note reads the same wherever it appears. */
 function noteVisibilityLabel(v: MapNoteRow["visibility"]): string {
   if (v === "friends") return "Friends";
@@ -101,6 +114,89 @@ function noteCreatedLabel(iso: string): string {
 }
 
 /**
+ * One game in the venue's list.
+ *
+ * A live game is the thing a player most wants to spot, so it gets the loudest treatment the
+ * card has: an emerald pulse chip, matching the LIVE badge used on the recommended-games list
+ * and the map's live tone.
+ */
+function GameListRow({
+  game,
+  now,
+  joined,
+  onJoin,
+  onChat,
+  distanceLabel,
+}: {
+  game: GameRow;
+  now: number;
+  joined: boolean;
+  onJoin?: (g: GameRow) => void;
+  onChat?: (g: GameRow) => void;
+  distanceLabel?: string;
+}) {
+  const live = isGameLive(game, now);
+  const filled = game.participant_count ?? 0;
+  const total = game.spots_needed;
+
+  return (
+    <li className="flex items-center gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2 py-2">
+      <span
+        className={
+          "flex size-10 shrink-0 items-center justify-center rounded-2xl text-2xl " +
+          (live ? "bg-emerald-500/12" : "bg-violet-500/10")
+        }
+        aria-hidden
+      >
+        {getSportIconEmoji(game.sport)}
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-slate-100">
+            {game.title || "Pickup"}
+          </span>
+          {live ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-emerald-400">
+              <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
+              Live
+            </span>
+          ) : null}
+        </p>
+        <p className="mt-0.5 truncate text-[11px] text-slate-500">
+          {formatVenueGameTimerSummary(game, now)}
+          {distanceLabel ? ` · ${distanceLabel}` : ""}
+        </p>
+      </div>
+
+      <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-400" aria-label={`${filled} of ${total} spots filled`}>
+        {filled}/{total}
+      </span>
+
+      {joined ? (
+        <button
+          type="button"
+          onClick={() => onChat?.(game)}
+          className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-teal-600/90 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-500"
+        >
+          <MessageCircle className="h-3.5 w-3.5" />
+          Chat
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onJoin?.(game)}
+          className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-amber-600/90 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-500"
+        >
+          Join
+          <ChevronRight className="h-3.5 w-3.5 opacity-80" />
+        </button>
+      )}
+    </li>
+  );
+}
+
+/**
  * Centered venue modal with two views inside one surface:
  *  - "actions" (default): open games, per-sport Join/Chat, Directions, Create game.
  *  - "details": OSM facts (chips/hours/operator/website) + lazy Wikidata hero/description.
@@ -111,8 +207,8 @@ function noteCreatedLabel(iso: string): string {
 export function VenueInfoPopup({
   open,
   venue,
-  openGamesNearbyCount,
   gamesNearby = [],
+  gamesNearbyRing = [],
   notesAtVenue = [],
   onOpenNote,
   joinedGameIds = new Set(),
@@ -147,7 +243,11 @@ export function VenueInfoPopup({
     setView("actions");
     // Open on whichever tab actually has something in it: a venue with notes and no games
     // would otherwise greet you with an empty list.
-    setTab(gamesNearby.length === 0 && notesAtVenue.length > 0 ? "notes" : "games");
+    setTab(
+      gamesNearby.length === 0 && gamesNearbyRing.length === 0 && notesAtVenue.length > 0
+        ? "notes"
+        : "games"
+    );
     setDetails(venue);
     setHeroImageUrl(venue.hero_image_url ?? null);
     setPhotoAttributions(venue.photo_attributions ?? []);
@@ -331,8 +431,30 @@ export function VenueInfoPopup({
       gallery.length
   );
 
-  const bySport = useMemo(() => groupGamesBySport(gamesNearby), [gamesNearby]);
-  const sportKeys = useMemo(() => [...bySport.keys()].sort((a, b) => a.localeCompare(b)), [bySport]);
+  const totalGames = gamesNearby.length + gamesNearbyRing.length;
+
+  /** Stands in for a missing photo — same glyph the venue draws on the map. */
+  const venueEmoji = useMemo(
+    () => venueSportEmoji(details.sport, details.leisure),
+    [details.sport, details.leisure]
+  );
+
+  /**
+   * Header summary — "0.4 mi away · 2 games · 1 note".
+   *
+   * Counts are tinted to match the map pin's badges and the tabs below (violet games, cyan
+   * notes), so the same colour means the same thing from pin to card without a legend.
+   */
+  const viewerDistanceMiles = useMemo(() => {
+    if (!viewerCoords) return null;
+    const m = haversineDistanceMeters(
+      viewerCoords.lat,
+      viewerCoords.lng,
+      details.center.lat,
+      details.center.lng
+    );
+    return m / 1609.34;
+  }, [viewerCoords, details.center.lat, details.center.lng]);
 
   const distanceMiles = (g: GameRow) => {
     const m = haversineDistanceMeters(details.center.lat, details.center.lng, g.lat, g.lng);
@@ -420,20 +542,46 @@ export function VenueInfoPopup({
               transition={viewTransition}
               className="flex min-h-0 flex-1 flex-col"
             >
-              {/* Header */}
-              <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-3">
-                <div className="min-w-0 flex-1">
-                  <h2 className="text-lg font-semibold text-white truncate">{title}</h2>
-                  <p className="text-sm text-slate-400 mt-0.5 truncate">{sub}</p>
+              {/*
+                Hero band. Uses only `hero_image_url`, which is already on the venue row — the
+                billed Google Photos call stays behind the Details view, exactly as before.
+                With no photo, a sport-tinted wash carries the venue's own emoji so the card
+                still opens on something rather than a grey rectangle.
+              */}
+              <div className="relative shrink-0 overflow-hidden">
+                <div className="relative aspect-[16/7] w-full bg-gradient-to-br from-emerald-900/40 via-slate-900 to-violet-900/30">
+                  {heroImageUrl ? (
+                    <img
+                      src={heroImageUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  ) : (
+                    <div
+                      className="flex h-full w-full items-center justify-center text-[64px] opacity-[0.18] select-none"
+                      aria-hidden
+                    >
+                      {venueEmoji}
+                    </div>
+                  )}
+                  {/* Scrim so the title stays legible over any photo. */}
+                  <div
+                    className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/55 to-transparent"
+                    aria-hidden
+                  />
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
+
+                {/* Controls float over the image, top-right. */}
+                <div className="absolute right-2 top-2 flex items-center gap-1">
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       openDetails();
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-300 transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/15 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-slate-950/70 px-3 py-1.5 text-sm font-medium text-emerald-300 backdrop-blur-md transition-colors hover:border-emerald-400/70 hover:bg-emerald-500/20 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
                     aria-label="Venue info"
                     title="Venue info"
                   >
@@ -446,64 +594,127 @@ export function VenueInfoPopup({
                       e.stopPropagation();
                       void handleShare();
                     }}
-                    className={ICON_BTN}
+                    className={HERO_ICON_BTN}
                     aria-label="Share venue"
                     title="Share"
                   >
                     <Share2 className="w-5 h-5" />
                   </button>
-                  <button type="button" onClick={onClose} className={ICON_BTN} aria-label="Close">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className={HERO_ICON_BTN}
+                    aria-label="Close"
+                  >
                     <X className="w-5 h-5" />
                   </button>
+                </div>
+
+                {/* Title block sits on the scrim, mockup-style. */}
+                <div className="absolute inset-x-0 bottom-0 px-4 pb-3">
+                  <h2 className="truncate text-lg font-semibold text-white drop-shadow-[0_1px_3px_rgba(2,6,23,0.9)]">
+                    {title}
+                  </h2>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm text-slate-300">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+                    {viewerDistanceMiles != null ? (
+                      <span className="tabular-nums">{viewerDistanceMiles.toFixed(1)} mi away</span>
+                    ) : (
+                      <span className="truncate">{sub}</span>
+                    )}
+                    {totalGames > 0 ? (
+                      <>
+                        <span aria-hidden className="text-slate-600">·</span>
+                        <span className="font-medium text-violet-300">
+                          {totalGames} game{totalGames === 1 ? "" : "s"}
+                        </span>
+                      </>
+                    ) : null}
+                    {notesAtVenue.length > 0 ? (
+                      <>
+                        <span aria-hidden className="text-slate-600">·</span>
+                        <span className="font-medium text-cyan-300">
+                          {notesAtVenue.length} note{notesAtVenue.length === 1 ? "" : "s"}
+                        </span>
+                      </>
+                    ) : null}
+                  </p>
                 </div>
               </div>
 
               {/* Scrollable body */}
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 scrollbar-hide">
-                {/* Games are violet and notes are cyan everywhere else in the app (the create
-                    modal's toggle, the note map marker) — these tabs inherit that, so colour
-                    alone tells you which list you are looking at. */}
-                <div role="tablist" aria-label="Venue activity" className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    role="tab"
-                    id="venue-tab-games"
-                    aria-selected={tab === "games"}
-                    aria-controls="venue-panel-games"
-                    onClick={() => setTab("games")}
-                    className={
-                      "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer " +
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/40 " +
-                      (tab === "games"
-                        ? "border-violet-400/50 bg-violet-500/20 text-violet-100"
-                        : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]")
-                    }
-                  >
-                    Active games
-                    <span className={tab === "games" ? "ml-1.5 text-violet-200/80" : "ml-1.5 text-slate-500"}>
-                      {gamesNearby.length}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    id="venue-tab-notes"
-                    aria-selected={tab === "notes"}
-                    aria-controls="venue-panel-notes"
-                    onClick={() => setTab("notes")}
-                    className={
-                      "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer " +
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 " +
-                      (tab === "notes"
-                        ? "border-cyan-400/45 bg-cyan-400/12 text-cyan-100"
-                        : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]")
-                    }
-                  >
-                    Notes
-                    <span className={tab === "notes" ? "ml-1.5 text-cyan-200/80" : "ml-1.5 text-slate-500"}>
-                      {notesAtVenue.length}
-                    </span>
-                  </button>
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 scrollbar-hide">
+                {/* Games are violet and notes are cyan everywhere else in the app — the create
+                    modal's toggle, the note map marker, the composite pin's badges — so the
+                    sliding indicator inherits that, and colour alone says which list you are
+                    looking at. */}
+                <div
+                  role="tablist"
+                  aria-label="Venue activity"
+                  className="relative flex items-center gap-1 rounded-xl border border-white/[0.06] bg-white/[0.04] p-1"
+                >
+                  {(
+                    [
+                      { key: "games" as const, label: "Games", count: totalGames },
+                      { key: "notes" as const, label: "Notes", count: notesAtVenue.length },
+                    ]
+                  ).map(({ key, label, count }) => {
+                    const selected = tab === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        role="tab"
+                        id={`venue-tab-${key}`}
+                        aria-selected={selected}
+                        aria-controls={`venue-panel-${key}`}
+                        onClick={() => setTab(key)}
+                        className={
+                          "relative flex-1 cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors " +
+                          "focus-visible:outline-none focus-visible:ring-2 " +
+                          (key === "games"
+                            ? "focus-visible:ring-violet-400/40 "
+                            : "focus-visible:ring-cyan-400/40 ") +
+                          (selected
+                            ? key === "games"
+                              ? "text-violet-100"
+                              : "text-cyan-100"
+                            : "text-slate-400 hover:text-slate-200")
+                        }
+                      >
+                        {selected ? (
+                          <motion.span
+                            layoutId="venue-tab-indicator"
+                            transition={
+                              reduceMotion
+                                ? { duration: 0 }
+                                : { type: "spring", stiffness: 420, damping: 34 }
+                            }
+                            className={
+                              "absolute inset-0 -z-10 rounded-lg border " +
+                              (key === "games"
+                                ? "border-violet-400/50 bg-violet-500/20"
+                                : "border-cyan-400/45 bg-cyan-400/12")
+                            }
+                            aria-hidden
+                          />
+                        ) : null}
+                        {label}
+                        <span
+                          className={
+                            "ml-1.5 tabular-nums " +
+                            (selected
+                              ? key === "games"
+                                ? "text-violet-200/80"
+                                : "text-cyan-200/80"
+                              : "text-slate-500")
+                          }
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {tab === "notes" ? (
@@ -550,78 +761,62 @@ export function VenueInfoPopup({
                   </div>
                 ) : (
                 <div id="venue-panel-games" role="tabpanel" aria-labelledby="venue-tab-games">
-                <div className="mt-3 flex items-center gap-2 text-slate-300 text-sm">
-                  <span
-                    className={`inline-block w-2 h-2 rounded-full ${openGamesNearbyCount > 0 ? "bg-emerald-400" : "bg-slate-600"}`}
-                    aria-hidden
-                  />
-                  <Activity className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden />
-                  <span className="font-medium">
-                    {openGamesNearbyCount} open game{openGamesNearbyCount === 1 ? "" : "s"}
-                  </span>
-                  <span className="text-slate-500 text-xs">near this venue</span>
-                </div>
-
-                {gamesNearby.length > 0 ? (
-                  <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
-                    <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium">Games by sport</p>
-                    <ul className="space-y-2">
-                      {sportKeys.map((sportKey) => {
-                        const list = bySport.get(sportKey) ?? [];
-                        return (
-                          <li key={sportKey}>
-                            <p className="text-xs text-emerald-400/90 font-semibold mb-1 flex items-center gap-1.5">
-                              <span aria-hidden>{getSportIconEmoji(sportKey)}</span>
-                              {sportKey}
-                              <span className="text-slate-500 font-normal">({list.length})</span>
+                  {totalGames > 0 ? (
+                    <div className="mt-3 space-y-3 border-t border-white/10 pt-3">
+                      {/*
+                        Two sections, because they mean different things on the map: the first
+                        set has no pins of its own (this card is the only way to reach them),
+                        the second still does. Headings are dropped when only one set exists —
+                        a lone "AT THIS VENUE" over the only list is noise.
+                      */}
+                      {gamesNearby.length > 0 ? (
+                        <section>
+                          {gamesNearbyRing.length > 0 ? (
+                            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                              At this venue
                             </p>
-                            <ul className="space-y-1 pl-0.5">
-                              {list.map((g) => {
-                                const joined = joinedGameIds.has(g.id);
-                                return (
-                                  <li
-                                    key={g.id}
-                                    className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2 py-2"
-                                  >
-                                    <div className="min-w-0 flex-1">
-                                      <p className="text-sm text-slate-100 truncate">{g.title || "Pickup"}</p>
-                                      <p className="text-[11px] text-slate-500">
-                                        {formatVenueGameTimerSummary(g, now)} · {distanceMiles(g)} mi
-                                      </p>
-                                    </div>
-                                    {joined ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => onOpenChat?.(g)}
-                                        className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal-600/90 hover:bg-teal-500 text-white text-xs font-medium cursor-pointer transition-colors"
-                                      >
-                                        <MessageCircle className="w-3.5 h-3.5" />
-                                        Chat
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => onJoinGame?.(g)}
-                                        className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-white text-xs font-medium cursor-pointer transition-colors"
-                                      >
-                                        Join
-                                        <ChevronRight className="w-3.5 h-3.5 opacity-80" />
-                                      </button>
-                                    )}
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="mt-3 border-t border-white/10 pt-3 text-sm text-slate-500">
-                    No open games here yet — start one below.
-                  </p>
-                )}
+                          ) : null}
+                          <ul className="space-y-2">
+                            {gamesNearby.map((g) => (
+                              <GameListRow
+                                key={g.id}
+                                game={g}
+                                now={now}
+                                joined={joinedGameIds.has(g.id)}
+                                onJoin={onJoinGame}
+                                onChat={onOpenChat}
+                              />
+                            ))}
+                          </ul>
+                        </section>
+                      ) : null}
+
+                      {gamesNearbyRing.length > 0 ? (
+                        <section>
+                          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                            Nearby
+                          </p>
+                          <ul className="space-y-2">
+                            {gamesNearbyRing.map((g) => (
+                              <GameListRow
+                                key={g.id}
+                                game={g}
+                                now={now}
+                                joined={joinedGameIds.has(g.id)}
+                                onJoin={onJoinGame}
+                                onChat={onOpenChat}
+                                distanceLabel={`${distanceMiles(g)} mi`}
+                              />
+                            ))}
+                          </ul>
+                        </section>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="mt-3 border-t border-white/10 pt-3 text-sm text-slate-500">
+                      No games here yet — start one below.
+                    </p>
+                  )}
                 </div>
                 )}
 

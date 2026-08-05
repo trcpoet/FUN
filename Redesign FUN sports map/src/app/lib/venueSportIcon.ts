@@ -4,7 +4,7 @@
  */
 
 import { osmSportTokens } from "../../lib/osmSportTags";
-import { getGameMapboxIconId, resolveSportMapboxSuffix } from "../map/gameSportIcons";
+import { getGameMapboxIconId, getSportIconEmoji, resolveSportMapboxSuffix } from "../map/gameSportIcons";
 import { SPORTS_CATALOG, OTHER_SPORT } from "../../lib/sportsCatalog";
 
 /**
@@ -78,6 +78,16 @@ export function venueSportMapIconId(sport: string | undefined | null, leisure?: 
   // No exact sport → stadium marker (represents the field) instead of 🎯.
   if (suffix === OTHER_SPORT.mapboxSuffix) return getGameMapboxIconId(GENERIC_VENUE_SUFFIX);
   return getGameMapboxIconId(suffix);
+}
+
+/**
+ * Display emoji for a venue, matching whatever `venueSportMapIconId` rasterizes onto the map.
+ * Needed by DOM pins (`VenueActivityPin`), which draw the glyph as text rather than as a
+ * registered Mapbox image. Same generic-venue rule: no exact sport → 🏟️, never 🎯.
+ */
+export function venueSportEmoji(sport: string | undefined | null, leisure?: string | null): string {
+  const suffix = primaryVenueSportSuffix(sport, leisure);
+  return getSportIconEmoji(suffix === OTHER_SPORT.mapboxSuffix ? GENERIC_VENUE_SUFFIX : suffix);
 }
 
 export function venueSportKey(sport: string | undefined | null, leisure?: string | null): number {

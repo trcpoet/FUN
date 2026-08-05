@@ -18,11 +18,23 @@ import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
 import type { VenueClusterPoint } from "../lib/sportsVenueTypes";
 import { venueSelectionFromProperties } from "../lib/venueSelection";
 import { enrichVenueGeoJSON } from "../lib/venueClusterEngine";
-import { venueClusterIconImageExpression } from "../lib/venueSportIcon";
-import { openGamesNearPoint } from "../lib/gamesAtVenue";
+import { venueClusterIconImageExpression, venueSportEmoji } from "../lib/venueSportIcon";
 import { splitColocated } from "../lib/colocateGames";
 import { partitionNotesByVenue } from "../lib/notesAtVenue";
-import { limitGamesForMapViewport } from "../map/mapBounds";
+import {
+  activeGamesNearPoint,
+  partitionGamesByVenue,
+  sortGamesForVenueList,
+} from "../lib/venueActivity";
+import { limitGamesForMapViewport, approxVisibleBoundsWidthKm } from "../map/mapBounds";
+import {
+  resolveVenueFetchAnchor,
+  venueFetchRadiusKm,
+  venueRequestRadiusKm,
+  shouldRefetchVenues,
+  type VenueFetchCoverage,
+} from "../map/venueFetchAnchor";
+import { reportVenueCoverageGaps } from "../map/venueCoverageInvariant";
 import {
   getViewportMetrics,
   shouldShowGameClusters,
@@ -44,6 +56,7 @@ import type { SignInGateAction } from "./SignInGate";
 import { ColocatedGamesPin } from "./ColocatedGamesPin";
 import { NoteClusterPin } from "./NoteClusterPin";
 import { RandomLocationGamePin } from "./RandomLocationGamePin";
+import { VenueActivityPin } from "./VenueActivityPin";
 import { ColocatedGamesModal } from "./ColocatedGamesModal";
 import { ColocatedNotesModal } from "./ColocatedNotesModal";
 import { GameMapCountdownPill } from "./GameMapCountdownPill";
@@ -324,6 +337,10 @@ export function MapboxMap(props: MapboxMapProps) {
   const venueCountdownEntriesRef = useRef(
     new Map<string, { marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }>()
   );
+  /** Composite pins for venues that have absorbed a game, keyed by venue id. */
+  const venueActivityEntriesRef = useRef(
+    new Map<string, { marker: import("mapbox-gl").Marker; root: ReactRoot; scaleEl: HTMLDivElement }>()
+  );
   /** Pulsating note markers, keyed by note id (no React root — plain DOM). */
   const noteMarkerEntriesRef = useRef<Map<string, { marker: import("mapbox-gl").Marker; root: HTMLButtonElement; dispose: () => void }>>(new Map());
   /** HTML markers for several notes at the same coordinates (React root, so zoom-scalable). */
@@ -383,7 +400,31 @@ export function MapboxMap(props: MapboxMapProps) {
   const userCoordsRef = useRef(userCoords);
   userCoordsRef.current = userCoords;
   const lastAppliedStyleUrlRef = useRef(activeStyleUrl);
-  const venuesFetchCenter = venuesCenter ?? userCoords; // where to look for venues (explicit center, else the user)
+  /**
+   * What the map is currently looking at. Venues MUST follow this.
+   *
+   * The venue layer used to be anchored to `venuesCenter ?? userCoords` and never
+   * re-fetched on pan, while the Mapbox basemap draws `landuse` pitch polygons for the
+   * whole world — so panning anywhere off that anchor showed a pitch with no icon and
+   * no error. Sampled on moveend/zoomend (see the effect below).
+   */
+  const [mapViewport, setMapViewport] = useState<{ lat: number; lng: number; widthKm: number } | null>(
+    null
+  );
+  // Explicit centre (search / tapped venue) wins only while the map is still on it.
+  const venuesFetchCenter = resolveVenueFetchAnchor({
+    explicitCenter: venuesCenter,
+    mapCenter: mapViewport,
+    userCoords,
+  });
+  /** What the current view needs on screen… */
+  const venueViewportRadius = mapViewport
+    ? venueFetchRadiusKm(mapViewport.widthKm, venueSearchRadiusKm)
+    : venueSearchRadiusKm;
+  /** …and the wider ring we actually request, so panning is served from data we hold. */
+  const venueFetchRadius = venueRequestRadiusKm(venueViewportRadius, venueSearchRadiusKm);
+  /** What we last actually fetched — the guard against re-requesting ground we already hold. */
+  const venueCoverageRef = useRef<VenueFetchCoverage | null>(null);
   /** Debounced anchor so rapid search / map moves don’t spam Overpass + Supabase. */
   const [debouncedVenueFetchCenter, setDebouncedVenueFetchCenter] = useState(venuesFetchCenter);
   // Wait 420ms after the center stops changing before committing it, so quick pans don't trigger many fetches.
@@ -405,6 +446,32 @@ export function MapboxMap(props: MapboxMapProps) {
     if (mapSearchEpoch < 1 || !venuesFetchCenter) return;
     setDebouncedVenueFetchCenter(venuesFetchCenter);
   }, [mapSearchEpoch, venuesFetchCenter?.lat, venuesFetchCenter?.lng]);
+
+  // Track what the map is looking at, so venue loading can follow it. `moveend`/`zoomend`
+  // fire once per gesture, and the venue fetch itself is guarded by `shouldRefetchVenues`,
+  // so this is cheap.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const sample = () => {
+      const c = map.getCenter();
+      const widthKm = approxVisibleBoundsWidthKm(map);
+      setMapViewport((prev) =>
+        prev && prev.lat === c.lat && prev.lng === c.lng && prev.widthKm === widthKm
+          ? prev
+          : { lat: c.lat, lng: c.lng, widthKm }
+      );
+    };
+
+    sample();
+    map.on("moveend", sample);
+    map.on("zoomend", sample);
+    return () => {
+      map.off("moveend", sample);
+      map.off("zoomend", sample);
+    };
+  }, [mapLoaded]);
   const venueClustersRef = useRef<VenueClusterPoint[]>([]);
   /** Last `mapSearchEpoch` whose stale venue pins were wiped — one wipe per double-tap. */
   const lastWipedSearchEpochRef = useRef(0);
@@ -1201,6 +1268,14 @@ export function MapboxMap(props: MapboxMapProps) {
       if (el) el.style.visibility = showIndividuals ? "visible" : "hidden";
     });
 
+    // Composite venue pins follow the *game* gate, not the venue-dot one: what they add over a
+    // plain venue is games, and those games are still counted by the cluster bubbles below this
+    // zoom. Venues aren't fetched under z9 anyway, so nothing is lost at the low end.
+    venueActivityEntriesRef.current.forEach(({ marker }) => {
+      const el = marker.getElement();
+      if (el) el.style.visibility = showIndividuals ? "visible" : "hidden";
+    });
+
     // If there are games but they're hidden because the view is too zoomed out, nudge the user.
     const g = gamesRef.current;
     setMapUxHint(
@@ -1239,6 +1314,10 @@ export function MapboxMap(props: MapboxMapProps) {
       ent.scaleEl.style.transformOrigin = "center";
     }
     for (const ent of venueCountdownEntriesRef.current.values()) {
+      ent.scaleEl.style.transform = `scale(${s})`;
+      ent.scaleEl.style.transformOrigin = "center";
+    }
+    for (const ent of venueActivityEntriesRef.current.values()) {
       ent.scaleEl.style.transform = `scale(${s})`;
       ent.scaleEl.style.transformOrigin = "center";
     }
@@ -1306,7 +1385,9 @@ export function MapboxMap(props: MapboxMapProps) {
       filter: [
         "all",
         ["!", ["has", "point_count"]], // not a cluster
-        ["!=", ["coalesce", ["get", "marker_kind"], ""], "colocated"], // not a stacked-pin game
+        // Not drawn by something else: stacked-pin games and games absorbed by a venue's
+        // composite pin both carry their glyph on a DOM marker instead.
+        ["match", ["coalesce", ["get", "marker_kind"], ""], ["colocated", "at_venue"], false, true],
       ],
       layout: {
         "icon-image": ["coalesce", ["get", "sport_map_icon"], getGameMapboxIconId("other")],
@@ -1328,7 +1409,7 @@ export function MapboxMap(props: MapboxMapProps) {
       filter: [
         "all",
         ["!", ["has", "point_count"]],
-        ["!=", ["coalesce", ["get", "marker_kind"], ""], "colocated"],
+        ["match", ["coalesce", ["get", "marker_kind"], ""], ["colocated", "at_venue"], false, true],
       ],
       layout: {
         "text-field": ["concat", ["to-string", ["get", "players_filled"]], "/", ["to-string", ["get", "players_total"]]],
@@ -1447,6 +1528,65 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [mapLoaded, basemapStyleEpoch, applyMapLayerVisibility, applyDomMarkerScale, applyGameIconLayout]);
 
+  /**
+   * What sits on a venue, and what stands alone.
+   *
+   * Both splits must be computed before any of the render effects below, because every one of
+   * them needs to know what the venue pins have already taken.
+   *
+   * Notes and games are absorbed for the same reason: their markers land on the venue's own
+   * coordinate and cover it. A note's DOM pin always paints above the GL venue layers; a
+   * game's GL icon paints after the venue layer *and* makes `onVenuePointClick` bail on its
+   * hit-test guard — which is what left venues with games both invisible and unclickable.
+   * Absorbed items lose their own pin and ride on the venue's composite pin instead.
+   */
+  const venueAnchors = useMemo(
+    () =>
+      venueClustersRef.current.map((c) => ({
+        id: c.properties.id,
+        lat: c.lat,
+        lng: c.lng,
+      })),
+    // venuePointsEpoch stands in for venueClustersRef, which is a ref and can't be a dep.
+    [venuePointsEpoch]
+  );
+
+  const { anchored: notesByVenueId, floating: floatingNotes } = useMemo(
+    () => partitionNotesByVenue(notes, venueAnchors, MapCfg.NOTE_VENUE_ABSORB_RADIUS_METERS),
+    [notes, venueAnchors]
+  );
+
+  const { singles: floatingNoteSingles, groups: floatingNoteGroups } = useMemo(
+    () => splitColocated(floatingNotes),
+    [floatingNotes]
+  );
+
+  const { anchored: gamesByVenueId } = useMemo(
+    () =>
+      partitionGamesByVenue(
+        games,
+        venueAnchors,
+        MapCfg.GAME_VENUE_ABSORB_RADIUS_METERS,
+        Date.now()
+      ),
+    // mapMinuteEpoch re-runs the ended-game check as time passes.
+    [games, venueAnchors, mapMinuteEpoch]
+  );
+
+  /** Flat id set — the form every render path needs to ask "is this one already on a venue?". */
+  const absorbedGameIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const list of gamesByVenueId.values()) {
+      for (const g of list) ids.add(g.id);
+    }
+    return ids;
+  }, [gamesByVenueId]);
+
+  /** Venues that carry activity — these leave the GL source and render as composite DOM pins. */
+  const activeVenues = useMemo(() => {
+    return venueClustersRef.current.filter((c) => (gamesByVenueId.get(c.properties.id)?.length ?? 0) > 0);
+  }, [gamesByVenueId, venuePointsEpoch]);
+
   /** Push game GeoJSON into clustered source (capped by viewport for performance). */
   // Whenever the games list (or selection/minute tick) changes, feed fresh data to the GL source.
   useEffect(() => {
@@ -1457,31 +1597,17 @@ export function MapboxMap(props: MapboxMapProps) {
 
     // Limit to the games near the viewport so we never push thousands of features at once.
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
-    src.setData(gamesToGeoJSON(capped, selectedGameId));
+    src.setData(gamesToGeoJSON(capped, selectedGameId, absorbedGameIds));
     applyMapLayerVisibility();
-  }, [mapLoaded, basemapStyleEpoch, games, selectedGameId, mapMinuteEpoch, applyMapLayerVisibility]);
-
-  /**
-   * Split notes into those sitting on a venue and those standing alone.
-   *
-   * Note markers are DOM elements, so they always paint above the GL venue layers and
-   * swallow the click that would open the venue. Notes at a venue therefore get no pin of
-   * their own — the venue carries a count badge and lists them in its modal instead.
-   */
-  const { anchored: notesByVenueId, floating: floatingNotes } = useMemo(() => {
-    const venues = venueClustersRef.current.map((c) => ({
-      id: c.properties.id,
-      lat: c.lat,
-      lng: c.lng,
-    }));
-    return partitionNotesByVenue(notes, venues, MapCfg.NOTE_VENUE_ABSORB_RADIUS_METERS);
-    // venuePointsEpoch stands in for venueClustersRef, which is a ref and can't be a dep.
-  }, [notes, venuePointsEpoch]);
-
-  const { singles: floatingNoteSingles, groups: floatingNoteGroups } = useMemo(
-    () => splitColocated(floatingNotes),
-    [floatingNotes]
-  );
+  }, [
+    mapLoaded,
+    basemapStyleEpoch,
+    games,
+    selectedGameId,
+    mapMinuteEpoch,
+    absorbedGameIds,
+    applyMapLayerVisibility,
+  ]);
 
   /**
    * Render standalone notes as pulsating DOM markers (Letter/Note icon).
@@ -1608,11 +1734,16 @@ export function MapboxMap(props: MapboxMapProps) {
   }, [mapLoaded, basemapStyleEpoch, floatingNoteGroups, applyDomMarkerScale]);
 
   /**
-   * Note count badge on venue pins.
+   * Note count badge on venue pins, and removal of venues that have become composite pins.
    *
    * Counts are baked into the venue feature properties rather than pushed as feature state:
    * `text-field` is a layout property, and Mapbox only resolves ["feature-state"] in paint
    * properties, so a state-driven label would never render.
+   *
+   * Venues carrying a game drop out of this source entirely. They are drawn as DOM markers
+   * instead, and leaving them here would double-draw them — worse, this source clusters to
+   * z16 with a 40 px radius, so two courts ~50 m apart merge at ordinary zooms and the GL
+   * icon would vanish into a cluster bubble while the DOM pin stayed put.
    */
   useEffect(() => {
     const map = mapRef.current;
@@ -1624,12 +1755,142 @@ export function MapboxMap(props: MapboxMapProps) {
 
     src.setData({
       ...enriched,
-      features: enriched.features.map((f) => {
-        const count = notesByVenueId.get(f.properties.id)?.length ?? 0;
-        return count > 0 ? { ...f, properties: { ...f.properties, note_count: count } } : f;
-      }),
+      features: enriched.features
+        .filter((f) => (gamesByVenueId.get(f.properties.id)?.length ?? 0) === 0)
+        .map((f) => {
+          const count = notesByVenueId.get(f.properties.id)?.length ?? 0;
+          return count > 0 ? { ...f, properties: { ...f.properties, note_count: count } } : f;
+        }),
     });
-  }, [mapLoaded, basemapStyleEpoch, notesByVenueId, venuePointsEpoch]);
+  }, [mapLoaded, basemapStyleEpoch, notesByVenueId, gamesByVenueId, venuePointsEpoch]);
+
+  /**
+   * Teardown for the composite pins below.
+   *
+   * Deliberately a separate effect with narrow deps: the render effect diffs its markers by
+   * venue id so they survive the minute tick, which means it must *not* destroy them in its
+   * own cleanup. This one runs only when the map or basemap style is replaced, or on unmount.
+   * Declared first so its cleanup fires before the render effect repopulates.
+   */
+  useEffect(() => {
+    return () => {
+      const existing = venueActivityEntriesRef.current;
+      const entries = [...existing.values()];
+      existing.clear();
+      for (const entry of entries) {
+        try {
+          entry.marker.remove();
+        } catch (_) {}
+      }
+      window.setTimeout(() => {
+        for (const entry of entries) {
+          try {
+            entry.root.unmount();
+          } catch (_) {}
+        }
+      }, 0);
+    };
+  }, [mapLoaded, basemapStyleEpoch]);
+
+  /**
+   * Composite venue pins: one DOM marker per venue that has absorbed a game.
+   *
+   * DOM on purpose — it always paints above every GL layer, and a React click with
+   * `stopPropagation()` never reaches Mapbox, so neither the paint order nor the
+   * `onVenuePointClick` hit-test guard can make the venue unreachable again.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const nextById = new Map(activeVenues.map((v) => [v.properties.id, v]));
+
+    let cancelled = false;
+    void loadMapboxGl().then((mapboxgl) => {
+      if (cancelled || mapRef.current !== map) return;
+      const Marker = mapboxgl.Marker;
+      const existing = venueActivityEntriesRef.current;
+
+      // Drop entries whose venue no longer carries a game.
+      const toUnmount: ReactRoot[] = [];
+      for (const [id, entry] of existing) {
+        if (!nextById.has(id)) {
+          try {
+            entry.marker.remove();
+          } catch (_) {}
+          toUnmount.push(entry.root);
+          existing.delete(id);
+        }
+      }
+      if (toUnmount.length) {
+        window.setTimeout(() => {
+          for (const root of toUnmount) {
+            try {
+              root.unmount();
+            } catch (_) {}
+          }
+        }, 0);
+      }
+
+      for (const venue of activeVenues) {
+        const id = venue.properties.id;
+        const pin = (
+          <VenueActivityPin
+            venueName={venue.properties.name || "Sports venue"}
+            venueEmoji={venueSportEmoji(venue.properties.sport, venue.properties.leisure)}
+            games={gamesByVenueId.get(id) ?? []}
+            notes={notesByVenueId.get(id) ?? []}
+            selected={selectedVenue?.id === id}
+            onPress={() => {
+              // Same three steps as the GL venue handler's `selectVenueFromCluster`: stamp the
+              // interaction so the generic map-click handler doesn't immediately clear it,
+              // close any game card, then open the venue.
+              venueInteractionTsRef.current = Date.now();
+              setEventPopup(null);
+              onSelectVenue(
+                venueSelectionFromProperties(venue.properties, { lng: venue.lng, lat: venue.lat })
+              );
+            }}
+          />
+        );
+
+        const prev = existing.get(id);
+        if (prev) {
+          prev.marker.setLngLat([venue.lng, venue.lat]);
+          prev.root.render(pin);
+          continue;
+        }
+
+        const outer = document.createElement("div");
+        outer.style.pointerEvents = "auto";
+        const scaleEl = document.createElement("div");
+        scaleEl.style.willChange = "transform";
+        outer.appendChild(scaleEl);
+        const root = createRoot(scaleEl);
+        root.render(pin);
+        const marker = new Marker({ element: outer, anchor: "center" })
+          .setLngLat([venue.lng, venue.lat])
+          .addTo(map);
+        existing.set(id, { marker, root, scaleEl });
+      }
+
+      applyMapLayerVisibility();
+      applyDomMarkerScale();
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    mapLoaded,
+    basemapStyleEpoch,
+    activeVenues,
+    gamesByVenueId,
+    notesByVenueId,
+    selectedVenue,
+    applyMapLayerVisibility,
+    applyDomMarkerScale,
+  ]);
 
   /** Same-coordinate games: single HTML cluster pin (avoids overlapping GL sport icons). */
   // When several games sit at the exact same spot, draw one combined HTML pin that opens
@@ -1639,7 +1900,10 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map || !mapLoaded) return;
 
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
-    const { groups } = splitColocated(capped); // groups = sets of games sharing one location
+    const { groups: allGroups } = splitColocated(capped); // groups = sets of games sharing one location
+    // Colocated games share a coordinate, so a group is absorbed all-or-nothing: if it sits on
+    // a venue, the venue's composite pin already speaks for it.
+    const groups = allGroups.filter((grp) => !grp.every((g) => absorbedGameIds.has(g.id)));
 
     let cancelled = false;
     if (groups.length > 0) {
@@ -1700,7 +1964,15 @@ export function MapboxMap(props: MapboxMapProps) {
         }
       }, 0);
     };
-  }, [mapLoaded, games, selectedGameId, bumpGameId, mapMinuteEpoch, applyMapLayerVisibility]);
+  }, [
+    mapLoaded,
+    games,
+    selectedGameId,
+    bumpGameId,
+    mapMinuteEpoch,
+    absorbedGameIds,
+    applyMapLayerVisibility,
+  ]);
 
   /** Map-tap games (no venue label): HTML pin with dd/hh/mm/ss pill — not drawn on GL symbol layer. */
   // Games created by tapping an empty spot (no venue) get a custom HTML pin with a live countdown.
@@ -1710,7 +1982,11 @@ export function MapboxMap(props: MapboxMapProps) {
 
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
     const { singles } = splitColocated(capped); // games that are alone at their spot
-    const randomSingles = singles.filter((g) => !isVenueGame(g)); // ...and not tied to a venue
+    const randomSingles = singles.filter(
+      // Not tied to a venue by label, and not sitting on one either — a long-press game dropped
+      // right on a court would cover it exactly like a venue-created game does.
+      (g) => !isVenueGame(g) && !absorbedGameIds.has(g.id)
+    );
 
     let cancelled = false;
     if (randomSingles.length > 0) {
@@ -1772,12 +2048,23 @@ export function MapboxMap(props: MapboxMapProps) {
         }
       }, 0);
     };
-  }, [mapLoaded, games, selectedGameId, bumpGameId, mapMinuteEpoch, applyMapLayerVisibility]);
+  }, [
+    mapLoaded,
+    games,
+    selectedGameId,
+    bumpGameId,
+    mapMinuteEpoch,
+    absorbedGameIds,
+    applyMapLayerVisibility,
+  ]);
 
   /**
    * Venue games (location_label set) are drawn as GL symbols. To keep parity with
    * map-tap pins, render a tiny DOM-only countdown/LIVE badge above each venue
    * single. (Non-interactive; clicks go to the GL layer.)
+   *
+   * Games absorbed by a venue are skipped — their pill is drawn inside the composite pin,
+   * where it can sit in the top-left corner clear of the note badge.
    */
   useEffect(() => {
     const map = mapRef.current;
@@ -1785,7 +2072,7 @@ export function MapboxMap(props: MapboxMapProps) {
 
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
     const { singles } = splitColocated(capped);
-    const venueSingles = singles.filter((g) => isVenueGame(g)); // games attached to a venue
+    const venueSingles = singles.filter((g) => isVenueGame(g) && !absorbedGameIds.has(g.id));
     const nextById = new Map<string, GameRow>(venueSingles.map((g) => [g.id, g])); // desired set, by id
 
     let cancelled = false;
@@ -1869,7 +2156,14 @@ export function MapboxMap(props: MapboxMapProps) {
         }
       }, 0);
     };
-  }, [mapLoaded, games, mapMinuteEpoch, applyMapLayerVisibility, applyDomMarkerScale]);
+  }, [
+    mapLoaded,
+    games,
+    mapMinuteEpoch,
+    absorbedGameIds,
+    applyMapLayerVisibility,
+    applyDomMarkerScale,
+  ]);
 
   /** Selected / bump / hover: game sport icon layout + halo. */
   // Re-run the icon layout immediately when selection or the tap-pulse changes (the rAF loop
@@ -2320,14 +2614,24 @@ export function MapboxMap(props: MapboxMapProps) {
   const venueSportSig = venueSportsFilter.slice().sort().join("|");
   // Data key: location + radius (+ a recenter epoch + a search epoch) — drives the network fetch.
   // `centerOnUserTrigger` is bumped by the recenter button even when coords don't change,
-  // so venues can be refreshed on demand. `mapSearchEpoch` does the same for a double-tap, which
-  // matters because the center is rounded to 2dp (~1.1km) — two nearby taps would otherwise
-  // produce an identical key and skip the refetch.
+  // so venues can be refreshed on demand. `mapSearchEpoch` does the same for a double-tap.
+  //
+  // Quantized to 3dp (~110m), NOT 2dp (~1.1km): the key only decides whether the effect
+  // re-runs — `shouldRefetchVenues` below decides whether a request actually goes out. A
+  // coarse key here used to mean panning within ~1.1km could never trigger a re-evaluation
+  // at all, which is part of how venues stopped following the map.
   const venueFetchDataKey = debouncedVenueFetchCenter
-    ? `${debouncedVenueFetchCenter.lat.toFixed(2)},${debouncedVenueFetchCenter.lng.toFixed(2)},${venueSearchRadiusKm},${centerOnUserTrigger ?? 0},${mapSearchEpoch}`
+    ? `${debouncedVenueFetchCenter.lat.toFixed(3)},${debouncedVenueFetchCenter.lng.toFixed(3)},${venueFetchRadius.toFixed(2)},${centerOnUserTrigger ?? 0},${mapSearchEpoch}`
     : null;
   // Render key: includes sport sig — drives the effect to re-run on filter changes.
   const venueFetchKey = venueFetchDataKey ? `${venueFetchDataKey},${venueSportSig}` : null;
+
+  // Explicit user commits ("recenter", "search this spot") always mean "load this again",
+  // so forget what we hold and let the coverage guard fall through to a real fetch.
+  useEffect(() => {
+    if ((centerOnUserTrigger ?? 0) < 1 && mapSearchEpoch < 1) return;
+    venueCoverageRef.current = null;
+  }, [centerOnUserTrigger, mapSearchEpoch]);
 
   // On an explicit "search this spot", drop the previous results immediately rather than leaving
   // them painted for the whole round-trip. Keyed on the epoch alone so ordinary refetches (filter
@@ -2398,11 +2702,18 @@ export function MapboxMap(props: MapboxMapProps) {
           );
         };
 
+        // Always, before any setData: a symbol layer whose `icon-image` names an image
+        // the style no longer holds renders NOTHING — no warning on screen, just a
+        // missing icon over a basemap pitch. `setStyle` can drop the image registry while
+        // leaving the layers in place, so registering only on layer creation was a
+        // standing way for every venue icon to silently disappear. It's a no-op when the
+        // images are already there.
+        registerGameSportImages(mapInstance);
+
         if (venueGlLayersReady(mapInstance)) {
           (mapInstance.getSource(SRC_VENUE_POINTS) as import("mapbox-gl").GeoJSONSource).setData(enriched);
         } else {
           removeVenueGlLayers(mapInstance);
-          registerGameSportImages(mapInstance);
 
           mapInstance.addSource(SRC_VENUE_POINTS, {
             type: "geojson",
@@ -2702,6 +3013,27 @@ export function MapboxMap(props: MapboxMapProps) {
       if (cancelled || venueKickoffStarted) return;
       if (map.getZoom() < MapCfg.VENUE_FETCH_MIN_ZOOM) return;
 
+      // What the screen needs now vs. what a fetch would give us.
+      const need = {
+        lat: debouncedVenueFetchCenter.lat,
+        lng: debouncedVenueFetchCenter.lng,
+        viewportRadiusKm: venueViewportRadius,
+        sportSig: venueSportSig,
+      };
+      const wanted: VenueFetchCoverage = {
+        lat: debouncedVenueFetchCenter.lat,
+        lng: debouncedVenueFetchCenter.lng,
+        fetchedRadiusKm: venueFetchRadius,
+        sportSig: venueSportSig,
+      };
+      // Already holding this ground (and this filter)? Don't spend a request on it.
+      // An explicit recenter/search bumps an epoch, which changes the effect key and
+      // clears coverage below, so those always refetch.
+      if (!shouldRefetchVenues(need, venueCoverageRef.current)) {
+        onVenuesFetchLoadingChangeRef.current?.(false);
+        return;
+      }
+
       venueKickoffStarted = true;
       if (idleFallbackId !== undefined) {
         clearTimeout(idleFallbackId);
@@ -2709,14 +3041,14 @@ export function MapboxMap(props: MapboxMapProps) {
       }
       map.off("idle", kickoffVenueFetch);
       map.off("zoomend", onVenueZoomForFetch);
-      if (isMobile) map.off("moveend", kickoffVenueFetch);
+      map.off("moveend", kickoffVenueFetch);
 
       onVenuesFetchLoadingChangeRef.current?.(true);
 
       fetchSportsVenuesWithProgress(
         debouncedVenueFetchCenter.lat,
         debouncedVenueFetchCenter.lng,
-        venueSearchRadiusKm,
+        venueFetchRadius,
         {
           signal: venueFetchAbort.signal,
           sportFilter: venueSportsFilter,
@@ -2732,12 +3064,29 @@ export function MapboxMap(props: MapboxMapProps) {
       )
         .then((result) => {
           if (cancelled) return;
+          // Record what we now hold so nearby pans reuse it instead of refetching.
+          venueCoverageRef.current = wanted;
           applyVenueFetchResult(result.geojson, result.error);
+          // DEV-only: shout if the basemap is drawing pitches we put no marker on.
+          if (import.meta.env.DEV) {
+            window.setTimeout(() => {
+              if (cancelled) return;
+              reportVenueCoverageGaps(map, SRC_VENUE_POINTS, {
+                anchor: debouncedVenueFetchCenter,
+                radiusKm: venueFetchRadius,
+                sportFilter: venueSportsFilter,
+                lastSource: result.source,
+              });
+            }, 600);
+          }
         })
         .catch((err: unknown) => {
           if (cancelled) return;
           const name = err instanceof Error ? err.name : "";
           if (name === "AbortError") return;
+          // Failed: keep coverage unset so the next idle/moveend retries this area
+          // rather than assuming we have it.
+          venueCoverageRef.current = null;
           onVenuesFetchLoadingChangeRef.current?.(false);
           setMapUxHint("Could not load venues — check your connection and try again");
         });
@@ -2751,7 +3100,8 @@ export function MapboxMap(props: MapboxMapProps) {
 
     map.on("idle", kickoffVenueFetch);
     map.on("zoomend", onVenueZoomForFetch);
-    if (isMobile) map.on("moveend", kickoffVenueFetch);
+    // On every platform, not just mobile: panning to a new area must be able to load it.
+    map.on("moveend", kickoffVenueFetch);
     idleFallbackId = window.setTimeout(kickoffVenueFetch, 2500);
     if (map.isStyleLoaded()) {
       kickoffVenueFetch();
@@ -2763,7 +3113,7 @@ export function MapboxMap(props: MapboxMapProps) {
       if (idleFallbackId !== undefined) clearTimeout(idleFallbackId);
       map.off("idle", kickoffVenueFetch);
       map.off("zoomend", onVenueZoomForFetch);
-      if (isMobile) map.off("moveend", kickoffVenueFetch);
+      map.off("moveend", kickoffVenueFetch);
       onVenuesFetchLoadingChangeRef.current?.(false);
     };
   }, [
@@ -2772,7 +3122,9 @@ export function MapboxMap(props: MapboxMapProps) {
     venueFetchKey,
     venueFetchDataKey,
     debouncedVenueFetchCenter,
-    venueSearchRadiusKm,
+    venueFetchRadius,
+    venueViewportRadius,
+    venueSportSig,
     venueSportsFilter,
     onSelectVenue,
     pauseVenueFetch,
@@ -2781,13 +3133,32 @@ export function MapboxMap(props: MapboxMapProps) {
     isMobile,
   ]);
 
-  // Games happening at (within 120m of) the selected venue — shown inside the venue card.
+  /**
+   * The venue card's two game lists.
+   *
+   * `gamesAtSelectedVenue` is exactly the set the composite pin's badge counts, so the number
+   * on the map and the "At this venue" list can never disagree. `gamesNearSelectedVenue` is
+   * the wider discovery ring: those games keep their own map pins and are shown separately.
+   */
   const gamesAtSelectedVenue = useMemo(() => {
     if (!selectedVenue) return [];
-    return openGamesNearPoint(games, selectedVenue.center.lat, selectedVenue.center.lng, 120);
-  }, [games, selectedVenue]);
+    const now = Date.now();
+    return sortGamesForVenueList(gamesByVenueId.get(selectedVenue.id) ?? [], now);
+  }, [gamesByVenueId, selectedVenue, mapMinuteEpoch]);
 
-  const openGamesNearbyCount = gamesAtSelectedVenue.length;
+  const gamesNearSelectedVenue = useMemo(() => {
+    if (!selectedVenue) return [];
+    const now = Date.now();
+    const atVenue = new Set((gamesByVenueId.get(selectedVenue.id) ?? []).map((g) => g.id));
+    const ring = activeGamesNearPoint(
+      games,
+      selectedVenue.center.lat,
+      selectedVenue.center.lng,
+      MapCfg.VENUE_GAME_LIST_RADIUS_METERS,
+      now
+    ).filter((g) => !atVenue.has(g.id));
+    return sortGamesForVenueList(ring, now);
+  }, [games, gamesByVenueId, selectedVenue, mapMinuteEpoch]);
 
   // Notes absorbed by the selected venue — these have no pin of their own, so the modal is
   // where they live.
@@ -2880,8 +3251,8 @@ export function MapboxMap(props: MapboxMapProps) {
         <VenueInfoPopup
           venue={selectedVenue}
           open
-          openGamesNearbyCount={openGamesNearbyCount}
           gamesNearby={gamesAtSelectedVenue}
+          gamesNearbyRing={gamesNearSelectedVenue}
           notesAtVenue={notesAtSelectedVenue}
           onOpenNote={(note) => {
             onSelectVenue(null);

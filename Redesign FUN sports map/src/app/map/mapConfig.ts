@@ -150,6 +150,29 @@ export const VENUE_AREA_RADIUS_METERS = 42;
  */
 export const NOTE_VENUE_ABSORB_RADIUS_METERS = VENUE_AREA_RADIUS_METERS;
 
+/**
+ * Same rule, applied to games. A game created from a venue card inherits that venue's exact
+ * centre, so its GL sport icon lands pixel-on-pixel over the venue's own icon — and because
+ * both symbol layers set `icon-allow-overlap`, the game (painted later) wins. On a tennis
+ * court both glyphs are 🎾, so the venue becomes invisible *and* unclickable.
+ *
+ * A game inside this radius therefore surrenders its own pin and is drawn as part of the
+ * venue's composite pin instead (see `VenueActivityPin`). Same 42 m as notes and for the same
+ * reason: absorb only what genuinely overlaps the icon.
+ */
+export const GAME_VENUE_ABSORB_RADIUS_METERS = VENUE_AREA_RADIUS_METERS;
+
+/**
+ * How far the venue card looks for games to *list*. Wider than the absorb radius on purpose:
+ * absorbing is about occlusion, listing is about discovery. Games between the two radii keep
+ * their own map pin and appear under the card's "Nearby" heading, so the pin badge (absorbed
+ * only) never disagrees with the "At this venue" list.
+ */
+export const VENUE_GAME_LIST_RADIUS_METERS = 120;
+
+/** Composite venue pin (venue + absorbed games/notes) — diameter in px. */
+export const VENUE_ACTIVITY_PIN_SIZE_PX = 56;
+
 /** Mapbox venue clustering — above this zoom, individual venue points emit. */
 export const VENUE_CLUSTER_MAX_ZOOM = 16;
 

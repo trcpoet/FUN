@@ -262,17 +262,17 @@ export default function App() {
 
   useEffect(() => {
     if (venueIntentReady) return;
-    if (favoriteSport) {
-      setVenueSportIntent(favoriteSport);
-      setVenueIntentReady(true);
-      return;
-    }
+    // A stored choice is the only thing that narrows the venue layer — the user picked it.
+    //
+    // The profile's favoriteSport used to seed this filter automatically, so a Soccer
+    // favorite silently hid every tennis court, basketball court and untagged pitch on the
+    // map, with no visible control saying why. A filter the user never chose is
+    // indistinguishable from missing data. The favorite still pre-selects inside the venue
+    // sport menu (see venueSportIntent prop) — it just no longer hides anything on its own.
     const stored = readStoredVenueSportIntent();
-    // No favorite + nothing stored → default to all sports so venues load
-    // immediately instead of gating behind a "What do you want to play?" prompt.
     setVenueSportIntent(stored !== undefined ? stored : null);
     setVenueIntentReady(true);
-  }, [favoriteSport, venueIntentReady]);
+  }, [venueIntentReady]);
   const { stats } = useUserStats({ enabled: secondaryReady });
   const navigate = useNavigate();
   const location = useLocation();

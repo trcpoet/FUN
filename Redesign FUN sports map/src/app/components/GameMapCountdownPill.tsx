@@ -35,17 +35,30 @@ function livePillClass(): string {
   return `${urgentPillBase} animate-pulse`;
 }
 
-/** Top-right badge: urgent countdown or LIVE (random-location / non-venue games). */
-export function GameMapCountdownPill({ game }: { game: GameRow }) {
+/**
+ * Urgent countdown or LIVE (random-location / non-venue games).
+ *
+ * `corner` moves it to the pin's top-left, which the composite venue pin needs — its
+ * top-right corner is taken by the cyan note badge.
+ */
+export function GameMapCountdownPill({
+  game,
+  corner = "top-right",
+}: {
+  game: GameRow;
+  corner?: "top-right" | "top-left";
+}) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
+  const pos = corner === "top-left" ? posTopLeft : posTopRight;
+
   if (isGameLive(game, now)) {
     return (
-      <span className={`${posTopRight} ${livePillClass()}`} aria-hidden>
+      <span className={`${pos} ${livePillClass()}`} aria-hidden>
         LIVE
       </span>
     );
@@ -53,7 +66,7 @@ export function GameMapCountdownPill({ game }: { game: GameRow }) {
   const rem = getCountdownRemainingMs(game, now);
   if (rem == null) return null;
   return (
-    <span className={`${posTopRight} ${countdownPillClass(rem)}`} aria-hidden>
+    <span className={`${pos} ${countdownPillClass(rem)}`} aria-hidden>
       {formatUrgentCountdown(rem)}
     </span>
   );

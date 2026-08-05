@@ -3,7 +3,7 @@
  * leisure=pitch, leisure=sports_centre; optional sport=* filter for smaller Overpass payloads.
  */
 
-import { expectedOsmTokensForDisplaySports } from "../../lib/osmSportTags";
+import { expectedOsmTokensForDisplaySports, venueMatchesSelectedSports } from "../../lib/osmSportTags";
 import { supabase } from "../../lib/supabase";
 import type { OsmSportsVenueRow } from "../../lib/supabase";
 import { OSM_VENUE_MAP_SELECT } from "../../lib/osmVenueColumns";
@@ -20,6 +20,18 @@ export type VenueFetchResult = {
   error?: string;
 };
 
+/**
+ * Result of a venue read, keeping "nothing here" and "could not find out" apart.
+ *
+ * These used to both be `null`, which is precisely how a venue could silently stop
+ * rendering: a failed read looked exactly like an empty neighbourhood, so nothing
+ * retried, nothing logged, and the basemap kept drawing the pitch regardless.
+ */
+export type VenueDbOutcome =
+  | { status: "ok"; geojson: SportsVenueGeoJSON }
+  | { status: "empty" }
+  | { status: "unavailable"; error: string };
+
 const EMPTY_GEOJSON: SportsVenueGeoJSON = { type: "FeatureCollection", features: [] };
 
 /** Auto-cache endpoint: fetches from Overpass server-side and persists to DB. Returns GeoJSON directly. */
@@ -32,36 +44,27 @@ const MAX_MEMORY_ENTRIES = 10;
 /** Max entries persisted in sessionStorage (smaller — quota). */
 const SESSION_LIMIT = 4;
 const SESSION_STORAGE_KEY = "fun.sportsVenues.cache.v2";
-/** Set when `osm_sports_venues` is missing from PostgREST (migration not applied); avoids repeated 404s. */
-const SESSION_SKIP_DB_KEY = "fun.sportsVenues.skipOsmDb";
 
-let venuesDbReadDisabled =
-  typeof sessionStorage !== "undefined"
-    ? (() => {
-        try {
-          return sessionStorage.getItem(SESSION_SKIP_DB_KEY) === "1";
-        } catch {
-          return false;
-        }
-      })()
-    : false;
+/**
+ * How long to stop querying after PostgREST says `osm_sports_venues` is missing.
+ *
+ * This used to latch for the entire tab session (and persist to sessionStorage), so a
+ * single blip — a schema-cache reload, a migration mid-deploy — left the venue layer
+ * dead until the user reopened the tab, with no way to tell. A short cooldown still
+ * avoids hammering a genuinely absent table, but always recovers on its own.
+ */
+const DB_SKIP_COOLDOWN_MS = 60_000;
 
-function persistVenuesDbSkip() {
-  try {
-    sessionStorage.setItem(SESSION_SKIP_DB_KEY, "1");
-  } catch {
-    /* quota / private mode */
-  }
+/** Timestamp of the last "table is missing" response; 0 = never. */
+let venuesDbSkipUntil = 0;
+
+function venuesDbReadSkipped(): boolean {
+  return Date.now() < venuesDbSkipUntil;
 }
 
 /** Call after you create `public.osm_sports_venues` in Supabase so the app retries reading venues from the DB. */
 export function clearSportsVenuesDbSkip(): void {
-  venuesDbReadDisabled = false;
-  try {
-    sessionStorage.removeItem(SESSION_SKIP_DB_KEY);
-  } catch {
-    /* ignore */
-  }
+  venuesDbSkipUntil = 0;
 }
 
 function isMissingVenuesTableError(error: { code?: string; message?: string; details?: string } | null): boolean {
@@ -235,20 +238,31 @@ async function fetchOverpassNetwork(
 }
 
 /**
- * Read pre-synced venues from Supabase (fast). Returns null if unavailable or empty.
- * sportFilter mirrors Overpass behavior: sports_centres always pass; pitches filtered by sport.
+ * Read pre-synced venues from Supabase (fast).
+ *
+ * Distinguishes "no venues in this bbox" (`empty`) from "the read failed" (`unavailable`)
+ * so callers can retry the right one — only `unavailable` deserves a network fallback.
+ *
+ * Sport filtering goes through the shared `venueMatchesSelectedSports` predicate, the
+ * same one the render path uses. It used to have a second, subtly different copy right
+ * here (split on `;` only, no token normalization, bare pitches always dropped), so a
+ * venue could pass one filter and fail the other depending on which layer you asked.
  */
 export async function fetchSportsVenuesFromDb(
   bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number },
   options?: { signal?: AbortSignal; sportFilter?: string[] }
-): Promise<SportsVenueGeoJSON | null> {
-  if (!supabase || venuesDbReadDisabled) return null;
+): Promise<VenueDbOutcome> {
+  if (!supabase) return { status: "unavailable", error: "Supabase client not configured" };
+  if (venuesDbReadSkipped()) return { status: "unavailable", error: "Venue table unavailable" };
   throwIfAborted(options?.signal);
   const { minLat, minLng, maxLat, maxLng } = bbox;
 
   let query = supabase
     .from("osm_sports_venues")
     .select(OSM_VENUE_MAP_SELECT)
+    // Stable ordering: without it the 8000-row cap would truncate an arbitrary,
+    // shifting subset — venues would appear and vanish as rows were re-written.
+    .order("id", { ascending: true })
     .gte("lat", minLat)
     .lte("lat", maxLat)
     .gte("lng", minLng)
@@ -263,28 +277,24 @@ export async function fetchSportsVenuesFromDb(
   throwIfAborted(options?.signal);
   if (error) {
     if (isMissingVenuesTableError(error)) {
-      venuesDbReadDisabled = true;
-      persistVenuesDbSkip();
+      venuesDbSkipUntil = Date.now() + DB_SKIP_COOLDOWN_MS;
     }
-    return null;
+    const message = error.message ?? "Venue read failed";
+    // This branch used to be completely dark — an unreadable table looked identical
+    // to an empty neighbourhood.
+    console.warn("[FUN] venue DB read failed:", error.code ?? "", message);
+    return { status: "unavailable", error: message };
   }
-  if (!data?.length) return null;
+  if (!data?.length) return { status: "empty" };
 
-  const sportTokens = options?.sportFilter?.length
-    ? [...expectedOsmTokensForDisplaySports(options.sportFilter)].map((t) => t.toLowerCase())
-    : null;
+  const sportFilter = options?.sportFilter ?? [];
 
   const features: SportsVenueFeature[] = [];
   for (const row of data) {
     throwIfAborted(options?.signal);
     // Via unknown: the client is untyped, so PostgREST hands back a loose row shape.
     const typed = row as unknown as OsmSportsVenueRow;
-    const leisure = typed.leisure ?? "";
-    const sport = typed.sport ?? "";
-    if (sportTokens && leisure === "pitch") {
-      const rowSports = sport.toLowerCase().split(";").map((s) => s.trim());
-      if (!sportTokens.some((t) => rowSports.includes(t))) continue;
-    }
+    if (!venueMatchesSelectedSports(typed.sport, sportFilter, typed.leisure)) continue;
     features.push({
       type: "Feature",
       geometry: { type: "Point", coordinates: [typed.lng, typed.lat] },
@@ -292,7 +302,9 @@ export async function fetchSportsVenuesFromDb(
     });
   }
 
-  return features.length ? { type: "FeatureCollection", features } : null;
+  // Rows existed but the filter removed them all — that is an empty *result*, not a
+  // broken database, and must not trigger a full Overpass re-import.
+  return features.length ? { status: "ok", geojson: { type: "FeatureCollection", features } } : { status: "empty" };
 }
 
 /**
@@ -335,10 +347,15 @@ export async function fetchSportsVenuesFromOverpass(
       if (error && geojson.features.length === 0) {
         throw new Error(error);
       }
-      const entry: CacheEntry = { geojson, ts: Date.now() };
-      memoryCache.set(cacheKey, entry);
-      pruneMemory();
-      persistSession();
+      // Only cache real results. Caching an empty collection used to pin a bbox to
+      // "no venues" for 12 minutes across reloads (sessionStorage), so a single bad
+      // response outlived the condition that caused it.
+      if (geojson.features.length > 0) {
+        const entry: CacheEntry = { geojson, ts: Date.now() };
+        memoryCache.set(cacheKey, entry);
+        pruneMemory();
+        persistSession();
+      }
       return geojson;
     } catch (e) {
       if (e && typeof e === "object" && "name" in e && (e as { name: string }).name === "AbortError") {
@@ -364,16 +381,16 @@ export async function fetchSportsVenuesFromOverpass(
 }
 
 /**
- * Prefer Supabase (`osm_sports_venues`); if empty, use Overpass + client cache.
+ * Prefer Supabase (`osm_sports_venues`); fall back to Overpass only when the DB read
+ * actually failed. A genuinely empty area is an answer, not a reason to re-import.
  */
 export async function fetchSportsVenues(
   bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number },
   options?: { signal?: AbortSignal; sportFilter?: string[] }
 ): Promise<VenueFetchResult> {
   const fromDb = await fetchSportsVenuesFromDb(bbox, options);
-  if (fromDb && fromDb.features.length > 0) {
-    return { geojson: fromDb, source: "db" };
-  }
+  if (fromDb.status === "ok") return { geojson: fromDb.geojson, source: "db" };
+  if (fromDb.status === "empty") return { geojson: EMPTY_GEOJSON, source: "db" };
   return fetchSportsVenuesFromOverpass(bbox, options);
 }
 
@@ -399,9 +416,8 @@ export async function fetchSportsVenuesWithProgress(
 ): Promise<VenueFetchResult> {
   const fullBbox = bboxFromCenterRadius(centerLat, centerLng, radiusKm);
   const fromDb = await fetchSportsVenuesFromDb(fullBbox, options);
-  if (fromDb && fromDb.features.length > 0) {
-    return { geojson: fromDb, source: "db" };
-  }
+  if (fromDb.status === "ok") return { geojson: fromDb.geojson, source: "db" };
+  if (fromDb.status === "empty") return { geojson: EMPTY_GEOJSON, source: "db" };
 
   if (radiusKm <= PROGRESSIVE_NEAR_RADIUS_KM) {
     return fetchSportsVenuesFromOverpass(fullBbox, options);
