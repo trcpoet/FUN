@@ -34,10 +34,21 @@ export function getCountdownUrgency(totalMs: number): CountdownUrgency {
   return "calm";
 }
 
-/** Resolved end-of-game timestamp (ms epoch). Prefers DB-provided `ends_at`, falls
- * back to `starts_at + duration_minutes`, and finally to the legacy default window
- * so existing rows without duration still expire correctly. */
+/** Resolved end-of-game timestamp (ms epoch). Prefers the moment a host actually ended the
+ * game, then DB-provided `ends_at`, falls back to `starts_at + duration_minutes`, and finally
+ * to the legacy default window so existing rows without duration still expire correctly.
+ *
+ * Untimed games that were never started resolve to `null` — they have no end to speak of, and
+ * the map's `MAP_UNTIMED_TTL_MS` is what eventually retires them. Do not invent an end from
+ * `created_at`: posting a pickup game is not the same as starting one. */
 export function getGameEndsAtMs(game: GameRow): number | null {
+  // A host who pressed "End game" set this; it beats any scheduled window.
+  const explicitEnd = game.ended_at?.trim();
+  if (explicitEnd) {
+    const t = new Date(explicitEnd).getTime();
+    if (!Number.isNaN(t)) return t;
+  }
+
   const dbEnd = game.ends_at?.trim();
   if (dbEnd) {
     const t = new Date(dbEnd).getTime();
@@ -259,15 +270,27 @@ export function formatLiveStripCardSummary(game: GameRow, nowMs: number): string
   return spots;
 }
 
+/**
+ * An untimed pickup game (no `starts_at`, never started) that has outlived its map TTL.
+ *
+ * These never satisfy `isGameEnded` — nothing about them ever "finishes" — so without this they
+ * would linger in every list forever. Timed games always answer `false`; ask `isGameEnded` about
+ * those instead.
+ */
+export function isUntimedGameExpired(game: GameRow, nowMs: number): boolean {
+  if (game.starts_at?.trim()) return false;
+  if (game.status === "live" || game.live_started_at?.trim()) return false;
+  const created = new Date(game.created_at).getTime();
+  if (Number.isNaN(created)) return false;
+  return nowMs - created > MAP_UNTIMED_TTL_MS;
+}
+
 /** Map + carousels: scheduled games plus untimed games within their TTL. Ended/completed/cancelled excluded. */
 export function filterGamesVisibleOnMap(games: GameRow[], nowMs: number): GameRow[] {
   return games.filter((g) => {
     if (g.status === "completed" || g.status === "cancelled") return false;
     if (isGameEnded(g, nowMs)) return false;
-    if (g.starts_at?.trim()) return true;
-    // Untimed pickup games: show for MAP_UNTIMED_TTL_MS after creation
-    const created = new Date(g.created_at).getTime();
-    return nowMs - created <= MAP_UNTIMED_TTL_MS;
+    return !isUntimedGameExpired(g, nowMs);
   });
 }
 

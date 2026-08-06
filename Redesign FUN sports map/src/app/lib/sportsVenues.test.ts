@@ -183,3 +183,65 @@ describe("missing-table skip latch", () => {
     expect(stub.from.mock.calls.length).toBeGreaterThan(callsAfterFirst);
   });
 });
+
+/**
+ * The longitude span of a fixed distance depends on latitude. This used to be computed with a
+ * hardcoded cos(40°), so every request made anywhere else was mis-sized — harmlessly wide near
+ * the equator, but dangerously narrow toward the poles, where venues inside the radius were
+ * simply never fetched.
+ */
+describe("bboxFromCenterRadius", () => {
+  const KM_PER_DEG_LAT = 111;
+
+  /** Half-width of the box in km at the given latitude, i.e. what the caller asked for. */
+  function lngHalfWidthKm(
+    box: { minLng: number; maxLng: number },
+    lat: number
+  ): number {
+    const degrees = (box.maxLng - box.minLng) / 2;
+    return degrees * KM_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180);
+  }
+
+  it("covers the requested radius at the latitude it was asked about", async () => {
+    const { bboxFromCenterRadius } = await loadModule(makeSupabaseStub({ data: [], error: null }));
+    for (const lat of [0, 32.7, 40, 51.5, 60]) {
+      const box = bboxFromCenterRadius(lat, -97.1, 10);
+      expect(lngHalfWidthKm(box, lat)).toBeCloseTo(10, 6);
+      expect((box.maxLat - box.minLat) / 2).toBeCloseTo(10 / KM_PER_DEG_LAT, 9);
+    }
+  });
+
+  it("no longer under-fetches at high latitude (the actual bug)", async () => {
+    const { bboxFromCenterRadius } = await loadModule(makeSupabaseStub({ data: [], error: null }));
+    // The old constant produced this span regardless of where you were.
+    const oldHalfSpanDeg = 10 / (KM_PER_DEG_LAT * Math.cos((40 * Math.PI) / 180));
+    const box = bboxFromCenterRadius(60, 0, 10);
+    const halfSpanDeg = (box.maxLng - box.minLng) / 2;
+    // At 60° the true span is much wider than the 40° constant allowed for.
+    expect(halfSpanDeg).toBeGreaterThan(oldHalfSpanDeg * 1.3);
+  });
+
+  it("still matches the old behaviour at the latitude that was hardcoded", async () => {
+    const { bboxFromCenterRadius } = await loadModule(makeSupabaseStub({ data: [], error: null }));
+    const oldHalfSpanDeg = 10 / (KM_PER_DEG_LAT * Math.cos((40 * Math.PI) / 180));
+    const box = bboxFromCenterRadius(40, 0, 10);
+    expect((box.maxLng - box.minLng) / 2).toBeCloseTo(oldHalfSpanDeg, 9);
+  });
+
+  it("treats north and south symmetrically", async () => {
+    const { bboxFromCenterRadius } = await loadModule(makeSupabaseStub({ data: [], error: null }));
+    const north = bboxFromCenterRadius(45, 10, 25);
+    const south = bboxFromCenterRadius(-45, 10, 25);
+    expect(north.maxLng - north.minLng).toBeCloseTo(south.maxLng - south.minLng, 9);
+  });
+
+  it("stays finite near the pole instead of dividing by ~zero", async () => {
+    const { bboxFromCenterRadius } = await loadModule(makeSupabaseStub({ data: [], error: null }));
+    const box = bboxFromCenterRadius(89.9, 0, 50);
+    expect(Number.isFinite(box.minLng)).toBe(true);
+    expect(Number.isFinite(box.maxLng)).toBe(true);
+    expect(box.minLng).toBeGreaterThanOrEqual(-180);
+    expect(box.maxLng).toBeLessThanOrEqual(180);
+    expect(box.maxLat).toBeLessThanOrEqual(90);
+  });
+});

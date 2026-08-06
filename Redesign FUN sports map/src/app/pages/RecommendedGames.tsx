@@ -24,7 +24,22 @@ function spotsLabel(g: GameRow): string {
   return `${going} going · full`;
 }
 
-function GameRowButton({ g, ended, onOpen }: { g: GameRow; ended: boolean; onOpen: () => void }) {
+/**
+ * `live` comes from the bucket the row is rendered in rather than being re-derived here, so the
+ * badge can never contradict the section heading above it — and a row in "Upcoming" cannot show
+ * a Live badge no matter how the clock moves mid-render.
+ */
+function GameRowButton({
+  g,
+  ended,
+  live = false,
+  onOpen,
+}: {
+  g: GameRow;
+  ended: boolean;
+  live?: boolean;
+  onOpen: () => void;
+}) {
   return (
     <button
       type="button"
@@ -53,7 +68,7 @@ function GameRowButton({ g, ended, onOpen }: { g: GameRow; ended: boolean; onOpe
             <span className="inline-flex shrink-0 items-center rounded-full bg-slate-500/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-400">
               Ended
             </span>
-          ) : g.status === "live" ? (
+          ) : live ? (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-emerald-400">
               <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
             </span>
@@ -125,6 +140,7 @@ export default function RecommendedGames() {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [openLive, setOpenLive] = useState(true);
+  const [openUpcoming, setOpenUpcoming] = useState(true);
   const [openEnded, setOpenEnded] = useState(false);
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
 
@@ -161,7 +177,7 @@ export default function RecommendedGames() {
     };
   }, [coords?.lat, coords?.lng]);
 
-  const { live, ended } = useMemo(
+  const { live, upcoming, ended } = useMemo(
     () => splitGamesByLiveness(games, { primarySports: athleteProfile.primarySports ?? [] }),
     [games, athleteProfile.primarySports],
   );
@@ -240,6 +256,27 @@ export default function RecommendedGames() {
               ) : (
                 <ul className="grid gap-2">
                   {live.map((g) => (
+                    <li key={g.id}>
+                      <GameRowButton g={g} ended={false} live onOpen={() => openGame(g.id)} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Accordion>
+
+            {/* Scheduled but not yet started. These used to be filed under "Live", which is how
+                a game starting next week ended up wearing a live badge. */}
+            <Accordion
+              title="Upcoming"
+              count={upcoming.length}
+              open={openUpcoming}
+              onToggle={() => setOpenUpcoming((o) => !o)}
+            >
+              {upcoming.length === 0 ? (
+                <p className="px-2 py-3 text-xs text-slate-500">Nothing scheduled nearby yet.</p>
+              ) : (
+                <ul className="grid gap-2">
+                  {upcoming.map((g) => (
                     <li key={g.id}>
                       <GameRowButton g={g} ended={false} onOpen={() => openGame(g.id)} />
                     </li>

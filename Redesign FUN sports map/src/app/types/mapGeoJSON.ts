@@ -6,7 +6,7 @@
 
 import type { Feature, FeatureCollection, Point } from "geojson";
 import type { GameRow } from "../../lib/supabase";
-import { isVenueGame } from "../../lib/mapGameTimer";
+import { isGameEnded, isGameLive, isVenueGame } from "../../lib/mapGameTimer";
 import { colocatedGroupId, splitColocated } from "../lib/colocateGames";
 import { getGameMapboxIconId, getSportIconEmoji, resolveSportMapboxSuffix } from "../map/gameSportIcons";
 
@@ -47,22 +47,35 @@ export type UserMarkerFeatureProperties = {
 
 export type UserMarkerFeature = Feature<Point, UserMarkerFeatureProperties>;
 
-/** Derive status from starts_at: in past => live, within 1h => soon, else scheduled */
-export function getGameStatus(startsAt: string | null): GameStatus {
-  if (!startsAt) return "scheduled";
-  const start = new Date(startsAt).getTime();
-  const now = Date.now();
-  const oneHour = 60 * 60 * 1000;
-  if (start <= now) return "live";
-  if (start - now <= oneHour) return "soon";
-  return "scheduled";
+const SOON_MS = 60 * 60 * 1000;
+
+/**
+ * Ring colour for a game pin: live now, starting within the hour, or later.
+ *
+ * Delegates the "is it live" question to the canonical predicate rather than re-deriving it
+ * from `starts_at` alone. The old version answered "live" for any game whose start had passed,
+ * which meant a finished game still wore a red ring, and it missed host-started games whose
+ * scheduled start was still in the future — so both callers had to special-case
+ * `status === "live"` themselves before calling it.
+ */
+export function getGameStatus(game: GameRow, nowMs: number = Date.now()): GameStatus {
+  if (isGameLive(game, nowMs)) return "live";
+  if (isGameEnded(game, nowMs)) return "scheduled";
+  if (!game.starts_at?.trim()) return "scheduled";
+  const start = new Date(game.starts_at).getTime();
+  if (Number.isNaN(start)) return "scheduled";
+  return start - nowMs <= SOON_MS ? "soon" : "scheduled";
 }
 
 /** Map GameRow to GeoJSON feature (venue / non-colocated games only). Uses `participant_count` from `get_games_nearby` when present. */
-export function gameToFeature(game: GameRow, _selectedGameId: string | null): GameFeature {
+export function gameToFeature(
+  game: GameRow,
+  _selectedGameId: string | null,
+  nowMs: number = Date.now()
+): GameFeature {
   const players_filled = game.participant_count ?? 0;
   const players_total = game.spots_needed;
-  const status = game.status === "live" ? "live" : getGameStatus(game.starts_at);
+  const status = getGameStatus(game, nowMs);
   const players_label = `${players_filled}/${players_total}`;
   const map_label = players_label;
   return {
@@ -87,7 +100,7 @@ export function gameToFeature(game: GameRow, _selectedGameId: string | null): Ga
   };
 }
 
-function colocatedGroupToFeature(games: GameRow[]): GameFeature {
+function colocatedGroupToFeature(games: GameRow[], nowMs: number = Date.now()): GameFeature {
   const g0 = games[0]!;
   const id = colocatedGroupId(games);
   const totalSpots = games.reduce((s, g) => s + (g.spots_needed ?? 0), 0);
@@ -106,7 +119,8 @@ function colocatedGroupToFeature(games: GameRow[]): GameFeature {
       marker_kind: "colocated",
       sport: "multi",
       sport_map_icon: getGameMapboxIconId(g0.sport),
-      status: games.some((g) => g.status === "live") ? "live" : getGameStatus(g0.starts_at),
+      // A stack reads as live if anything in it is; otherwise take the most urgent member.
+      status: games.some((g) => isGameLive(g, nowMs)) ? "live" : getGameStatus(g0, nowMs),
       players_filled: filled,
       players_total: totalSpots,
       players_label,
@@ -133,15 +147,18 @@ export function gamesToGeoJSON(
   const { singles, groups } = splitColocated(games);
   const venueSingles = singles.filter(isVenueGame);
   const absorbed = (id: string) => absorbedGameIds?.has(id) ?? false;
+  // One clock for the whole collection, so two pins built in the same pass can't disagree
+  // about whether the same instant counts as live.
+  const nowMs = Date.now();
 
   const features: GameFeature[] = [
     ...venueSingles.map((g) => {
-      const f = gameToFeature(g, selectedGameId);
+      const f = gameToFeature(g, selectedGameId, nowMs);
       if (absorbed(g.id)) f.properties.marker_kind = "at_venue";
       return f;
     }),
     ...groups.map((grp) => {
-      const f = colocatedGroupToFeature(grp);
+      const f = colocatedGroupToFeature(grp, nowMs);
       // Colocated games share one coordinate, so they are absorbed all-or-nothing.
       if (grp.every((g) => absorbed(g.id))) f.properties.marker_kind = "at_venue";
       return f;

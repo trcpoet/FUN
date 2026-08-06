@@ -166,22 +166,39 @@ function persistSession() {
   }
 }
 
-const KM_TO_DEG_LAT = 1 / 111;
-const KM_TO_DEG_LNG = 1 / (111 * Math.cos((Math.PI * 40) / 180));
+const KM_PER_DEG_LAT = 111;
 
-/** Compute bbox for a circle of given radius (km) around center. */
+/**
+ * Smallest cosine we will divide by, ~cos(84°).
+ *
+ * Meridians converge at the poles, so a fixed distance spans ever more longitude the further
+ * north or south you go — and past ~84° the span exceeds the whole globe. Clamping here keeps
+ * the box finite; `bboxFromCenterRadius` separately caps the result at ±180°.
+ */
+const MIN_LAT_COSINE = Math.cos((84 * Math.PI) / 180);
+
+/**
+ * Compute bbox for a circle of given radius (km) around center.
+ *
+ * Longitude degrees shrink as you move away from the equator, so the conversion has to use the
+ * *actual* latitude. This previously hardcoded cos(40°), which silently mis-sized every request
+ * made anywhere else: at Dallas (~32.7°) the box came out ~10% too wide (merely wasteful), but
+ * at 60° it was ~35% too narrow — venues inside the radius were never fetched, and because the
+ * basemap draws pitches from its own tiles, the gap showed up as "pitch visible, no icon".
+ */
 export function bboxFromCenterRadius(
   centerLat: number,
   centerLng: number,
   radiusKm: number
 ): { minLat: number; minLng: number; maxLat: number; maxLng: number } {
-  const dLat = radiusKm * KM_TO_DEG_LAT;
-  const dLng = radiusKm * KM_TO_DEG_LNG;
+  const dLat = radiusKm / KM_PER_DEG_LAT;
+  const cosLat = Math.max(Math.abs(Math.cos((centerLat * Math.PI) / 180)), MIN_LAT_COSINE);
+  const dLng = radiusKm / (KM_PER_DEG_LAT * cosLat);
   return {
-    minLat: centerLat - dLat,
-    maxLat: centerLat + dLat,
-    minLng: centerLng - dLng,
-    maxLng: centerLng + dLng,
+    minLat: Math.max(-90, centerLat - dLat),
+    maxLat: Math.min(90, centerLat + dLat),
+    minLng: Math.max(-180, centerLng - dLng),
+    maxLng: Math.min(180, centerLng + dLng),
   };
 }
 

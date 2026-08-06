@@ -1,6 +1,12 @@
 import type { GameRow } from "../../lib/supabase";
 import type { SportsVenueGeoJSON, SportsVenueProperties } from "./sportsVenueTypes";
 import { distanceKmBetween } from "../map/mapBounds";
+import {
+  getGameEndsAtMs as gameEndTimeMs,
+  isGameEnded,
+  isGameLive as isLiveGame,
+  isUntimedGameExpired,
+} from "../../lib/mapGameTimer";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -24,41 +30,19 @@ function normSport(s: string | null | undefined): string {
   return (s ?? "").trim().toLowerCase();
 }
 
-const ENDED_STATUSES = new Set(["completed", "cancelled"]);
-const DEFAULT_DURATION_MIN = 90;
-
-function parseTime(v: string | null | undefined): number | null {
-  if (!v) return null;
-  const t = Date.parse(v);
-  return Number.isNaN(t) ? null : t;
-}
-
 /**
- * Best-effort end timestamp (ms) for a game, tolerant of legacy rows created
- * before `ended_at`/`ends_at` existed: falls back to start + duration, and
- * finally to created_at + duration (assume it began when created).
+ * Liveness lives in one place: `src/lib/mapGameTimer.ts`.
+ *
+ * This module used to carry its own `gameEndTimeMs` / `isGameEnded` / `isLiveGame`, and they
+ * quietly disagreed with the canonical ones in two ways. It short-circuited `status === 'live'`
+ * to not-ended, so a game whose window had elapsed stayed "live" until the cron caught it; and
+ * it invented an end of `created_at + duration` for untimed games, which treats posting a
+ * pickup game as starting it. Worst of all `isLiveGame` was just `!isGameEnded`, so a game
+ * starting next week counted as live — which is why the "Live" accordion listed it.
+ *
+ * Re-exported rather than deleted so existing callers keep working.
  */
-export function gameEndTimeMs(g: GameRow): number | null {
-  const durMs = (g.duration_minutes ?? DEFAULT_DURATION_MIN) * 60_000;
-  return (
-    parseTime(g.ended_at) ??
-    parseTime(g.ends_at) ??
-    (parseTime(g.starts_at) != null ? (parseTime(g.starts_at) as number) + durMs : null) ??
-    (parseTime(g.created_at) != null ? (parseTime(g.created_at) as number) + durMs : null)
-  );
-}
-
-/** A game is "ended" if cancelled/completed, or its end time has passed. */
-export function isGameEnded(g: GameRow, nowMs: number = Date.now()): boolean {
-  if (g.status && ENDED_STATUSES.has(g.status)) return true;
-  if (g.status === "live") return false; // explicitly in progress right now
-  const end = gameEndTimeMs(g);
-  return end != null && end < nowMs;
-}
-
-export function isLiveGame(g: GameRow, nowMs: number = Date.now()): boolean {
-  return !isGameEnded(g, nowMs);
-}
+export { gameEndTimeMs, isGameEnded, isLiveGame };
 
 /** Rank games best-first: sport overlap, nearest, fullest, newest. No filtering. */
 export function rankGameRows(
@@ -80,21 +64,50 @@ export function rankGameRows(
 }
 
 /**
- * Split games into live (joinable now / upcoming) and ended (over), each
- * ordered for display: live best-first, ended most-recently-ended first.
+ * Split games into what is happening now, what is still to come, and what is over.
+ *
+ * "Live" previously meant merely "not ended", which swept in everything scheduled for next
+ * week. Those games are real and worth showing — they just aren't live — so they get their own
+ * bucket rather than being hidden or mislabelled.
+ *
+ * Untimed pickup games past the map's TTL are dropped outright: nothing about them ever ends,
+ * so they would otherwise sit in "Upcoming" indefinitely.
  */
 export function splitGamesByLiveness(
   games: GameRow[],
   opts: { primarySports?: string[] } = {},
-): { live: GameRow[]; ended: GameRow[] } {
+): { live: GameRow[]; upcoming: GameRow[]; ended: GameRow[] } {
   const now = Date.now();
   const live: GameRow[] = [];
+  const upcoming: GameRow[] = [];
   const ended: GameRow[] = [];
-  for (const g of games) (isGameEnded(g, now) ? ended : live).push(g);
+
+  for (const g of games) {
+    if (isGameEnded(g, now)) {
+      ended.push(g);
+    } else if (isUntimedGameExpired(g, now)) {
+      continue;
+    } else if (isLiveGame(g, now)) {
+      live.push(g);
+    } else {
+      upcoming.push(g);
+    }
+  }
+
   return {
     live: rankGameRows(live, opts),
+    // Soonest first — the next thing you could turn up to is the useful one.
+    upcoming: upcoming
+      .slice()
+      .sort((a, b) => (startTimeMs(a) ?? Infinity) - (startTimeMs(b) ?? Infinity)),
     ended: ended.slice().sort((a, b) => (gameEndTimeMs(b) ?? 0) - (gameEndTimeMs(a) ?? 0)),
   };
+}
+
+function startTimeMs(g: GameRow): number | null {
+  if (!g.starts_at?.trim()) return null;
+  const t = Date.parse(g.starts_at);
+  return Number.isNaN(t) ? null : t;
 }
 
 function optStr(v: string | null | undefined): string | null {
