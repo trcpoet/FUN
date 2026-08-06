@@ -8,6 +8,7 @@ import { glassMessengerPanel } from "../styles/glass";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
 import type { NavigateToOptions } from "../../lib/directions";
 import { directionsHref } from "../lib/venueInfoHelpers";
+import { GoogleMapsLinkButton } from "./GoogleMapsLinkButton";
 
 const SPORT_GRADIENT: Record<string, string> = {
   soccer:     'from-emerald-600 to-green-800',
@@ -210,14 +211,7 @@ export function GameEventPopup({
               </a>
             )}
             {onNavigateTo && viewerCoords ? (
-              <a
-                href={mapsHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 text-[11px] font-medium text-white/60 hover:text-white/90"
-              >
-                Maps
-              </a>
+              <GoogleMapsLinkButton href={mapsHref} />
             ) : null}
           </div>
         ) : null}

@@ -47,6 +47,7 @@ import { VenuePhotoUploadPanel } from "./venue/VenuePhotoUploadPanel";
 import { VenueFactGrid } from "./venue/VenueFactGrid";
 import { VenueReviewsSection } from "./venue/VenueReviewsSection";
 import { VenueCommentsSection } from "./venue/VenueCommentsSection";
+import { GoogleMapsLinkButton } from "./GoogleMapsLinkButton";
 
 type View = "actions" | "details";
 type Tab = "games" | "notes";
@@ -479,7 +480,6 @@ export function VenueInfoPopup({
   // One press scope per footer action — each animates its own element.
   const showRoutePress = usePressAnimation();
   const directionsPress = usePressAnimation();
-  const mapsPress = usePressAnimation();
   const createGamePress = usePressAnimation();
 
   const handleShowRoute = () => {
@@ -886,17 +886,7 @@ export function VenueInfoPopup({
                     </motion.a>
                   )}
                   {onNavigateTo && viewerCoords ? (
-                    <motion.a
-                      {...mapsPress}
-                      href={mapsHref}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      initial={{ scale: 1 }}
-                      className="inline-flex shrink-0 items-center justify-center rounded-xl border border-white/10 px-3 py-2.5 text-xs font-medium text-slate-400 transition-colors hover:text-white hover:bg-white/5"
-                      title="Open in Google Maps"
-                    >
-                      Maps
-                    </motion.a>
+                    <GoogleMapsLinkButton href={mapsHref} />
                   ) : null}
                   {onCreateGame ? (
                     <motion.button
