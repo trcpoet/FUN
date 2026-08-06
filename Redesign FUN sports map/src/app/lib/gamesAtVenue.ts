@@ -17,20 +17,10 @@ export function haversineDistanceMeters(
   return earthRadius * c;
 }
 
-/** Open games near a point (same default radius as MapboxMap venue popup). */
-export function openGamesNearPoint(
-  games: GameRow[],
-  centerLat: number,
-  centerLng: number,
-  radiusMeters: number
-): GameRow[] {
-  return games.filter((g) => {
-    const isOpen = g.status === "open" || !g.status;
-    if (!isOpen) return false;
-    const d = haversineDistanceMeters(centerLat, centerLng, g.lat, g.lng);
-    return d <= radiusMeters;
-  });
-}
+// `openGamesNearPoint` lived here. It filtered on `status === "open" || !status`, which meant a
+// game vanished from a venue's list the instant its host pressed Start — the exact opposite of
+// what "active games" should show. Use `activeGamesNearPoint` in `venueActivity.ts` instead: it
+// asks whether the game has *ended*, which is the question a venue card is actually asking.
 
 /** Group games by normalized sport label for section headers. */
 export function groupGamesBySport(games: GameRow[]): Map<string, GameRow[]> {

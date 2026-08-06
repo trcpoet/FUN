@@ -27,8 +27,14 @@ export type GameFeatureProperties = {
   sport_emoji: string; // UI / parity with map glyph
   visibility?: "public" | "private";
   title?: string;
-  /** Same-spot games: hidden on symbol layer; shown as HTML cluster pin instead. */
-  marker_kind?: "colocated";
+  /**
+   * Why this game is hidden on the symbol layer:
+   *  · `colocated` — same-spot games, shown as one HTML cluster pin instead.
+   *  · `at_venue`  — absorbed by a venue's composite pin (its icon would otherwise cover the
+   *    venue and eat its click).
+   * Either way the feature stays in the source so low-zoom game clusters still count it.
+   */
+  marker_kind?: "colocated" | "at_venue";
 };
 
 export type GameFeature = Feature<Point, GameFeatureProperties>;
@@ -114,13 +120,32 @@ function colocatedGroupToFeature(games: GameRow[]): GameFeature {
 /**
  * GeoJSON for Mapbox GL: venue-only singles + colocated cluster points.
  * Random-location singles (no `location_label`) are rendered as HTML markers with a countdown pill.
+ *
+ * `absorbedGameIds` marks games that sit on top of a venue. They keep their feature — so the
+ * low-zoom cluster bubbles still count them — but get `marker_kind: "at_venue"`, which the
+ * icon and roster layers filter out. Their glyph lives on the venue's composite pin instead.
  */
-export function gamesToGeoJSON(games: GameRow[], selectedGameId: string | null): GamesGeoJSON {
+export function gamesToGeoJSON(
+  games: GameRow[],
+  selectedGameId: string | null,
+  absorbedGameIds?: ReadonlySet<string>
+): GamesGeoJSON {
   const { singles, groups } = splitColocated(games);
   const venueSingles = singles.filter(isVenueGame);
+  const absorbed = (id: string) => absorbedGameIds?.has(id) ?? false;
+
   const features: GameFeature[] = [
-    ...venueSingles.map((g) => gameToFeature(g, selectedGameId)),
-    ...groups.map((grp) => colocatedGroupToFeature(grp)),
+    ...venueSingles.map((g) => {
+      const f = gameToFeature(g, selectedGameId);
+      if (absorbed(g.id)) f.properties.marker_kind = "at_venue";
+      return f;
+    }),
+    ...groups.map((grp) => {
+      const f = colocatedGroupToFeature(grp);
+      // Colocated games share one coordinate, so they are absorbed all-or-nothing.
+      if (grp.every((g) => absorbed(g.id))) f.properties.marker_kind = "at_venue";
+      return f;
+    }),
   ];
   return {
     type: "FeatureCollection",

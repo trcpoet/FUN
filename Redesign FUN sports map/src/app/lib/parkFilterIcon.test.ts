@@ -56,11 +56,11 @@ describe("enrichVenueGeoJSON — a filtered park shows its contained sport's ico
     expect(out.features.find((f) => f.properties.id === "park1")?.properties.sport_map_icon).toBe(
       getGameMapboxIconId("tennis"),
     );
-    // All three survive: tennis pitch matches by sport, softball pitch matches by
-    // leisure (Tennis osmLeisure=['pitch'] keeps every pitch), park kept by fix #2.
-    // The park still resolves to tennis because only the tennis pitch matches the
-    // filter *suffix* — the softball pitch doesn't seed the park icon.
-    expect(out.features.map((f) => f.properties.id).sort()).toEqual(["park1", "s1", "t1"]);
+    // The tennis pitch matches by sport; the park is kept because it declares no sport
+    // (fix #2). The softball pitch is now correctly dropped — it used to survive because
+    // Tennis lists osmLeisure=['pitch'], which matched every pitch of every sport and
+    // made the whole filter a no-op on real data.
+    expect(out.features.map((f) => f.properties.id).sort()).toEqual(["park1", "t1"]);
   });
 
   it("park keeps the stadium icon when filtering by a sport it does NOT contain", () => {

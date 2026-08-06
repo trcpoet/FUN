@@ -150,8 +150,9 @@ export default function PopularVenues() {
       maxLng: coords.lng + dLng,
     };
     void fetchSportsVenuesFromDb(bbox)
-      .then((fc) => {
+      .then((outcome) => {
         if (cancelled) return;
+        const fc = outcome.status === "ok" ? outcome.geojson : null;
         const ranked = rankHotPickVenues(fc, { center: coords });
         // No growth after widening the radius => we've exhausted the area.
         if (radiusKm > START_RADIUS_KM && ranked.length <= prevCountRef.current) {
