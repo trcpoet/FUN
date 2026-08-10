@@ -10,7 +10,7 @@
 -- Extension-owned objects (PostGIS, pg_trgm) are intentionally excluded — the
 -- `create extension` statements below bring them back.
 --
--- Generated: 2026-08-10T11:40:38.790Z
+-- Generated: 2026-08-10T11:50:11.404Z
 
 set search_path = public;
 
@@ -2317,6 +2317,9 @@ AS $function$
       greatest(1.0, least(300.0, coalesce(p_map_radius_km, 120.0))) as rkm,
       greatest(1, least(200, coalesce(p_limit, 80))) as lim
   ),
+  viewer as (
+    select p.gender from public.profiles p where p.id = auth.uid()
+  ),
   note_likes as (
     select
       l.note_id,
@@ -2375,9 +2378,17 @@ AS $function$
       0::int as like_count,
       false as liked_by_me
     from public.games g
+    left join public.profiles host on host.id = g.created_by
     where public.haversine_km((select qlat from cfg), (select qlng from cfg), g.lat, g.lng) <= (select rkm from cfg)
       and coalesce(g.status::text, '') not in ('completed','cancelled')
       and (g.ends_at is null or g.ends_at > now())
+      -- Same rule the map and Live enforce. A null viewer gender (guest, or a
+      -- profile that never set one) yields false, so the feed shows no games.
+      and public.can_view_game_for_gender(
+        (select gender from viewer),
+        host.gender,
+        g.requirements->>'matchType'
+      )
   ),
   statuses as (
     select
