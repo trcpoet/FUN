@@ -3,7 +3,9 @@ import type { SportsVenueGeoJSON, SportsVenueProperties } from "./sportsVenueTyp
 import { distanceKmBetween } from "../map/mapBounds";
 import {
   getGameEndsAtMs as gameEndTimeMs,
+  formatLiveStripCardSummary,
   isGameEnded,
+  isGameInLiveWindow,
   isGameLive as isLiveGame,
   isUntimedGameExpired,
 } from "../../lib/mapGameTimer";
@@ -19,11 +21,14 @@ export type HotPickVenue = {
   lng: number;
   distanceKm: number | null;
   surface: string | null;
+  lit: string | null;
   access: string | null;
   openingHours: string | null;
   website: string | null;
   operator: string | null;
   heroImageUrl: string | null;
+  /** Games sitting at this venue. Attached by the caller — the venue cache knows nothing about games. */
+  games: GameRow[];
 };
 
 function normSport(s: string | null | undefined): string {
@@ -142,11 +147,13 @@ export function rankHotPickVenues(
       lng,
       distanceKm,
       surface: optStr(p.surface),
+      lit: optStr(p.lit),
       access: optStr(p.access),
       openingHours: optStr(p.opening_hours),
       website: optStr(p.website),
       operator: optStr(p.operator),
       heroImageUrl: optStr(p.hero_image_url),
+      games: [],
     });
   }
 
@@ -163,4 +170,111 @@ export function formatKm(km: number | null | undefined): string | null {
   if (km == null) return null;
   if (km < 1) return `${Math.round(km * 1000)} m`;
   return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+}
+
+// ---------------------------------------------------------------------------
+// Venue activity — "is anything happening here right now?"
+// ---------------------------------------------------------------------------
+
+/** `live` = a game is in its window. `soon` = one starts inside the live window (3h). */
+export type VenueActivityTier = "live" | "soon" | "none";
+
+export type VenueActivity = {
+  tier: VenueActivityTier;
+  liveCount: number;
+  soonCount: number;
+  /** Every game still standing here, live or not. */
+  upcomingCount: number;
+  /** The game the row should talk about: live first, then the soonest to start. */
+  leadGame: GameRow | null;
+  /** Row copy, identical to the live strip's card so the two never disagree. */
+  headline: string | null;
+  /** Distinct sports with something on, for the row's emoji cluster. */
+  sports: string[];
+};
+
+const NO_ACTIVITY: VenueActivity = {
+  tier: "none",
+  liveCount: 0,
+  soonCount: 0,
+  upcomingCount: 0,
+  leadGame: null,
+  headline: null,
+  sports: [],
+};
+
+function startMs(game: GameRow): number {
+  const t = game.starts_at ? new Date(game.starts_at).getTime() : NaN;
+  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+}
+
+/**
+ * Summarise what is happening at one venue.
+ *
+ * Liveness is delegated to `mapGameTimer` — this decides only how to *present* it. Games that
+ * have finished, and untimed pickup games past their map TTL, are dropped first so a venue
+ * can't claim activity the map has already retired.
+ */
+export function venueActivity(games: GameRow[], nowMs: number): VenueActivity {
+  const standing = games.filter((g) => !isGameEnded(g, nowMs) && !isUntimedGameExpired(g, nowMs));
+  if (standing.length === 0) return NO_ACTIVITY;
+
+  const live = standing.filter((g) => isLiveGame(g, nowMs));
+  const soon = standing.filter((g) => !isLiveGame(g, nowMs) && isGameInLiveWindow(g, nowMs));
+
+  // A live game ending soonest is the most urgent thing to say; otherwise the next to start.
+  const leadGame =
+    [...live].sort((a, b) => (gameEndTimeMs(a) ?? Infinity) - (gameEndTimeMs(b) ?? Infinity))[0] ??
+    [...soon].sort((a, b) => startMs(a) - startMs(b))[0] ??
+    [...standing].sort((a, b) => startMs(a) - startMs(b))[0] ??
+    null;
+
+  const sports: string[] = [];
+  for (const g of standing) {
+    const s = (g.sport ?? "").trim();
+    if (s && !sports.includes(s)) sports.push(s);
+  }
+
+  return {
+    tier: live.length > 0 ? "live" : soon.length > 0 ? "soon" : "none",
+    liveCount: live.length,
+    soonCount: soon.length,
+    upcomingCount: standing.length,
+    leadGame,
+    headline: leadGame ? formatLiveStripCardSummary(leadGame, nowMs) : null,
+    sports,
+  };
+}
+
+const TIER_RANK: Record<VenueActivityTier, number> = { live: 0, soon: 1, none: 2 };
+
+/**
+ * The venues worth pinning to the top of the list.
+ *
+ * Deliberately a *separate shelf* rather than a blended score: folding activity into the
+ * distance sort would let a live game 20 km out outrank the court across the street. Ordering
+ * inside the shelf is tier, then distance — nearest live game first.
+ *
+ * Callers keep rendering the full distance-sorted list underneath; a promoted venue appears in
+ * both, so scrolling to its sport still shows what is on there.
+ */
+export function pickActiveVenues(
+  venues: HotPickVenue[],
+  nowMs: number,
+  opts: { limit?: number } = {},
+): HotPickVenue[] {
+  const limit = opts.limit ?? 6;
+  return venues
+    .map((venue) => ({ venue, activity: venueActivity(venue.games, nowMs) }))
+    .filter((entry) => entry.activity.tier !== "none")
+    .sort((a, b) => {
+      const byTier = TIER_RANK[a.activity.tier] - TIER_RANK[b.activity.tier];
+      if (byTier !== 0) return byTier;
+      return (
+        (a.venue.distanceKm ?? Number.POSITIVE_INFINITY) -
+        (b.venue.distanceKm ?? Number.POSITIVE_INFINITY)
+      );
+    })
+    .slice(0, limit)
+    .map((entry) => entry.venue);
 }

@@ -3265,7 +3265,11 @@ export function MapboxMap(props: MapboxMapProps) {
           viewerCoords={userCoords}
           onNavigateTo={onNavigateTo}
           onJoinGame={onJoinGame}
+          onLeaveGame={onLeaveGame}
           onOpenChat={onOpenMessagesForGame}
+          onStartHostedGame={onStartHostedGame}
+          onEndHostedGame={onEndHostedGame}
+          onDeleteHostedGame={onDeleteHostedGame}
           onClose={() => {
             // A shown route deliberately outlives this modal — the route chip's ✕ clears it.
             onSelectVenue(null);
@@ -3299,6 +3303,8 @@ export function MapboxMap(props: MapboxMapProps) {
             onDeleteHostedGame?.(g);
             setColocatedModalGames(null);
           }}
+          onStartGame={onStartHostedGame}
+          onEndGame={onEndHostedGame}
           onOpenChat={(g) => {
             onOpenMessagesForGame?.(g);
             setColocatedModalGames(null);

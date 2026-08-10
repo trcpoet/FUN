@@ -7,7 +7,10 @@ import {
   splitGamesByLiveness,
   rankHotPickVenues,
   formatKm,
+  venueActivity,
+  pickActiveVenues,
   type LatLng,
+  type HotPickVenue,
 } from "./hotPicks.ts";
 import type {
   SportsVenueGeoJSON,
@@ -495,5 +498,138 @@ describe("agreement with mapGameTimer", () => {
     expect(isGameEnded(future, now)).toBe(timerIsGameEnded(future, now));
     expect(isGameEnded(past, now)).toBe(true);
     expect(isGameEnded(future, now)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// venueActivity / pickActiveVenues — the Popular Venues "Happening now" shelf
+// ---------------------------------------------------------------------------
+
+describe("venueActivity", () => {
+  const now = Date.parse("2026-07-23T12:00:00.000Z");
+  const HOUR = 60 * MIN;
+
+  it("reports no activity for a venue with no games", () => {
+    const a = venueActivity([], now);
+    expect(a.tier).toBe("none");
+    expect(a.headline).toBeNull();
+    expect(a.leadGame).toBeNull();
+    expect(a.sports).toEqual([]);
+  });
+
+  it("ignores games that already ended", () => {
+    const ended = mkGame({ id: "e", starts_at: new Date(now - 5 * HOUR).toISOString(), duration_minutes: 60 });
+    expect(venueActivity([ended], now).tier).toBe("none");
+  });
+
+  it("ignores untimed pickup games past their map TTL", () => {
+    const stale = mkGame({ id: "s", starts_at: null, created_at: new Date(now - 5 * 24 * HOUR).toISOString() });
+    expect(venueActivity([stale], now).tier).toBe("none");
+  });
+
+  it("reports live when a game is in its window", () => {
+    const live = mkGame({ id: "l", status: "live", live_started_at: new Date(now - 10 * MIN).toISOString() });
+    const a = venueActivity([live], now);
+    expect(a.tier).toBe("live");
+    expect(a.liveCount).toBe(1);
+    expect(a.leadGame?.id).toBe("l");
+    expect(a.headline).toContain("Live");
+  });
+
+  it("reports soon for a game starting inside the live window", () => {
+    const soon = mkGame({ id: "s", starts_at: new Date(now + 40 * MIN).toISOString() });
+    const a = venueActivity([soon], now);
+    expect(a.tier).toBe("soon");
+    expect(a.soonCount).toBe(1);
+    expect(a.headline).toContain("Starts in");
+  });
+
+  it("does not call a game days away 'soon', but still counts it", () => {
+    const later = mkGame({ id: "x", starts_at: new Date(now + 3 * 24 * HOUR).toISOString() });
+    const a = venueActivity([later], now);
+    expect(a.tier).toBe("none");
+    expect(a.upcomingCount).toBe(1);
+  });
+
+  it("prefers a live game over a sooner-starting scheduled one for the headline", () => {
+    const live = mkGame({ id: "l", status: "live", live_started_at: new Date(now - 5 * MIN).toISOString() });
+    const soon = mkGame({ id: "s", starts_at: new Date(now + 10 * MIN).toISOString() });
+    expect(venueActivity([soon, live], now).leadGame?.id).toBe("l");
+  });
+
+  it("leads with the soonest start when nothing is live", () => {
+    const later = mkGame({ id: "later", starts_at: new Date(now + 2 * HOUR).toISOString() });
+    const sooner = mkGame({ id: "sooner", starts_at: new Date(now + 30 * MIN).toISOString() });
+    expect(venueActivity([later, sooner], now).leadGame?.id).toBe("sooner");
+  });
+
+  it("collects distinct sports without duplicates", () => {
+    const games = [
+      mkGame({ id: "a", sport: "basketball", status: "live" }),
+      mkGame({ id: "b", sport: "basketball", status: "live" }),
+      mkGame({ id: "c", sport: "soccer", status: "live" }),
+    ];
+    expect(venueActivity(games, now).sports).toEqual(["basketball", "soccer"]);
+  });
+});
+
+describe("pickActiveVenues", () => {
+  const now = Date.parse("2026-07-23T12:00:00.000Z");
+
+  function mkVenue(id: string, distanceKm: number, games: GameRow[]): HotPickVenue {
+    return {
+      id,
+      name: id,
+      sport: null,
+      leisure: null,
+      lat: 0,
+      lng: 0,
+      distanceKm,
+      surface: null,
+      lit: null,
+      access: null,
+      openingHours: null,
+      website: null,
+      operator: null,
+      heroImageUrl: null,
+      games,
+    };
+  }
+
+  const liveGame = () => mkGame({ id: "l" + Math.random(), status: "live" });
+  const soonGame = () => mkGame({ id: "s" + Math.random(), starts_at: new Date(now + 30 * MIN).toISOString() });
+
+  it("drops venues with nothing on", () => {
+    const out = pickActiveVenues([mkVenue("quiet", 0.1, []), mkVenue("busy", 5, [liveGame()])], now);
+    expect(out.map((v) => v.id)).toEqual(["busy"]);
+  });
+
+  it("puts live venues ahead of soon ones even when they are farther away", () => {
+    const out = pickActiveVenues(
+      [mkVenue("soon-near", 0.2, [soonGame()]), mkVenue("live-far", 9, [liveGame()])],
+      now,
+    );
+    expect(out.map((v) => v.id)).toEqual(["live-far", "soon-near"]);
+  });
+
+  it("sorts by distance inside a tier", () => {
+    const out = pickActiveVenues(
+      [mkVenue("far", 8, [liveGame()]), mkVenue("near", 0.5, [liveGame()]), mkVenue("mid", 3, [liveGame()])],
+      now,
+    );
+    expect(out.map((v) => v.id)).toEqual(["near", "mid", "far"]);
+  });
+
+  it("caps the shelf at six venues by default and honours an explicit limit", () => {
+    const venues = Array.from({ length: 10 }, (_, i) => mkVenue(`v${i}`, i, [liveGame()]));
+    expect(pickActiveVenues(venues, now)).toHaveLength(6);
+    expect(pickActiveVenues(venues, now, { limit: 2 }).map((v) => v.id)).toEqual(["v0", "v1"]);
+  });
+
+  it("sorts venues with unknown distance last rather than dropping them", () => {
+    const unknown = mkVenue("unknown", 0, [liveGame()]);
+    unknown.distanceKm = null;
+    const out = pickActiveVenues([unknown, mkVenue("known", 4, [liveGame()])], now);
+    expect(out.map((v) => v.id)).toEqual(["known", "unknown"]);
   });
 });

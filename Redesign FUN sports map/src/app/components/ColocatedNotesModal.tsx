@@ -1,8 +1,8 @@
 import { useMemo, useRef } from "react";
-import { X, MapPin, ChevronRight, MessageCircle, Lock, Users, Globe } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { X, MapPin, ChevronRight, MessageCircle } from "lucide-react";
 import type { MapNoteRow } from "../../lib/supabase";
 import { haversineDistanceMeters } from "../lib/gamesAtVenue";
+import { noteCreatedLabel, noteVisibilityIcon, noteVisibilityLabel } from "../lib/noteVisibility";
 import { useModalA11y } from "../../hooks/useModalA11y";
 
 type ColocatedNotesModalProps = {
@@ -11,18 +11,6 @@ type ColocatedNotesModalProps = {
   onClose: () => void;
   onOpenNote: (note: MapNoteRow) => void;
 };
-
-function visibilityMeta(v: MapNoteRow["visibility"]): { label: string; Icon: typeof Globe } {
-  if (v === "friends") return { label: "Friends", Icon: Users };
-  if (v === "private") return { label: "Private", Icon: Lock };
-  return { label: "Public", Icon: Globe };
-}
-
-function createdLabel(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "Recently";
-  return formatDistanceToNow(d, { addSuffix: true });
-}
 
 function commonPlaceName(notes: MapNoteRow[]): string | null {
   const names = notes.map((n) => n.place_name?.trim()).filter(Boolean) as string[];
@@ -108,7 +96,8 @@ export function ColocatedNotesModal({
         <div className="overflow-y-auto max-h-[min(24rem,70vh)] p-2">
           <ul className="space-y-1">
             {ordered.map((note) => {
-              const { label, Icon } = visibilityMeta(note.visibility);
+              const label = noteVisibilityLabel(note.visibility);
+              const Icon = noteVisibilityIcon(note.visibility);
               const comments = note.comment_count ?? 0;
               return (
                 <li key={note.id}>
@@ -123,7 +112,7 @@ export function ColocatedNotesModal({
                         <Icon className="h-3 w-3 shrink-0" aria-hidden />
                         {label}
                         <span aria-hidden>·</span>
-                        {createdLabel(note.created_at)}
+                        {noteCreatedLabel(note.created_at)}
                         {comments > 0 ? (
                           <>
                             <span aria-hidden>·</span>

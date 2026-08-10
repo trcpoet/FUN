@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { formatDistanceToNow } from "date-fns";
 import {
   X,
   MapPin,
@@ -21,6 +20,7 @@ import { formatVenueGameTimerSummary, isGameLive } from "../../lib/mapGameTimer"
 import { haversineDistanceMeters } from "../lib/gamesAtVenue";
 import { getSportIconEmoji } from "../map/gameSportIcons";
 import { venueSportEmoji } from "../lib/venueSportIcon";
+import { noteCreatedLabel, noteVisibilityLabel } from "../lib/noteVisibility";
 import { fetchVenueById, fetchVenueEnrichment } from "../../lib/api";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
 import type { NavigateToOptions } from "../../lib/directions";
@@ -48,6 +48,8 @@ import { VenueFactGrid } from "./venue/VenueFactGrid";
 import { VenueReviewsSection } from "./venue/VenueReviewsSection";
 import { VenueCommentsSection } from "./venue/VenueCommentsSection";
 import { GoogleMapsLinkButton } from "./GoogleMapsLinkButton";
+import { GameActionBar } from "./game/GameActionBar";
+import { gameViewerRole } from "../lib/gameViewerRole";
 
 type View = "actions" | "details";
 type Tab = "games" | "notes";
@@ -80,8 +82,18 @@ type VenueInfoPopupProps = {
   onCreateGame?: (venue: VenueSelection) => void;
   /** Join a specific game at this venue (unlock chat). */
   onJoinGame?: (game: GameRow) => void;
+  /** Leave a game listed here. */
+  onLeaveGame?: (game: GameRow) => void;
   /** Open messenger for a game (user should already be joined for chat). */
   onOpenChat?: (game: GameRow) => void;
+  /**
+   * Host-only controls for games listed here. Without these a host could see their own game
+   * at a venue but had no way to start, end or delete it — the map popup was the only place
+   * those existed.
+   */
+  onStartHostedGame?: (game: GameRow) => Promise<void> | void;
+  onEndHostedGame?: (game: GameRow) => Promise<void> | void;
+  onDeleteHostedGame?: (game: GameRow) => Promise<boolean> | void;
   /** Viewer location for directions shortcut. */
   viewerCoords?: { lat: number; lng: number } | null;
   /** Draw Mapbox walking route on the map. */
@@ -101,19 +113,6 @@ const HERO_ICON_BTN =
   "p-2 rounded-full bg-slate-950/70 text-slate-200 backdrop-blur-md hover:bg-slate-900/90 hover:text-white " +
   "transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40";
 
-/** Matches the wording in NoteThreadDialog so a note reads the same wherever it appears. */
-function noteVisibilityLabel(v: MapNoteRow["visibility"]): string {
-  if (v === "friends") return "Friends";
-  if (v === "private") return "Private";
-  return "Public";
-}
-
-function noteCreatedLabel(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "Recently";
-  return formatDistanceToNow(d, { addSuffix: true });
-}
-
 /**
  * One game in the venue's list.
  *
@@ -125,23 +124,41 @@ function GameListRow({
   game,
   now,
   joined,
+  currentUserId,
   onJoin,
+  onLeave,
   onChat,
+  onStart,
+  onEnd,
+  onDelete,
   distanceLabel,
 }: {
   game: GameRow;
   now: number;
   joined: boolean;
+  currentUserId: string | null;
   onJoin?: (g: GameRow) => void;
+  onLeave?: (g: GameRow) => void;
   onChat?: (g: GameRow) => void;
+  onStart?: (g: GameRow) => Promise<void> | void;
+  onEnd?: (g: GameRow) => Promise<void> | void;
+  onDelete?: (g: GameRow) => Promise<boolean> | void;
   distanceLabel?: string;
 }) {
   const live = isGameLive(game, now);
   const filled = game.participant_count ?? 0;
   const total = game.spots_needed;
 
+  // No `hostGameIds` here — the venue modal only ever receives `currentUserId`, so the role
+  // helper falls back to `created_by`, the same test the live strip uses.
+  const role = gameViewerRole(game, {
+    currentUserId,
+    joinedGameIds: joined ? new Set([game.id]) : new Set<string>(),
+    nowMs: now,
+  });
+
   return (
-    <li className="flex items-center gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2 py-2">
+    <li className="flex flex-wrap items-center gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2 py-2">
       <span
         className={
           "flex size-10 shrink-0 items-center justify-center rounded-2xl text-2xl " +
@@ -174,25 +191,17 @@ function GameListRow({
         {filled}/{total}
       </span>
 
-      {joined ? (
-        <button
-          type="button"
-          onClick={() => onChat?.(game)}
-          className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-teal-600/90 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-500"
-        >
-          <MessageCircle className="h-3.5 w-3.5" />
-          Chat
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => onJoin?.(game)}
-          className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-amber-600/90 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-500"
-        >
-          Join
-          <ChevronRight className="h-3.5 w-3.5 opacity-80" />
-        </button>
-      )}
+      <GameActionBar
+        game={game}
+        role={role}
+        density="compact"
+        onJoin={onJoin}
+        onLeave={onLeave}
+        onChat={onChat}
+        onStart={onStart}
+        onEnd={onEnd}
+        onDelete={onDelete}
+      />
     </li>
   );
 }
@@ -216,7 +225,11 @@ export function VenueInfoPopup({
   onClose,
   onCreateGame,
   onJoinGame,
+  onLeaveGame,
   onOpenChat,
+  onStartHostedGame,
+  onEndHostedGame,
+  onDeleteHostedGame,
   viewerCoords = null,
   onNavigateTo,
   currentUserId = null,
@@ -783,8 +796,13 @@ export function VenueInfoPopup({
                                 game={g}
                                 now={now}
                                 joined={joinedGameIds.has(g.id)}
+                                currentUserId={currentUserId}
                                 onJoin={onJoinGame}
+                                onLeave={onLeaveGame}
                                 onChat={onOpenChat}
+                                onStart={onStartHostedGame}
+                                onEnd={onEndHostedGame}
+                                onDelete={onDeleteHostedGame}
                               />
                             ))}
                           </ul>
@@ -803,8 +821,13 @@ export function VenueInfoPopup({
                                 game={g}
                                 now={now}
                                 joined={joinedGameIds.has(g.id)}
+                                currentUserId={currentUserId}
                                 onJoin={onJoinGame}
+                                onLeave={onLeaveGame}
                                 onChat={onOpenChat}
+                                onStart={onStartHostedGame}
+                                onEnd={onEndHostedGame}
+                                onDelete={onDeleteHostedGame}
                                 distanceLabel={`${distanceMiles(g)} mi`}
                               />
                             ))}
