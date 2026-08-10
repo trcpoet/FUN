@@ -85,6 +85,14 @@ const L_VENUE_NOTE_BADGE = "venue-note-badge";
 const DIRECTIONS_SOURCE_ID = "fun-directions-route";
 const DIRECTIONS_LAYER_ID = "fun-directions-route-line";
 
+/**
+ * Estimated viewport width (km) used to seed `mapViewport` the instant a "fly" camera
+ * request is issued, before we have a real measurement from the map. Only matters for
+ * the very first fly (no prior sample yet) — `sample()` overwrites it with the real
+ * value once `moveend` fires. Roughly matches the width at `LOCATION_SEARCH_ZOOM` (~12.5).
+ */
+const FALLBACK_VIEWPORT_WIDTH_KM = 8;
+
 /** Remove venue GL layers/sources — map teardown or basemap style swap only (not venue-fetch effect re-runs). */
 function removeVenueGlLayers(map: import("mapbox-gl").Map): void {
   try {
@@ -852,6 +860,17 @@ export function MapboxMap(props: MapboxMapProps) {
 
       // "fly" = move to a single coordinate.
       if (req.kind === "fly") {
+        // Seed the tracked viewport with the fly target immediately, rather than waiting
+        // ~1.4s for `moveend` to report it. Without this, `resolveVenueFetchAnchor` measures
+        // drift against the *stale* (pre-fly) viewport for the whole animation and keeps
+        // discarding the new explicit center, so venues near a freshly searched location
+        // don't start loading until the camera has fully arrived. `widthKm` is reused as a
+        // best-effort estimate — `sample()` corrects it for real once `moveend` fires.
+        setMapViewport((prev) => ({
+          lat: req.lat,
+          lng: req.lng,
+          widthKm: prev?.widthKm ?? FALLBACK_VIEWPORT_WIDTH_KM,
+        }));
         m.flyTo({
           center: [req.lng, req.lat],
           zoom: req.zoom ?? 13,
