@@ -105,8 +105,23 @@ export default function App() {
   // so returning to the map (e.g. globe button) centers there immediately instead of
   // flashing Times Square while live geolocation resolves. Read once on mount.
   const lastKnownCoords = useMemo(() => getLastKnownCoords(), []);
-  const effectiveUserCoords =
-    userCoords ?? lastKnownCoords ?? { lat: 40.758, lng: -73.9855 }; // Times Square (first-ever visit only)
+  // Memoized so the last-resort literal doesn't mint a new object on every render —
+  // this reference flows all the way down to the popups' directions lookups.
+  const effectiveUserCoords = useMemo(
+    () => userCoords ?? lastKnownCoords ?? { lat: 40.758, lng: -73.9855 }, // Times Square (first-ever visit only)
+    [userCoords, lastKnownCoords]
+  );
+
+  /**
+   * A *real* fix only, held in a ref so one-shot lookups can read it without
+   * re-arming their effects. Deliberately not `effectiveUserCoords`: that falls
+   * back to the Times Square literal, which would fabricate a distance rather
+   * than admit it doesn't know one.
+   */
+  const realUserCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  useEffect(() => {
+    realUserCoordsRef.current = userCoords ?? lastKnownCoords ?? null;
+  }, [userCoords, lastKnownCoords]);
 
   /** Minute tick: drop expired untimed games from UI and refresh map countdown labels. */
   const [mapMinuteEpoch, setMapMinuteEpoch] = useState(0);
@@ -359,7 +374,7 @@ export default function App() {
     if (!note) {
       // Note may be outside the current radius cache (e.g. Feed-only far note).
       // Fetch it directly so the map can fly to the creation location.
-      void fetchNoteById(nid).then((r) => {
+      void fetchNoteById(nid, realUserCoordsRef.current).then((r) => {
         if (r.error || !r.data) return;
         setMapNotes((prev) => (prev.some((n) => n.id === r.data!.id) ? prev : [...prev, r.data!]));
         // Ensure venues + notes fetch around the deep-linked point.
@@ -691,12 +706,25 @@ export default function App() {
   const searchAnchorLat = gamesFetchLat;
   const searchAnchorLng = gamesFetchLng;
 
+  /**
+   * Games the map would actually show (TTL + filters + visibility), before sport-focus.
+   * Sport search "N games in current radius" must use this — not the raw RPC list — or
+   * expired untimed pickups (still `status=open`, `ends_at` null) inflate the count while
+   * filterGamesVisibleOnMap has already dropped their pins.
+   */
+  const mapCountableGames = useMemo(() => {
+    let list = filterGamesVisibleOnMap(games, Date.now());
+    list = list.filter((g) => gameMatchesFilters(g, appliedFilters, viewerGender));
+    list = list.filter((g) => gameVisibleToViewer(g, currentUserId, followedIds));
+    return list;
+  }, [games, appliedFilters, mapMinuteEpoch, currentUserId, followedIds, viewerGender]);
+
   const unifiedSearch = useUnifiedSearch({
     debouncedQuery: debouncedSearch,
     anchorLat: searchAnchorLat,
     anchorLng: searchAnchorLng,
     excludeUserId: currentUserId,
-    games,
+    games: mapCountableGames,
   });
 
   useEffect(() => {
@@ -708,16 +736,16 @@ export default function App() {
   useEffect(() => {
     if (!sportFocus || !userCoords || nearbyLoading) return;
     if (sportExtendSessionRef.current === sportFocus.sport) return; // already resolved this session
-    const matching = gamesMatchingSport(games, sportFocus.sport);
+    const matching = gamesMatchingSport(mapCountableGames, sportFocus.sport);
     if (matching.length === 0 && effectiveGamesRadiusKm < EXTENDED_GAMES_RADIUS_KM) {
       sportExtendSessionRef.current = sportFocus.sport;
       setSportExtendRadius(EXTENDED_GAMES_RADIUS_KM);
     }
-  }, [sportFocus, games, nearbyLoading, effectiveGamesRadiusKm, userCoords]);
+  }, [sportFocus, mapCountableGames, nearbyLoading, effectiveGamesRadiusKm, userCoords]);
 
   useEffect(() => {
     if (!sportFocus || !userCoords || nearbyLoading) return;
-    const matching = gamesMatchingSport(games, sportFocus.sport);
+    const matching = gamesMatchingSport(mapCountableGames, sportFocus.sport);
     if (matching.length === 0) {
       if (
         effectiveGamesRadiusKm >= EXTENDED_GAMES_RADIUS_KM &&
@@ -755,16 +783,14 @@ export default function App() {
       coordinates.push([userCoords.lng, userCoords.lat]);
       setMapCameraRequest({ id, kind: "fitBounds", coordinates });
     }
-  }, [sportFocus, games, nearbyLoading, effectiveGamesRadiusKm, userCoords]);
+  }, [sportFocus, mapCountableGames, nearbyLoading, effectiveGamesRadiusKm, userCoords]);
 
   const displayGames = useMemo(() => {
-    let list = filterGamesVisibleOnMap(games, Date.now());
+    let list = mapCountableGames;
     // Precedence = intersection: TopUI search (sportFocus) AND applied filters must both pass.
     if (sportFocus) list = gamesMatchingSport(list, sportFocus.sport);
-    list = list.filter((g) => gameMatchesFilters(g, appliedFilters, viewerGender)); // sports + skill + age + matchType
-    list = list.filter((g) => gameVisibleToViewer(g, currentUserId, followedIds)); // System C: friends/invite-only pins
     return list;
-  }, [games, sportFocus, appliedFilters, mapMinuteEpoch, currentUserId, followedIds, viewerGender]);
+  }, [mapCountableGames, sportFocus]);
 
   // Live preview for the FiltersModal footer — uses the draft, not appliedFilters.
   const filtersPreviewCount = useMemo(
@@ -826,12 +852,18 @@ export default function App() {
             onOpenChange={(o) => {
               if (!o) setActiveMapNote(null);
             }}
-            note={{
-              id: activeMapNote.id,
-              body: activeMapNote.body,
-              created_at: activeMapNote.created_at,
-              visibility: activeMapNote.visibility,
-              place_name: activeMapNote.place_name,
+            note={activeMapNote}
+            currentUserId={currentUserId}
+            onCenterOnMap={() => {
+              handleCenterOnCoords({ lat: activeMapNote.lat, lng: activeMapNote.lng });
+              setActiveMapNote(null);
+            }}
+            onDeleted={() => {
+              // Prune locally rather than leaning on refetchNotes: that is gated behind
+              // `secondaryReady` and deferred to idle, so the deleted note's pin would
+              // linger on the map until the next fetch happened to land.
+              setMapNotes((prev) => prev.filter((n) => n.id !== activeMapNote.id));
+              setActiveMapNote(null);
             }}
           />
         ) : null}

@@ -105,11 +105,32 @@ export async function fetchMyNoteInbox(): Promise<{
   return fetchMyNoteInboxFromTables();
 }
 
-/** Single-note lookup for deep-links / messenger header. */
+/**
+ * Single-note lookup for deep-links / messenger header.
+ *
+ * Prefers `get_note_by_id`, which carries `comment_count`, `like_count` and the
+ * viewer's own `liked_by_me` — none of which a direct table read can produce.
+ * Pass the viewer's position to also get `distance_km`.
+ */
 export async function fetchNoteById(
   id: string,
+  viewer?: { lat: number; lng: number } | null,
 ): Promise<{ data: MapNoteRow | null; error: Error | null }> {
   if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const rpc = await supabase.rpc("get_note_by_id", {
+    p_note_id: id,
+    p_lat: viewer?.lat ?? null,
+    p_lng: viewer?.lng ?? null,
+  });
+  if (!rpc.error) {
+    // Set-returning: zero rows means "no such note, or not visible to you".
+    const rows = (rpc.data as MapNoteRow[] | null) ?? [];
+    return { data: rows[0] ?? null, error: null };
+  }
+  if (!inboxRpcMissing(rpc.error)) return { data: null, error: new Error(rpc.error.message) };
+
+  // Deployment hasn't run `20260809120000_note_likes_read_path.sql` yet. The
+  // note still opens; it just has no counts, exactly as before that migration.
   const { data, error } = await supabase
     .from("map_notes")
     .select("id, body, visibility, created_at, created_by, lat, lng, place_name")

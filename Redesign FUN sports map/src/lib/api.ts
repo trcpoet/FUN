@@ -211,6 +211,7 @@ export type UnifiedFeedItem =
       comment_count: number;
       created_by: string | null;
       like_count: number;
+      liked_by_me: boolean;
     }
   | {
       kind: "game";
@@ -224,6 +225,7 @@ export type UnifiedFeedItem =
       visibility: GameVisibility;
       comment_count: number;
       created_by: string | null;
+      /** Always 0 — games have no like feature, so there is no `liked_by_me` either. */
       like_count: number;
     }
   | {
@@ -239,6 +241,7 @@ export type UnifiedFeedItem =
       comment_count: number;
       created_by: string | null;
       like_count: number;
+      liked_by_me: boolean;
     };
 
 /** Games + map notes within a tight radius (default 25 km) for Discovery “Live”. */

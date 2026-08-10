@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
-  Heart,
   MessageCircle,
   MapPin,
   Send,
@@ -32,14 +31,9 @@ import {
 } from "../../../lib/api";
 import type { FeedMediaPostRow, MapNoteCommentRow, StatusCommentRow } from "../../../lib/supabase";
 import { glassMessengerPanel } from "../../styles/glass";
+import { noteVisibilityLabel } from "../../lib/noteVisibility";
+import { LikeButton } from "./LikeButton";
 import { NoteCommentLikeButton } from "./NoteCommentLikeButton";
-
-export function visibilityChip(v: string | null | undefined): string {
-  if (!v) return "Public";
-  if (v === "friends" || v === "friends_only") return "Friends";
-  if (v === "private" || v === "invite_only") return "Private";
-  return "Public";
-}
 
 const PREVIEW_COUNT = 3;
 
@@ -64,16 +58,9 @@ export function NoteFeedCard(props: {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [likeCount, setLikeCount] = useState(item.like_count ?? 0);
-  const [likeBusy, setLikeBusy] = useState(false);
-  const [liked, setLiked] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const isOwner = Boolean(currentUserId && item.created_by && currentUserId === item.created_by);
-
-  useEffect(() => {
-    setLikeCount(item.like_count ?? 0);
-  }, [item.id, item.like_count]);
 
   useEffect(() => {
     if (loaded || (item.comment_count ?? 0) === 0) return;
@@ -121,19 +108,8 @@ export function NoteFeedCard(props: {
     // loading states / scroll jumps.
   };
 
-  const handleLike = async () => {
-    if (likeBusy) return;
-    setLikeBusy(true);
-    setError(null);
-    const { liked: nowLiked, error: err } = await toggleMapNoteLike(item.id);
-    setLikeBusy(false);
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    setLiked(nowLiked);
-    setLikeCount((c) => Math.max(0, c + (nowLiked ? 1 : -1)));
-  };
+  const noteId = item.id;
+  const handleLike = useCallback(() => toggleMapNoteLike(noteId), [noteId]);
 
   const handleDelete = async () => {
     if (!isOwner || deleteBusy) return;
@@ -170,7 +146,7 @@ export function NoteFeedCard(props: {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Badge className="bg-black/40 backdrop-blur-md border-white/10 text-[10px] font-bold uppercase tracking-wider py-0.5 px-2.5">
-              {visibilityChip(item.visibility)}
+              {noteVisibilityLabel(item.visibility)}
             </Badge>
             {isOwner ? (
               <button
@@ -192,19 +168,15 @@ export function NoteFeedCard(props: {
 
         <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
           <div className="inline-flex items-center gap-3 text-slate-400">
-            <button
-              type="button"
-              onClick={() => void handleLike()}
-              disabled={likeBusy}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-xs font-bold transition-colors disabled:opacity-50",
-                liked ? "text-rose-400 border-rose-500/30" : "text-slate-300 hover:text-rose-300",
-              )}
-              aria-label="Like note"
-            >
-              {likeBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Heart className={cn("size-3.5", liked && "fill-current")} />}
-              {likeCount}
-            </button>
+            <LikeButton
+              rowId={item.id}
+              likeCount={item.like_count}
+              likedByMe={item.liked_by_me}
+              toggle={handleLike}
+              label="note"
+              variant="chip"
+              onError={setError}
+            />
             <div className="inline-flex items-center gap-2">
               <div className="flex size-8 items-center justify-center rounded-full bg-white/[0.03]">
                 <MessageCircle className="size-4" />
@@ -381,16 +353,9 @@ export function StatusFeedCard(props: {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [likeCount, setLikeCount] = useState(item.like_count ?? 0);
-  const [likeBusy, setLikeBusy] = useState(false);
-  const [liked, setLiked] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const isOwner = Boolean(currentUserId && item.created_by && currentUserId === item.created_by);
-
-  useEffect(() => {
-    setLikeCount(item.like_count ?? 0);
-  }, [item.id, item.like_count]);
 
   useEffect(() => {
     if (loaded || (item.comment_count ?? 0) === 0) return;
@@ -436,19 +401,8 @@ export function StatusFeedCard(props: {
     // Same as notes: avoid full-feed refresh on comment send.
   };
 
-  const handleLike = async () => {
-    if (likeBusy) return;
-    setLikeBusy(true);
-    setError(null);
-    const { liked: nowLiked, error: err } = await toggleStatusLike(item.id);
-    setLikeBusy(false);
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    setLiked(nowLiked);
-    setLikeCount((c) => Math.max(0, c + (nowLiked ? 1 : -1)));
-  };
+  const statusId = item.id;
+  const handleLike = useCallback(() => toggleStatusLike(statusId), [statusId]);
 
   const handleDelete = async () => {
     if (!isOwner || deleteBusy) return;
@@ -488,19 +442,15 @@ export function StatusFeedCard(props: {
         <p className="text-[15px] text-slate-200 leading-[1.6] font-medium italic">“{item.body}”</p>
 
         <div className="inline-flex items-center gap-3 text-slate-400">
-          <button
-            type="button"
-            onClick={() => void handleLike()}
-            disabled={likeBusy}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-xs font-bold transition-colors disabled:opacity-50",
-              liked ? "text-rose-400 border-rose-500/30" : "text-slate-300 hover:text-rose-300",
-            )}
-            aria-label="Like status"
-          >
-            {likeBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Heart className={cn("size-3.5", liked && "fill-current")} />}
-            {likeCount}
-          </button>
+          <LikeButton
+            rowId={item.id}
+            likeCount={item.like_count}
+            likedByMe={item.liked_by_me}
+            toggle={handleLike}
+            label="status"
+            variant="chip"
+            onError={setError}
+          />
           <div className="inline-flex items-center gap-2">
             <MessageCircle className="size-4" />
             <span className="text-xs font-bold tabular-nums">

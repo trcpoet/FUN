@@ -124,6 +124,10 @@ export type MapNoteRow = {
   distance_km?: number | null;
   /** Returned by nearby/unified feed RPCs only. */
   comment_count?: number | null;
+  /** Returned by `get_notes_nearby` / `get_note_by_id`; absent on the table fallback. */
+  like_count?: number | null;
+  /** Viewer's own like. Same RPCs — a plain table read cannot know this. */
+  liked_by_me?: boolean | null;
 };
 
 export type MapNoteCommentRow = {
