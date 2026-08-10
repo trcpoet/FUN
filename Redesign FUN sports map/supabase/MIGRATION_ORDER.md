@@ -52,11 +52,14 @@ never drifts far from live.
 > - `20260808010000_games_nearby_untimed_ttl.sql`
 > - `20260809120000_note_likes_read_path.sql`
 
-To apply a single migration deliberately:
+To apply a single migration deliberately, pass the **file** — do not inline it:
 
 ```bash
-supabase db query --linked "$(cat supabase/migrations/<file>.sql)"
+supabase db query --linked -f supabase/migrations/<file>.sql
 ```
+
+Inlining with `"$(cat …)"` fails: every migration here opens with a `--` comment, and the
+CLI parses that leading `--` as a flag (`Unrecognized flag: -- Drop the legacy …`).
 
 Then confirm PostgREST picked up any signature change:
 
