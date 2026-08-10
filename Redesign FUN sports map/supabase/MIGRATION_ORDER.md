@@ -46,11 +46,15 @@ never drifts far from live.
 ## Applying migrations to production
 
 > **Do not run `supabase db push` casually.** It applies *every* pending migration.
-> As of 2026-08-10 the following are intentionally **not** applied to production and
-> pushing would deploy them by accident:
+> As of 2026-08-10 exactly one is intentionally **not** applied to production, and
+> pushing would deploy it by accident:
 >
-> - `20260808010000_games_nearby_untimed_ttl.sql`
-> - `20260809120000_note_likes_read_path.sql`
+> - `20260808010000_games_nearby_untimed_ttl.sql` — verified absent from prod
+>   (`get_games_nearby` has no `starts_at is null` branch)
+>
+> Applied on 2026-08-10: `20260809120000_note_likes_read_path`,
+> `20260810000000_drop_legacy_create_game_overload`,
+> `20260810120000_unified_feed_gender_gate`.
 
 To apply a single migration deliberately, pass the **file** — do not inline it:
 

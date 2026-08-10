@@ -90,13 +90,18 @@ built-in. `create_game` had both
 The 9-arg version is `SECURITY DEFINER`, executable by `anon`/`authenticated`, and inserts
 games rows while silently ignoring duration and visibility — a write path that bypasses the
 visibility rules enforced everywhere else. Dropped by
-`20260810000000_drop_legacy_create_game_overload.sql`.
+`20260810000000_drop_legacy_create_game_overload.sql`, **applied to production 2026-08-10**.
+
+Verified after the drop: exactly one overload remains —
+`create_game(text,text,integer,double precision,double precision,timestamptz,text,text,jsonb,integer,text)`,
+`SECURITY DEFINER`, executable by `authenticated` but **not** `anon`.
 
 No client change needed: `src/lib/api.ts` calls the 11-arg version first and only falls back
 to the 9-arg on a specific "missing argument" error, so the fallback branch simply becomes
 unreachable.
 
-### `get_unified_feed` skips the gender gate
+### `get_unified_feed` skipped the gender gate — fixed
 
-Lists games that `get_games_nearby` and `get_live_nearby` deliberately hide. Known,
-knowingly not fixed.
+It listed games that `get_games_nearby` and `get_live_nearby` deliberately hide. Closed by
+`20260810120000_unified_feed_gender_gate.sql`, applied to production 2026-08-10 and verified
+live (`get_unified_feed` now calls `can_view_game_for_gender`).

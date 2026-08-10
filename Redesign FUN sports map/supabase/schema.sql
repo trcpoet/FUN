@@ -10,7 +10,7 @@
 -- Extension-owned objects (PostGIS, pg_trgm) are intentionally excluded — the
 -- `create extension` statements below bring them back.
 --
--- Generated: 2026-08-10T11:50:11.404Z
+-- Generated: 2026-08-10T11:56:46.519Z
 
 set search_path = public;
 
@@ -1105,44 +1105,6 @@ begin
     insert into public.notifications (user_id, type, payload)
     values (v_participant.user_id, 'game_completed', jsonb_build_object('game_id', p_game_id, 'sport', v_sport));
   end loop;
-end;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.create_game(p_title text, p_sport text, p_lat double precision, p_lng double precision, p_spots_needed integer DEFAULT 2, p_starts_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_location_label text DEFAULT NULL::text, p_description text DEFAULT NULL::text, p_requirements jsonb DEFAULT NULL::jsonb)
- RETURNS uuid
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-declare
-  new_id uuid;
-begin
-  if auth.uid() is null then
-    raise exception 'Must be authenticated to create a game';
-  end if;
-  insert into public.games (
-    title, sport, spots_needed, location, created_by, status, starts_at, location_label, description, requirements
-  )
-  values (
-    p_title,
-    p_sport,
-    coalesce(p_spots_needed, 2),
-    st_setSRID(st_makePoint(p_lng, p_lat), 4326)::geography,
-    auth.uid(),
-    'open',
-    p_starts_at,
-    p_location_label,
-    nullif(trim(coalesce(p_description, '')), ''),
-    case
-      when p_requirements is null then '{}'::jsonb
-      when jsonb_typeof(p_requirements) = 'object' then p_requirements
-      else '{}'::jsonb
-    end
-  )
-  returning id into new_id;
-  insert into public.game_participants (game_id, user_id, role)
-  values (new_id, auth.uid(), 'host');
-  return new_id;
 end;
 $function$;
 
@@ -4085,11 +4047,7 @@ grant execute on function public.complete_game(p_game_id uuid, p_winner_team_or_
 
 grant execute on function public.complete_game(p_game_id uuid, p_winner_team_or_user text, p_score jsonb) to service_role;
 
-grant execute on function public.create_game(p_title text, p_sport text, p_lat double precision, p_lng double precision, p_spots_needed integer, p_starts_at timestamp with time zone, p_location_label text, p_description text, p_requirements jsonb) to authenticated;
-
 grant execute on function public.create_game(p_title text, p_sport text, p_spots_needed integer, p_lat double precision, p_lng double precision, p_starts_at timestamp with time zone, p_location_label text, p_description text, p_requirements jsonb, p_duration_minutes integer, p_visibility text) to authenticated;
-
-grant execute on function public.create_game(p_title text, p_sport text, p_lat double precision, p_lng double precision, p_spots_needed integer, p_starts_at timestamp with time zone, p_location_label text, p_description text, p_requirements jsonb) to service_role;
 
 grant execute on function public.create_game(p_title text, p_sport text, p_spots_needed integer, p_lat double precision, p_lng double precision, p_starts_at timestamp with time zone, p_location_label text, p_description text, p_requirements jsonb, p_duration_minutes integer, p_visibility text) to service_role;
 
