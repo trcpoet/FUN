@@ -554,6 +554,10 @@ export default function App() {
     setMapSearchLocationName(f.place_name?.split(',')[0]?.trim() ?? null);
     setSearchQuery("");
     setSportFocus(null);
+    // Same "explicit commit" treatment as double-tap: bump the epoch so stale venue
+    // coverage/pins are cleared and the debounce is skipped instead of waiting on the
+    // fly animation + a full debounce cycle before venues near the new spot show up.
+    setMapSearchEpoch((n) => n + 1);
     mapCameraIdRef.current += 1;
     setMapCameraRequest({
       id: mapCameraIdRef.current,
