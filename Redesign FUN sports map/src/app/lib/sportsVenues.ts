@@ -26,10 +26,20 @@ export type VenueFetchResult = {
  * These used to both be `null`, which is precisely how a venue could silently stop
  * rendering: a failed read looked exactly like an empty neighbourhood, so nothing
  * retried, nothing logged, and the basemap kept drawing the pitch regardless.
+ *
+ * `empty` and `uncached` are also distinct, and the difference decides whether we go
+ * to the network. `osm_sports_venues` is a *cache*, not a survey: zero rows in a bbox
+ * means nobody has loaded that area yet, not that the area has no pitches. Collapsing
+ * the two is how searching a city the cache had never seen returned no venues forever
+ * — the on-demand import in `/api/auto-cache-venues` was never called, so the area
+ * could never become cached.
  */
 export type VenueDbOutcome =
   | { status: "ok"; geojson: SportsVenueGeoJSON }
+  /** Rows cover this bbox, but the active sport filter matched none of them. */
   | { status: "empty" }
+  /** No rows at all for this bbox — the cache has never covered this area. */
+  | { status: "uncached" }
   | { status: "unavailable"; error: string };
 
 const EMPTY_GEOJSON: SportsVenueGeoJSON = { type: "FeatureCollection", features: [] };
@@ -240,8 +250,9 @@ async function fetchOverpassNetwork(
 /**
  * Read pre-synced venues from Supabase (fast).
  *
- * Distinguishes "no venues in this bbox" (`empty`) from "the read failed" (`unavailable`)
- * so callers can retry the right one — only `unavailable` deserves a network fallback.
+ * Distinguishes "the cache does not cover this bbox" (`uncached`), "it covers it and the
+ * filter matched nothing" (`empty`) and "the read failed" (`unavailable`) so callers can
+ * retry the right one — only `empty` is an answer that needs no network.
  *
  * Sport filtering goes through the shared `venueMatchesSelectedSports` predicate, the
  * same one the render path uses. It used to have a second, subtly different copy right
@@ -285,7 +296,9 @@ export async function fetchSportsVenuesFromDb(
     console.warn("[FUN] venue DB read failed:", error.code ?? "", message);
     return { status: "unavailable", error: message };
   }
-  if (!data?.length) return { status: "empty" };
+  // Nothing cached for this bbox yet. Callers must treat this as "go find out",
+  // not "there is nothing here" — see VenueDbOutcome.
+  if (!data?.length) return { status: "uncached" };
 
   const sportFilter = options?.sportFilter ?? [];
 
@@ -381,8 +394,11 @@ export async function fetchSportsVenuesFromOverpass(
 }
 
 /**
- * Prefer Supabase (`osm_sports_venues`); fall back to Overpass only when the DB read
- * actually failed. A genuinely empty area is an answer, not a reason to re-import.
+ * Prefer Supabase (`osm_sports_venues`); go to the network when the cache cannot answer —
+ * either it has never covered this bbox (`uncached`) or the read failed (`unavailable`).
+ *
+ * Only `empty` short-circuits: the rows are there and the sport filter matched none of
+ * them, so re-importing would return the same rows and change nothing.
  */
 export async function fetchSportsVenues(
   bbox: { minLng: number; minLat: number; maxLng: number; maxLat: number },

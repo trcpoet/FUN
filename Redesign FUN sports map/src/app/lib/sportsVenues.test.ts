@@ -60,13 +60,16 @@ describe("fetchSportsVenuesFromDb outcomes", () => {
     expect(out.geojson.features[0]!.properties.id).toBe("way/461237079");
   });
 
-  it("reports 'empty' — not 'unavailable' — when the area genuinely has no venues", async () => {
+  it("reports 'uncached' — not 'empty' — when no rows cover the area", async () => {
+    // The table is a cache, not a survey. Zero rows means nobody has loaded this area
+    // yet, so the caller still has to go and find out.
     const { fetchSportsVenuesFromDb } = await loadModule(makeSupabaseStub({ data: [], error: null }));
-    expect((await fetchSportsVenuesFromDb(BBOX)).status).toBe("empty");
+    expect((await fetchSportsVenuesFromDb(BBOX)).status).toBe("uncached");
   });
 
   it("reports 'empty' when the sport filter removed every row", async () => {
-    // Rows existed; the filter emptied them. That is not a broken database.
+    // Rows existed; the filter emptied them. That is not a broken database, and
+    // re-importing would return the very same rows.
     const { fetchSportsVenuesFromDb } = await loadModule(
       makeSupabaseStub({ data: [SOCCER_PITCH_ROW], error: null })
     );
@@ -94,16 +97,34 @@ describe("fetchSportsVenuesFromDb outcomes", () => {
 });
 
 describe("fetchSportsVenues fallback policy", () => {
-  it("does NOT hit the network when the DB says the area is simply empty", async () => {
+  it("does NOT hit the network when rows cover the area and the filter emptied them", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    const { fetchSportsVenues } = await loadModule(makeSupabaseStub({ data: [], error: null }));
+    const { fetchSportsVenues } = await loadModule(
+      makeSupabaseStub({ data: [SOCCER_PITCH_ROW], error: null })
+    );
 
-    const res = await fetchSportsVenues(BBOX);
+    const res = await fetchSportsVenues(BBOX, { sportFilter: ["Tennis"] });
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(res.geojson.features).toHaveLength(0);
     expect(res.source).toBe("db");
+  });
+
+  it("imports on demand when the cache has never covered the area", async () => {
+    // Searching a city the cache has never seen must reach /api/auto-cache-venues.
+    // Short-circuiting here is what made a searched location show zero venues forever.
+    const fetchSpy = vi.fn(async (_url: string, _init?: unknown) => ({
+      ok: true,
+      json: async () => ({ type: "FeatureCollection", features: [] }),
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { fetchSportsVenues } = await loadModule(makeSupabaseStub({ data: [], error: null }));
+
+    await fetchSportsVenues(BBOX);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]![0]).toBe("/api/auto-cache-venues");
   });
 
   it("falls back to the network only when the DB is actually unavailable", async () => {
@@ -119,6 +140,26 @@ describe("fetchSportsVenues fallback policy", () => {
     await fetchSportsVenues(BBOX);
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // The map calls this variant, so the on-demand import has to survive here too.
+  it("fetchSportsVenuesWithProgress imports an uncached area rather than returning nothing", async () => {
+    const feature = {
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [-97.1172948, 32.7273042] },
+      properties: { id: "way/461237079", sport: "soccer", leisure: "pitch" },
+    };
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ type: "FeatureCollection", features: [feature] }),
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { fetchSportsVenuesWithProgress } = await loadModule(makeSupabaseStub({ data: [], error: null }));
+
+    const res = await fetchSportsVenuesWithProgress(32.73, -97.115, 3);
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(res.geojson.features).toHaveLength(1);
   });
 });
 
