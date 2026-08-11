@@ -10,7 +10,7 @@
 -- Extension-owned objects (PostGIS, pg_trgm) are intentionally excluded — the
 -- `create extension` statements below bring them back.
 --
--- Generated: 2026-08-10T11:56:46.519Z
+-- Generated: 2026-08-11T18:15:35.628Z
 
 set search_path = public;
 
@@ -120,7 +120,8 @@ create table if not exists public.game_participants (
   user_id uuid not null,
   joined_at timestamp with time zone default now(),
   role text default 'player'::text not null,
-  confirmed_result boolean default false not null
+  confirmed_result boolean default false not null,
+  chat_hidden_at timestamp with time zone
 );
 
 create table if not exists public.game_results (
@@ -321,6 +322,13 @@ create table if not exists public.venue_comments (
   created_at timestamp with time zone default now() not null
 );
 
+create table if not exists public.venue_coverage (
+  tile_x integer not null,
+  tile_y integer not null,
+  warmed_at timestamp with time zone default now() not null,
+  venue_count integer default 0 not null
+);
+
 create table if not exists public.venue_photo_reports (
   photo_id uuid not null,
   user_id uuid not null,
@@ -414,6 +422,8 @@ alter table public.user_statuses add constraint user_statuses_pkey PRIMARY KEY (
 alter table public.venue_comment_likes add constraint venue_comment_likes_pkey PRIMARY KEY (comment_id, user_id);
 
 alter table public.venue_comments add constraint venue_comments_pkey PRIMARY KEY (id);
+
+alter table public.venue_coverage add constraint venue_coverage_pkey PRIMARY KEY (tile_x, tile_y);
 
 alter table public.venue_photo_reports add constraint venue_photo_reports_pkey PRIMARY KEY (photo_id, user_id);
 
@@ -707,6 +717,8 @@ CREATE INDEX IF NOT EXISTS venue_comments_user_id_idx ON public.venue_comments U
 
 CREATE INDEX IF NOT EXISTS venue_comments_venue_created_idx ON public.venue_comments USING btree (venue_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS venue_coverage_tile_idx ON public.venue_coverage USING btree (tile_x, tile_y, warmed_at);
+
 CREATE INDEX IF NOT EXISTS venue_photo_reports_user_id_idx ON public.venue_photo_reports USING btree (user_id);
 
 CREATE INDEX IF NOT EXISTS venue_photos_user_id_idx ON public.venue_photos USING btree (user_id);
@@ -896,6 +908,56 @@ begin
 
   return v_row;
 end $function$;
+
+CREATE OR REPLACE FUNCTION public.archive_game_chat(p_game_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_user  uuid;
+  v_ended boolean;
+  v_rows  int;
+begin
+  v_user := auth.uid();
+  if v_user is null then
+    return jsonb_build_object('success', false, 'error', 'Not authenticated');
+  end if;
+
+  -- Same definition of "over" the map uses: an explicit end state, a scheduled
+  -- window that has closed, or an untimed game past the 3-day map TTL.
+  select g.status in ('completed', 'cancelled')
+         or (g.ends_at is not null and g.ends_at <= now())
+         or (g.ends_at is null and g.starts_at is null and g.created_at <= now() - interval '3 days')
+    into v_ended
+    from public.games g
+   where g.id = p_game_id;
+
+  if v_ended is null then
+    return jsonb_build_object('success', false, 'error', 'Game not found');
+  end if;
+
+  if not v_ended then
+    return jsonb_build_object('success', false, 'error', 'You can archive this chat once the game has ended');
+  end if;
+
+  update public.game_participants
+     set chat_hidden_at = now()
+   where game_id = p_game_id
+     and user_id = v_user;
+
+  get diagnostics v_rows = row_count;
+  if v_rows = 0 then
+    return jsonb_build_object('success', false, 'error', 'Not in this game');
+  end if;
+
+  return jsonb_build_object('success', true, 'message', 'Chat archived');
+
+exception when others then
+  return jsonb_build_object('success', false, 'error', SQLERRM);
+end;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.can_dm(p_other_user_id uuid)
  RETURNS boolean
@@ -1596,6 +1658,7 @@ AS $function$
       g.status <> 'live'
       or (coalesce(g.live_started_at, g.updated_at, g.created_at) > now() - interval '24 hours')
     )
+    -- Timed: expire at ends_at. Untimed: age out on the same 3-day map TTL as get_live_nearby.
     and (
       (g.ends_at is not null and g.ends_at > now())
       or (g.ends_at is null and g.created_at > now() - interval '3 days')
@@ -1765,7 +1828,7 @@ CREATE OR REPLACE FUNCTION public.get_my_game_inbox()
  SET search_path TO 'public'
 AS $function$
   with my_games as (
-    select gp.game_id
+    select gp.game_id, gp.chat_hidden_at
       from public.game_participants gp
      where gp.user_id = auth.uid()
   ),
@@ -1805,6 +1868,8 @@ AS $function$
     join my_games mg on mg.game_id = g.id
     left join counts c     on c.game_id  = g.id
     left join last_msgs lm on lm.game_id = g.id
+   where mg.chat_hidden_at is null
+      or coalesce(lm.last_message_at, '-infinity'::timestamptz) > mg.chat_hidden_at
    order by greatest(
               coalesce(lm.last_message_at, 'epoch'::timestamptz),
               coalesce(g.ends_at,         'epoch'::timestamptz),
@@ -3358,6 +3423,38 @@ begin
   return NEW;
 end $function$;
 
+CREATE OR REPLACE FUNCTION public.unarchive_game_chat(p_game_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_user uuid;
+  v_rows int;
+begin
+  v_user := auth.uid();
+  if v_user is null then
+    return jsonb_build_object('success', false, 'error', 'Not authenticated');
+  end if;
+
+  update public.game_participants
+     set chat_hidden_at = null
+   where game_id = p_game_id
+     and user_id = v_user;
+
+  get diagnostics v_rows = row_count;
+  if v_rows = 0 then
+    return jsonb_build_object('success', false, 'error', 'Not in this game');
+  end if;
+
+  return jsonb_build_object('success', true, 'message', 'Chat restored');
+
+exception when others then
+  return jsonb_build_object('success', false, 'error', SQLERRM);
+end;
+$function$;
+
 CREATE OR REPLACE FUNCTION public.update_my_location(p_lat double precision, p_lng double precision)
  RETURNS void
  LANGUAGE plpgsql
@@ -3569,6 +3666,8 @@ alter table public.venue_comment_likes enable row level security;
 
 alter table public.venue_comments enable row level security;
 
+alter table public.venue_coverage enable row level security;
+
 alter table public.venue_photo_reports enable row level security;
 
 alter table public.venue_photos enable row level security;
@@ -3762,6 +3861,8 @@ create policy "venue_comments: delete own" on public.venue_comments as PERMISSIV
 create policy "venue_comments: insert own" on public.venue_comments as PERMISSIVE for INSERT to authenticated with check ((( SELECT auth.uid() AS uid) = user_id));
 
 create policy "venue_comments: read all" on public.venue_comments as PERMISSIVE for SELECT to anon, authenticated using (true);
+
+create policy venue_coverage_public_read on public.venue_coverage as PERMISSIVE for SELECT to anon, authenticated using (true);
 
 create policy "venue_photo_reports: insert own" on public.venue_photo_reports as PERMISSIVE for INSERT to authenticated with check ((( SELECT auth.uid() AS uid) = user_id));
 
@@ -3983,6 +4084,12 @@ grant delete, insert, references, select, trigger, truncate, update on public.ve
 
 grant delete, insert, references, select, trigger, truncate, update on public.venue_comments to service_role;
 
+grant delete, insert, references, select, trigger, truncate, update on public.venue_coverage to anon;
+
+grant delete, insert, references, select, trigger, truncate, update on public.venue_coverage to authenticated;
+
+grant delete, insert, references, select, trigger, truncate, update on public.venue_coverage to service_role;
+
 grant delete, insert, references, select, trigger, truncate, update on public.venue_photo_reports to anon;
 
 grant delete, insert, references, select, trigger, truncate, update on public.venue_photo_reports to authenticated;
@@ -4028,6 +4135,10 @@ grant execute on function public.add_venue_comment(p_venue_id text, p_body text,
 grant execute on function public.add_venue_photo(p_venue_id text, p_storage_path text, p_caption text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to authenticated;
 
 grant execute on function public.add_venue_photo(p_venue_id text, p_storage_path text, p_caption text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to service_role;
+
+grant execute on function public.archive_game_chat(p_game_id uuid) to authenticated;
+
+grant execute on function public.archive_game_chat(p_game_id uuid) to service_role;
 
 grant execute on function public.can_dm(p_other_user_id uuid) to authenticated;
 
@@ -4322,6 +4433,10 @@ grant execute on function public.trg_notify_note_thread_participants() to servic
 grant execute on function public.trg_notify_on_follow() to service_role;
 
 grant execute on function public.trg_venue_photo_report_applied() to service_role;
+
+grant execute on function public.unarchive_game_chat(p_game_id uuid) to authenticated;
+
+grant execute on function public.unarchive_game_chat(p_game_id uuid) to service_role;
 
 grant execute on function public.update_my_location(p_lat double precision, p_lng double precision) to authenticated;
 

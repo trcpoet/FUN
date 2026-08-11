@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { GameRow } from "../../lib/supabase";
 import { cn } from "./ui/utils";
 import { format } from "date-fns";
-import { Clock, Navigation, Share2, X, Users } from "lucide-react";
+import { ArrowLeft, Clock, Info, Navigation, Share2, X, Users } from "lucide-react";
 import { sportEmojiFor } from "../../lib/sportDisplay";
 import { glassMessengerPanel } from "../styles/glass";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
@@ -10,6 +11,7 @@ import type { NavigateToOptions } from "../../lib/directions";
 import { directionsHref } from "../lib/venueInfoHelpers";
 import { GoogleMapsLinkButton } from "./GoogleMapsLinkButton";
 import { GameActionBar } from "./game/GameActionBar";
+import { GameDetailsView } from "./game/GameDetailsView";
 import { gameViewerRole } from "../lib/gameViewerRole";
 
 const SPORT_GRADIENT: Record<string, string> = {
@@ -75,6 +77,10 @@ export function GameEventPopup({
   onNavigateTo,
 }: GameEventPopupProps) {
   const [optimisticLive, setOptimisticLive] = useState(false);
+  // Two views in one card: "actions" is what you do, "details" is what it is. Same pattern
+  // (and the same reason) as the venue modal's ℹ️.
+  const [view, setView] = useState<"actions" | "details">("actions");
+  const reduceMotion = useReducedMotion();
   const hasCoords = typeof game.lat === "number" && typeof game.lng === "number";
 
   // Membership belongs to the caller — it reads `game_participants` — so feed those props
@@ -178,6 +184,19 @@ export function GameEventPopup({
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
+              onClick={() => setView((v) => (v === "details" ? "actions" : "details"))}
+              className="inline-flex size-7 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors"
+              aria-label={view === "details" ? "Back to game actions" : "Game details"}
+              title={view === "details" ? "Back" : "Details"}
+            >
+              {view === "details" ? (
+                <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <Info className="h-3.5 w-3.5" aria-hidden />
+              )}
+            </button>
+            <button
+              type="button"
               onClick={() => void handleShare()}
               className="inline-flex size-7 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors"
               aria-label="Share game"
@@ -195,8 +214,9 @@ export function GameEventPopup({
           </div>
         </div>
 
-        {/* Distance / ETA row — Mapbox walking time */}
-        {hasCoords && mapsHref ? (
+        {/* Distance / ETA row — Mapbox walking time. Actions only: the details view is about
+            the game itself, and the row is the tallest thing in the header. */}
+        {view === "actions" && hasCoords && mapsHref ? (
           <div className="mt-3 flex items-center gap-2 rounded-xl bg-black/20 px-3 py-2">
             {onNavigateTo && viewerCoords ? (
               <button
@@ -233,80 +253,101 @@ export function GameEventPopup({
         ) : null}
       </div>
 
-      <div className="px-4 py-3 space-y-3">
-        {/* Time + spots row */}
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 shrink-0" />
-            {game.starts_at ? format(new Date(game.starts_at), "MMM d, h:mm a") : "—"}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5 shrink-0" />
-            {game.spots_remaining != null
-              ? game.spots_remaining === 0
-                ? `Full${game.substitute_count ? ` +${game.substitute_count}` : ""}`
-                : `${participantCount} / ${game.spots_needed}`
-              : `${game.spots_needed} max`}
-          </span>
-        </div>
-
-        {/* Avatar stack */}
-        {participantCount > 0 && (
-          <div className="flex items-center gap-2">
-            <div className="flex items-center">
-              {Array.from({ length: shownAvatars }).map((_, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "w-7 h-7 rounded-full border-2 border-slate-900 bg-gradient-to-br flex items-center justify-center",
-                    i > 0 && "-ml-2",
-                    ["from-emerald-500 to-teal-700","from-sky-500 to-blue-700","from-violet-500 to-purple-700","from-orange-500 to-amber-700"][i % 4]
-                  )}
-                >
-                  <Users className="w-3 h-3 text-white/80" />
-                </div>
-              ))}
-              {overflowCount > 0 && (
-                <div className="-ml-2 w-7 h-7 rounded-full border-2 border-slate-900 bg-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300">
-                  +{overflowCount}
-                </div>
-              )}
+      <AnimatePresence mode="wait" initial={false}>
+        {view === "details" ? (
+          <motion.div
+            key="details"
+            initial={reduceMotion ? false : { opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -12 }}
+            transition={{ duration: 0.16 }}
+          >
+            <GameDetailsView game={game} nowMs={Date.now()} />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="actions"
+            initial={reduceMotion ? false : { opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 12 }}
+            transition={{ duration: 0.16 }}
+            className="px-4 py-3 space-y-3"
+          >
+            {/* Time + spots row */}
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 shrink-0" />
+                {game.starts_at ? format(new Date(game.starts_at), "MMM d, h:mm a") : "—"}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 shrink-0" />
+                {game.spots_remaining != null
+                  ? game.spots_remaining === 0
+                    ? `Full${game.substitute_count ? ` +${game.substitute_count}` : ""}`
+                    : `${participantCount} / ${game.spots_needed}`
+                  : `${game.spots_needed} max`}
+              </span>
             </div>
-            <span className="text-xs text-slate-500">
-              {participantCount === 1 ? "1 player in" : `${participantCount} players in`}
-            </span>
-          </div>
+
+            {/* Avatar stack */}
+            {participantCount > 0 && (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center">
+                  {Array.from({ length: shownAvatars }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        "w-7 h-7 rounded-full border-2 border-slate-900 bg-gradient-to-br flex items-center justify-center",
+                        i > 0 && "-ml-2",
+                        ["from-emerald-500 to-teal-700","from-sky-500 to-blue-700","from-violet-500 to-purple-700","from-orange-500 to-amber-700"][i % 4]
+                      )}
+                    >
+                      <Users className="w-3 h-3 text-white/80" />
+                    </div>
+                  ))}
+                  {overflowCount > 0 && (
+                    <div className="-ml-2 w-7 h-7 rounded-full border-2 border-slate-900 bg-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300">
+                      +{overflowCount}
+                    </div>
+                  )}
+                </div>
+                <span className="text-xs text-slate-500">
+                  {participantCount === 1 ? "1 player in" : `${participantCount} players in`}
+                </span>
+              </div>
+            )}
+
+            {/* Description */}
+            {game.description?.trim() ? (
+              <p className="text-slate-400 text-xs leading-snug line-clamp-2">
+                {game.description.trim()}
+              </p>
+            ) : null}
+
+            {/* Action buttons */}
+            <GameActionBar
+              game={game}
+              role={role}
+              density="full"
+              onJoin={onJoin}
+              onLeave={onLeave}
+              onChat={
+                onOpenMessages
+                  ? (g) => {
+                      onOpenMessages(g);
+                      onClose();
+                    }
+                  : undefined
+              }
+              onStart={onStartHostedGame}
+              onEnd={onEndHostedGame}
+              onDelete={onDeleteHostedGame}
+              onDeleted={onClose}
+              onStarted={() => setOptimisticLive(true)}
+            />
+          </motion.div>
         )}
-
-        {/* Description */}
-        {game.description?.trim() ? (
-          <p className="text-slate-400 text-xs leading-snug line-clamp-2">
-            {game.description.trim()}
-          </p>
-        ) : null}
-
-        {/* Action buttons */}
-        <GameActionBar
-          game={game}
-          role={role}
-          density="full"
-          onJoin={onJoin}
-          onLeave={onLeave}
-          onChat={
-            onOpenMessages
-              ? (g) => {
-                  onOpenMessages(g);
-                  onClose();
-                }
-              : undefined
-          }
-          onStart={onStartHostedGame}
-          onEnd={onEndHostedGame}
-          onDelete={onDeleteHostedGame}
-          onDeleted={onClose}
-          onStarted={() => setOptimisticLive(true)}
-        />
-      </div>
+      </AnimatePresence>
     </div>
   );
 }

@@ -523,6 +523,49 @@ export function MapboxMap(props: MapboxMapProps) {
   const selectedVenueIdRef = useRef<string | null>(null);
   selectedVenueIdRef.current = selectedVenue?.id ?? null;
 
+  /**
+   * Select a game, pulse its icon, and open its card at a screen point.
+   *
+   * Lives out here rather than inside the layer effect because two callers need it: the GL
+   * icon click, and the venue modal — a game absorbed by a venue pin has no icon to click,
+   * so the modal's row is its only way to this card.
+   */
+  const openGameCard = useCallback((game: GameRow, point: { x: number; y: number }) => {
+    gameInteractionTsRef.current = Date.now();
+    onSelectGameRef.current(game);
+    bumpGameIcon(game.id);
+    setEventPopup({ game, point });
+  }, []);
+
+  /**
+   * Where to anchor a game's card.
+   *
+   * The card is drawn above its point (`translate(-50%, calc(-100% - 14px))`), so a game near
+   * the top or the edge of the viewport would clip off-screen. Project the game's own coords
+   * when they land comfortably inside the container, otherwise fall back to the centre — the
+   * same anchor the live-strip path uses.
+   */
+  const gameCardAnchor = useCallback((game: GameRow): { x: number; y: number } => {
+    const map = mapRef.current;
+    const rect = map?.getContainer().getBoundingClientRect();
+    const centre = { x: (rect?.width ?? 0) / 2, y: (rect?.height ?? 0) / 2 };
+    if (!map || !rect) return centre;
+
+    try {
+      const p = map.project([game.lng, game.lat]);
+      const MARGIN_X = 160; // half the card's max width
+      const MARGIN_TOP = 260; // the card hangs above the point
+      const inside =
+        p.x >= MARGIN_X &&
+        p.x <= rect.width - MARGIN_X &&
+        p.y >= MARGIN_TOP &&
+        p.y <= rect.height - 16;
+      return inside ? { x: p.x, y: p.y } : centre;
+    } catch (_) {
+      return centre;
+    }
+  }, []);
+
   /** 0–1 easing with flat derivatives at endpoints (smooth hover zoom in/out). */
   const smootherstep = (t: number) => {
     const x = Math.min(1, Math.max(0, t));
@@ -1451,12 +1494,7 @@ export function MapboxMap(props: MapboxMapProps) {
     // Notes are drawn as DOM markers in a separate effect (pulsating icon).
 
     // Select a game, pulse its icon, and open its card at the given screen point.
-    const openPopupForGame = (game: GameRow, mapPoint: { x: number; y: number }) => {
-      gameInteractionTsRef.current = Date.now();
-      onSelectGameRef.current(game);
-      bumpGameIcon(game.id);
-      setEventPopup({ game, point: mapPoint });
-    };
+    const openPopupForGame = openGameCard;
 
     // Translate a clicked GL feature back to its full game row, then open the popup.
     const openGameFromFeature = (e: {
@@ -1545,7 +1583,14 @@ export function MapboxMap(props: MapboxMapProps) {
       gameIconHoverTargetRef.current = 0;
       gameIconHoverLastTsRef.current = null;
     };
-  }, [mapLoaded, basemapStyleEpoch, applyMapLayerVisibility, applyDomMarkerScale, applyGameIconLayout]);
+  }, [
+    mapLoaded,
+    basemapStyleEpoch,
+    applyMapLayerVisibility,
+    applyDomMarkerScale,
+    applyGameIconLayout,
+    openGameCard,
+  ]);
 
   /**
    * What sits on a venue, and what stands alone.
@@ -3342,7 +3387,18 @@ export function MapboxMap(props: MapboxMapProps) {
           onNavigateTo={onNavigateTo}
           onJoinGame={onJoinGame}
           onLeaveGame={onLeaveGame}
-          onOpenChat={onOpenMessagesForGame}
+          onOpenChat={(g) => {
+            // The messenger sheet sits at z-[90] and this modal at z-[2000] — leaving the
+            // modal up opened the chat behind it, which read as a dead button.
+            onOpenMessagesForGame?.(g);
+            onSelectVenue(null);
+            setVenuePopupPoint(null);
+          }}
+          onOpenGameDetails={(g) => {
+            onSelectVenue(null);
+            setVenuePopupPoint(null);
+            openGameCard(g, gameCardAnchor(g));
+          }}
           onStartHostedGame={onStartHostedGame}
           onEndHostedGame={onEndHostedGame}
           onDeleteHostedGame={onDeleteHostedGame}
@@ -3384,6 +3440,10 @@ export function MapboxMap(props: MapboxMapProps) {
           onOpenChat={(g) => {
             onOpenMessagesForGame?.(g);
             setColocatedModalGames(null);
+          }}
+          onOpenGameDetails={(g) => {
+            setColocatedModalGames(null);
+            openGameCard(g, gameCardAnchor(g));
           }}
         />
       )}

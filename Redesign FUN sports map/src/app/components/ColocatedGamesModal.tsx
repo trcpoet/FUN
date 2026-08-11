@@ -23,6 +23,8 @@ type ColocatedGamesModalProps = {
   /** Host-only: live -> completed. */
   onEndGame?: (game: GameRow) => Promise<void> | void;
   onOpenChat?: (game: GameRow) => void;
+  /** Open one game's full card — stacked games share a pin, so a row is the only way in. */
+  onOpenGameDetails?: (game: GameRow) => void;
 };
 
 function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -52,6 +54,7 @@ export function ColocatedGamesModal({
   onStartGame,
   onEndGame,
   onOpenChat,
+  onOpenGameDetails,
 }: ColocatedGamesModalProps) {
   const [expandedSport, setExpandedSport] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -212,6 +215,7 @@ export function ColocatedGamesModal({
                               onJoin={onJoinGame}
                               onLeave={onLeaveGame}
                               onChat={onOpenChat}
+                              onOpenDetails={onOpenGameDetails}
                               onStart={onStartGame}
                               onEnd={onEndGame}
                               onDelete={onDeleteGame}

@@ -625,9 +625,9 @@ export default function App() {
     await reloadJoinedGameIds();
     refetchGames();
 
-    // If the user is currently viewing the thread for this game, close it.
-    if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === gameId) {
-      setMessagesOpen(false);
+    // The thread is gone, but the messenger isn't: drop back to the inbox rather than
+    // shutting the whole sheet, which reads as the app closing itself on you.
+    if (messengerFocus?.kind === "game" && messengerFocus.gameId === gameId) {
       setMessengerFocus(null);
     }
     return null;
@@ -643,8 +643,8 @@ export default function App() {
     await reloadJoinedGameIds();
     refetchGames();
     if (selectedGame?.id === game.id) setSelectedGame(null);
-    if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
-      setMessagesOpen(false);
+    // Same as leaving: return to the inbox, don't yank the messenger shut.
+    if (messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
       setMessengerFocus(null);
     }
     return true;
@@ -1099,6 +1099,9 @@ export default function App() {
         ensureSession={() => ensureSession("chat")}
         joinedGameIds={joinedGameIds}
         onLeaveThread={handleLeaveGame}
+        onStartHostedGame={handleStartHostedGame}
+        onEndHostedGame={handleEndHostedGame}
+        onDeleteHostedGame={handleDeleteHostedGame}
         inboxBootstrap={gameInboxBootstrap}
         dmInboxBootstrap={dmInboxBootstrap}
         onPlanRematch={(payload: PlanRematchPayload) => {

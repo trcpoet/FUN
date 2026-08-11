@@ -167,3 +167,35 @@ describe("host controls", () => {
     expect(r.canDelete).toBe(false);
   });
 });
+
+describe("archiving a finished chat", () => {
+  const joined = new Set(["g1"]);
+  const endedGame = () => makeGame({ starts_at: iso(-5 * HOUR), duration_minutes: 60 });
+
+  it("offers archive to the host — their only way out, since canLeave never is", () => {
+    const r = role(endedGame(), { currentUserId: HOST, joinedGameIds: joined });
+    expect(r.canArchive).toBe(true);
+    expect(r.canLeave).toBe(false);
+  });
+
+  it("offers archive to a player once the game is over", () => {
+    expect(role(endedGame(), { currentUserId: GUEST, joinedGameIds: joined }).canArchive).toBe(true);
+  });
+
+  it("withholds archive while the game is still standing", () => {
+    const upcoming = makeGame({ starts_at: iso(HOUR) });
+    expect(role(upcoming, { currentUserId: HOST, joinedGameIds: joined }).canArchive).toBe(false);
+
+    const live = makeGame({ status: "live", live_started_at: iso(-10 * MIN) });
+    expect(role(live, { currentUserId: HOST, joinedGameIds: joined }).canArchive).toBe(false);
+  });
+
+  it("withholds archive from someone who was never in the game", () => {
+    expect(role(endedGame(), { currentUserId: GUEST }).canArchive).toBe(false);
+  });
+
+  it("treats a cancelled game as archivable", () => {
+    const r = role(makeGame({ status: "cancelled" }), { currentUserId: HOST, joinedGameIds: joined });
+    expect(r.canArchive).toBe(true);
+  });
+});
