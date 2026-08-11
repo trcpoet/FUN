@@ -23,9 +23,14 @@ import { OSM_VENUE_MAP_SELECT } from "../../lib/osmVenueColumns";
 import {
   bboxFromCenterRadius,
   isCoverageStale,
+  sortTilesByProximity,
   tileCountForBbox,
   tileRangeForBbox,
+  tileToBbox,
+  tilesForBbox,
+  VENUE_WARM_MAX_TILES,
   VENUE_WARM_RADIUS_KM,
+  type VenueTile,
 } from "../../../server/lib/venueTiles";
 import type { SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 import { dbRowToVenueProperties } from "./venueSelection";
@@ -159,41 +164,77 @@ async function isAreaCovered(
 }
 
 /**
- * Areas we have already asked the server to warm, so a map that re-reads while an import is
- * still running does not fire the same request on every pass. Keyed by tile range, not by
- * exact bbox — two viewports a metre apart are the same import.
+ * Tiles we have already asked the server to import, so a map that re-reads while an import
+ * is still running does not re-request the same ground on every pass.
  */
 const warmRequested = new Set<string>();
 
-/**
- * Ask the server to import this area. Fire-and-forget by design.
- *
- * Deliberately NOT wired to the caller's AbortController: the map aborts venue fetches
- * constantly (every pan, every filter change), and under Fluid Compute a cancelled request
- * can cancel the server work with it — which would mean the import restarts from nothing
- * every time the user nudges the map, and never finishes.
- */
-function warmVenueArea(centerLat: number, centerLng: number): void {
-  const bbox = bboxFromCenterRadius(centerLat, centerLng, VENUE_WARM_RADIUS_KM);
-  const range = tileRangeForBbox(bbox);
-  const key = `${range.minX},${range.minY},${range.maxX},${range.maxY}`;
+/** Guards against several warm walks running at once — see `warmVenueArea`. */
+let warmChainRunning = false;
+
+const tileKey = (tile: VenueTile) => `${tile.x},${tile.y}`;
+
+/** Ask the server to import one tile. Resolves either way; never throws. */
+async function warmTile(tile: VenueTile): Promise<void> {
+  const key = tileKey(tile);
   if (warmRequested.has(key)) return;
   warmRequested.add(key);
 
-  // Only a request the server actually accepted counts as "asked". A rejected one
-  // (rate-limited, or a deployment missing SUPABASE_URL, which answers 503) must be
-  // forgettable, or one bad minute would leave the tab unable to warm anything again.
-  const forget = () => warmRequested.delete(key);
+  const b = tileToBbox(tile);
+  try {
+    const res = await fetch(WARM_PATH, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Centre of the tile, so the server derives exactly the tile we mean.
+      body: JSON.stringify({
+        lat: (b.minLat + b.maxLat) / 2,
+        lng: (b.minLng + b.maxLng) / 2,
+      }),
+    });
+    // Only a request the server accepted counts as "asked". A rejected one (rate-limited,
+    // Overpass down, or a deployment missing SUPABASE_URL, which answers 503) must be
+    // forgettable, or one bad minute would leave the tab unable to warm that ground again.
+    if (!res.ok) warmRequested.delete(key);
+  } catch {
+    warmRequested.delete(key);
+  }
+}
 
-  void fetch(WARM_PATH, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ lat: centerLat, lng: centerLng, radiusKm: VENUE_WARM_RADIUS_KM }),
-  })
-    .then((res) => {
-      if (!res.ok) forget();
-    })
-    .catch(forget);
+/**
+ * Ask the server to import the area around a point. Fire-and-forget by design.
+ *
+ * Walks outward from the centre one tile at a time, so the ground under the viewport lands
+ * first and the map can paint it while the rest is still arriving. Sequential rather than
+ * parallel on purpose: a burst of concurrent requests is exactly what makes the public
+ * Overpass mirrors start refusing us, and each tile is committed on its own anyway.
+ *
+ * Deliberately NOT wired to the caller's AbortController — the map aborts venue reads
+ * constantly (every pan, every filter change), and cancelling those must not cancel an
+ * import that is already underway, or it would restart from nothing and never finish.
+ */
+function warmVenueArea(centerLat: number, centerLng: number): void {
+  // At most one chain at a time. The map re-reads every few seconds while an import is
+  // outstanding, and without this each re-read would start a *second* chain for whichever
+  // tiles the first had not reached yet — turning a deliberately sequential walk into the
+  // concurrent burst that gets us refused by the Overpass mirrors.
+  if (warmChainRunning) return;
+
+  const bbox = bboxFromCenterRadius(centerLat, centerLng, VENUE_WARM_RADIUS_KM);
+  const tiles = sortTilesByProximity(tilesForBbox(bbox), centerLat, centerLng)
+    .filter((t) => !warmRequested.has(tileKey(t)))
+    .slice(0, VENUE_WARM_MAX_TILES);
+  if (tiles.length === 0) return;
+
+  warmChainRunning = true;
+  void (async () => {
+    try {
+      for (const tile of tiles) {
+        await warmTile(tile);
+      }
+    } finally {
+      warmChainRunning = false;
+    }
+  })();
 }
 
 /**
