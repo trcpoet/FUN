@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { GameRow, ProfileNearbyRow } from "../lib/supabase";
 import { planNearbyQueries } from "../lib/nearbyQueryPlan";
+import { retryTransient } from "../lib/retryTransient";
+import { isTransientRpcError } from "../lib/rpcErrors";
 
 const PROFILES_LIMIT = 50;
 
@@ -130,21 +132,34 @@ export function useNearbyMapQueries(params: {
     setLoading(true);
     setGamesError(null);
 
+    // Retried, because a 5xx from the API layer says nothing about whether games exist here.
+    // `shouldContinue` drops the retries the moment this effect is torn down, so panning the
+    // map doesn't leave a queue of doomed requests waiting out their backoff.
+    const alive = () => !cancelled;
+
     const gamesRpc = needGames
-      ? supabase.rpc("get_games_nearby", {
-          lat: gamesLat,
-          lng: gamesLng,
-          radius_km: gamesRadiusKm,
-        })
+      ? retryTransient(
+          () =>
+            supabase!.rpc("get_games_nearby", {
+              lat: gamesLat,
+              lng: gamesLng,
+              radius_km: gamesRadiusKm,
+            }),
+          { shouldContinue: alive },
+        )
       : Promise.resolve({ data: null, error: null });
 
     const profilesRpc = needProfiles
-      ? supabase.rpc("get_profiles_nearby", {
-          lat: profilesLat,
-          lng: profilesLng,
-          radius_km: athletesRadiusKm,
-          limit_count: PROFILES_LIMIT,
-        })
+      ? retryTransient(
+          () =>
+            supabase!.rpc("get_profiles_nearby", {
+              lat: profilesLat,
+              lng: profilesLng,
+              radius_km: athletesRadiusKm,
+              limit_count: PROFILES_LIMIT,
+            }),
+          { shouldContinue: alive },
+        )
       : Promise.resolve({ data: null, error: null });
 
     Promise.all([gamesRpc, profilesRpc])
@@ -157,8 +172,12 @@ export function useNearbyMapQueries(params: {
 
         if (needGames) {
           if (gamesRes.error) {
-            setGamesError(gamesRes.error.message);
-            setGames([]);
+            setGamesError(gamesRes.error.message ?? "Couldn't load games");
+            // Only an answer clears the map. After retries have been exhausted on a 5xx we
+            // still don't know what is out there, and `setGames([])` would state, in the only
+            // language the map has, that there is nothing — which is what made a brief API
+            // outage look like an empty city.
+            if (!isTransientRpcError(gamesRes.error)) setGames([]);
           } else {
             setGamesError(null);
             nextGames = (gamesRes.data as GameRow[]) ?? [];
@@ -170,7 +189,7 @@ export function useNearbyMapQueries(params: {
 
         if (needProfiles) {
           if (profilesRes.error) {
-            setProfiles([]);
+            if (!isTransientRpcError(profilesRes.error)) setProfiles([]);
           } else {
             nextProfiles = (profilesRes.data as ProfileNearbyRow[]) ?? [];
             setProfiles(nextProfiles);
@@ -196,8 +215,8 @@ export function useNearbyMapQueries(params: {
         if (!cancelled) {
           setLoading(false);
           setGamesError(String(e));
-          setGames([]);
-          setProfiles([]);
+          // A thrown request is a failure to ask, not an answer — same reasoning as above,
+          // so the last known pins stay on screen instead of the map emptying itself.
         }
       });
 

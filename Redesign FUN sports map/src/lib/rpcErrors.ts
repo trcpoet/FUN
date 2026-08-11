@@ -20,6 +20,14 @@ export type RpcErrorKind =
   | "missing-function"
   | "signature-mismatch"
   | "network"
+  /**
+   * The server is there but not answering right now — a 5xx from PostgREST or the gateway.
+   *
+   * These used to land in "other", which callers treat as a real answer: `get_games_nearby`
+   * failing with a 503 blanked the map exactly as if the area had no games. It is a different
+   * thing from "no games here" and must be retried, not rendered.
+   */
+  | "unavailable"
   | "other";
 
 export function classifyRpcError(err: RpcErrorLike): RpcErrorKind {
@@ -36,6 +44,28 @@ export function classifyRpcError(err: RpcErrorLike): RpcErrorKind {
 
   if (m.includes("failed to fetch") || m.includes("fetch failed") || m.includes("load failed")) {
     return "network";
+  }
+
+  // Checked before the missing-function heuristics below: a gateway 503 body can carry text
+  // like "service unavailable" that must not be read as "this function does not exist".
+  const status = typeof err.status === "number" ? err.status : Number(code);
+  if (Number.isFinite(status) && status >= 500 && status <= 599) {
+    return "unavailable";
+  }
+  if (
+    m.includes("service unavailable") ||
+    m.includes("bad gateway") ||
+    m.includes("gateway timeout") ||
+    m.includes("upstream connect error") ||
+    m.includes("server error") ||
+    // PostgREST when it cannot reach or has lost Postgres.
+    m.includes("database connection lost") ||
+    m.includes("could not connect to server") ||
+    m.includes("connection refused") ||
+    m.includes("too many connections") ||
+    m.includes("remaining connection slots")
+  ) {
+    return "unavailable";
   }
 
   const looksMissing =
@@ -59,6 +89,17 @@ export function isPermissionDenied(err: RpcErrorLike): boolean {
   return classifyRpcError(err) === "permission-denied";
 }
 
+/**
+ * Worth trying again in a moment: the request never got a real answer.
+ *
+ * Deliberately narrow. A permission failure, a missing function or a genuine empty result are
+ * all final — retrying them just multiplies the load while the UI lies about why it is empty.
+ */
+export function isTransientRpcError(err: RpcErrorLike): boolean {
+  const kind = classifyRpcError(err);
+  return kind === "unavailable" || kind === "network";
+}
+
 /** True when the RPC is genuinely absent from the DB (pre-migration), not merely denied. */
 export function isMissingRpc(err: RpcErrorLike): boolean {
   const kind = classifyRpcError(err);
@@ -74,6 +115,8 @@ export function friendlyRpcError(err: RpcErrorLike, feature: string): string {
       return `${feature} isn't available yet — the server is missing an update.`;
     case "network":
       return "Can't reach the server. Check your connection.";
+    case "unavailable":
+      return `${feature} is taking a moment — the server is busy. Retrying…`;
     default:
       return err?.message || "Something went wrong.";
   }
