@@ -29,13 +29,38 @@ async function fetchMyGameInboxFromTables(): Promise<{
   } = await supabase.auth.getUser();
   if (!user) return { data: null, error: new Error("Not signed in") };
 
-  const { data: mine, error: e1 } = await supabase
-    .from("game_participants")
-    .select("game_id")
-    .eq("user_id", user.id);
-  if (e1) return { data: null, error: new Error(e1.message) };
+  // `chat_hidden_at` only exists after 20260811000000; fall back so an un-migrated database
+  // still gets an inbox rather than an error.
+  type MineRow = { game_id: string; chat_hidden_at?: string | null };
+  let mine: MineRow[] | null = null;
+  {
+    const res = await supabase
+      .from("game_participants")
+      .select("game_id, chat_hidden_at")
+      .eq("user_id", user.id);
+    if (res.error) {
+      const m = (res.error.message ?? "").toLowerCase();
+      const columnMissing =
+        res.error.code === "42703" || (m.includes("column") && m.includes("does not exist"));
+      if (!columnMissing) return { data: null, error: new Error(res.error.message) };
+      const fallback = await supabase
+        .from("game_participants")
+        .select("game_id")
+        .eq("user_id", user.id);
+      if (fallback.error) return { data: null, error: new Error(fallback.error.message) };
+      mine = (fallback.data ?? []) as MineRow[];
+    } else {
+      mine = (res.data ?? []) as MineRow[];
+    }
+  }
 
-  const gameIds = [...new Set((mine ?? []).map((r: { game_id: string }) => r.game_id))];
+  const hiddenAtByGame = new Map<string, number>();
+  for (const r of mine ?? []) {
+    const t = r.chat_hidden_at ? Date.parse(r.chat_hidden_at) : NaN;
+    if (!Number.isNaN(t)) hiddenAtByGame.set(r.game_id, t);
+  }
+
+  const gameIds = [...new Set((mine ?? []).map((r) => r.game_id))];
   if (gameIds.length === 0) return { data: [], error: null };
 
   // Try the rich select first (post-migration: includes visibility / invite_token / ends_at / location).
@@ -106,7 +131,17 @@ async function fetchMyGameInboxFromTables(): Promise<{
     }
   }
 
-  const rows: GameInboxRow[] = (games ?? []).map((raw) => {
+  // Same rule as the RPC: an archived thread stays hidden only until it speaks again.
+  const visibleGames = (games ?? []).filter((raw) => {
+    const gid = (raw as { id: string }).id;
+    const hiddenAt = hiddenAtByGame.get(gid);
+    if (hiddenAt == null) return true;
+    const last = lastMsgByGame.get(gid);
+    const lastAt = last ? Date.parse(last.created_at) : NaN;
+    return !Number.isNaN(lastAt) && lastAt > hiddenAt;
+  });
+
+  const rows: GameInboxRow[] = visibleGames.map((raw) => {
     const g = raw as {
       id: string;
       title: string;
@@ -179,6 +214,41 @@ export async function fetchMyGameInbox(): Promise<{
   if (!error) return { data: (data as GameInboxRow[]) ?? [], error: null };
   if (!inboxRpcMissing(error)) return { data: null, error: new Error(error.message) };
   return fetchMyGameInboxFromTables();
+}
+
+const CHAT_ARCHIVE_MIGRATION = "supabase/migrations/20260811000000_game_chat_archive.sql";
+
+/**
+ * Hide a finished game's chat from your own inbox, or put it back.
+ *
+ * `leave_game` refuses hosts, so this is the only exit a host has that doesn't destroy the
+ * game. The server enforces "ended games only" and scopes the write to `auth.uid()`; both RPCs
+ * answer with the same `{success, error}` shape as `join_game` / `leave_game`.
+ */
+async function setGameChatArchived(gameId: string, archived: boolean): Promise<Error | null> {
+  if (!supabase) return new Error("Supabase not configured");
+  const fn = archived ? "archive_game_chat" : "unarchive_game_chat";
+  const { data, error } = await supabase.rpc(fn, { p_game_id: gameId });
+
+  if (error) {
+    if (isMissingRpc(error)) {
+      return new Error(
+        `Archiving chats isn't deployed yet. Run ${CHAT_ARCHIVE_MIGRATION} in the Supabase SQL Editor, then NOTIFY pgrst, 'reload schema'.`,
+      );
+    }
+    return new Error(error.message);
+  }
+
+  const result = data as { success?: boolean; error?: string } | null;
+  return result?.success ? null : new Error(result?.error ?? "Couldn't archive this chat");
+}
+
+export function archiveGameChat(gameId: string): Promise<Error | null> {
+  return setGameChatArchived(gameId, true);
+}
+
+export function unarchiveGameChat(gameId: string): Promise<Error | null> {
+  return setGameChatArchived(gameId, false);
 }
 
 export async function fetchGameMessages(gameId: string): Promise<{

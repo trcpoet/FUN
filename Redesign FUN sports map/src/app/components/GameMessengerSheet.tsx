@@ -31,12 +31,14 @@ import type {
   NoteInboxRow,
 } from "../../lib/supabase";
 import {
+  archiveGameChat,
   fetchGameChatMembers,
   type GameChatMember,
   fetchGameMessages,
   fetchMyGameInbox,
   sendGameMessage,
   subscribeGameMessages,
+  unarchiveGameChat,
 } from "../../lib/gameChat";
 import { fetchDmMessages, fetchMyDmInbox, sendDmMessage, subscribeDmMessages } from "../../lib/dmChat";
 import { badgeText, clearUnread, getUnreadCount, incrementUnread, threadKey } from "../../lib/unreadCounts";
@@ -57,6 +59,10 @@ import {
 import { InviteAdminPanel } from "./chat/InviteAdminPanel";
 import { useChatTrust, type ChatTrust, trustBadgeLabel } from "../../hooks/useChatTrust";
 import { NoteCommentLikeButton } from "./feed/NoteCommentLikeButton";
+import { GameActionBar } from "./game/GameActionBar";
+import { gameViewerRole } from "../lib/gameViewerRole";
+import { threadGameRow } from "../lib/threadGameRow";
+import { toast } from "sonner";
 
 export type GameThreadFocus = {
   kind: "game";
@@ -134,6 +140,16 @@ type GameMessengerSheetProps = {
   onSelectGameOnMap?: (gameId: string) => void;
   /** Leave chat and also unjoin the game (so the thread disappears). Return an Error on failure, null on success. */
   onLeaveThread?: (gameId: string) => Promise<Error | null | void>;
+  /**
+   * Host controls for the game this thread belongs to.
+   *
+   * The inbox is the only list in the app holding every game you are in, at any date — the
+   * map hides games absorbed by a venue pin and the live strip only reaches three hours out.
+   * Without these a host had no way to start, end or delete a game they made for next week.
+   */
+  onStartHostedGame?: (game: GameRow) => Promise<void> | void;
+  onEndHostedGame?: (game: GameRow) => Promise<void> | void;
+  onDeleteHostedGame?: (game: GameRow) => Promise<boolean> | void;
   /** Idle-prefetched rows so the list can paint before network round-trips. */
   inboxBootstrap?: GameInboxRow[] | null;
   dmInboxBootstrap?: DmInboxRow[] | null;
@@ -165,44 +181,30 @@ function partitionInboxByLifecycle(
   return { active, ended };
 }
 
-function threadScheduleLines(args: {
-  startsAt: string | null;
-  endsAt: string | null;
-  durationMinutes: number | null;
-  createdAt: string | null;
-  status: GameInboxRow["status"];
-  nowMs: number;
-}): { timeLine: string; countdownLine: string; ended: boolean } {
-  if (args.startsAt) {
-    const d = new Date(args.startsAt);
+/**
+ * The two lines under the thread title.
+ *
+ * Reads the same `GameRow` the action bar does — this used to build its own partial stub,
+ * which meant the header could describe a game the buttons disagreed about.
+ */
+function threadScheduleLines(
+  game: GameRow,
+  nowMs: number,
+): { timeLine: string; countdownLine: string; ended: boolean } {
+  if (game.starts_at) {
+    const d = new Date(game.starts_at);
     const t = d.getTime();
     const timeLine = format(d, "EEE, MMM d · h:mm a");
 
-    const stub: GameRow = {
-      id: "",
-      title: "",
-      sport: "",
-      spots_needed: 0,
-      starts_at: args.startsAt,
-      created_by: null,
-      created_at: args.startsAt,
-      status: args.status ?? undefined,
-      ends_at: args.endsAt ?? undefined,
-      duration_minutes: args.durationMinutes ?? undefined,
-      distance_km: 0,
-      lat: 0,
-      lng: 0,
-    };
-
-    if (isGameEnded(stub, args.nowMs)) {
+    if (isGameEnded(game, nowMs)) {
       return { timeLine, countdownLine: "Game ended · Plan rematch?", ended: true };
     }
-    if (t <= args.nowMs) {
-      const ends = getGameEndsAtMs(stub);
+    if (t <= nowMs) {
+      const ends = getGameEndsAtMs(game);
       if (ends != null) {
         return {
           timeLine,
-          countdownLine: `Live · ${formatUrgentCountdown(ends - args.nowMs)} left`,
+          countdownLine: `Live · ${formatUrgentCountdown(ends - nowMs)} left`,
           ended: false,
         };
       }
@@ -210,15 +212,12 @@ function threadScheduleLines(args: {
     }
     return {
       timeLine,
-      countdownLine: `Starts in ${formatUrgentCountdown(t - args.nowMs)}`,
+      countdownLine: `Starts in ${formatUrgentCountdown(t - nowMs)}`,
       ended: false,
     };
   }
-  if (args.createdAt) {
-    const rem = getCountdownRemainingMs(
-      { starts_at: null, created_at: args.createdAt } as GameRow,
-      args.nowMs
-    );
+  if (game.created_at) {
+    const rem = getCountdownRemainingMs(game, nowMs);
     const timeLine = "No set time";
     if (rem == null) return { timeLine, countdownLine: "No longer on map", ended: true };
     return { timeLine, countdownLine: `${formatUrgentCountdown(rem)} left on map`, ended: false };
@@ -395,6 +394,9 @@ export function GameMessengerSheet({
   joinedGameIds,
   onSelectGameOnMap,
   onLeaveThread,
+  onStartHostedGame,
+  onEndHostedGame,
+  onDeleteHostedGame,
   inboxBootstrap = null,
   dmInboxBootstrap = null,
   onPlanRematch,
@@ -927,20 +929,41 @@ export function GameMessengerSheet({
     }
   };
 
+  /**
+   * Archive the thread, then step back to the inbox so the user sees it gone.
+   *
+   * Undo is offered rather than a confirm: archiving is cheap to reverse and a dialog on a
+   * harmless action trains people to dismiss dialogs.
+   */
+  const handleArchiveChat = async (gameId: string) => {
+    setLeaveThreadError(null);
+    const err = await archiveGameChat(gameId);
+    if (err) {
+      setLeaveThreadError(err.message);
+      return;
+    }
+    onFocusThreadChange(null);
+    loadInbox();
+    toast.success("Chat archived", {
+      description: "It comes back if anyone posts.",
+      action: {
+        label: "Undo",
+        onClick: () => {
+          void unarchiveGameChat(gameId).then((e) => {
+            if (e) toast.error("Couldn't restore this chat", { description: e.message });
+            else loadInbox();
+          });
+        },
+      },
+    });
+  };
+
   const showList = !focusThread;
 
   const inboxRow =
     focusThread?.kind === "game" ? inbox.find((r) => r.id === focusThread.gameId) : undefined;
-  const threadStartsAt =
-    focusThread?.kind === "game" ? focusThread.startsAt ?? inboxRow?.starts_at ?? null : null;
-  const threadEndsAt =
-    focusThread?.kind === "game" ? focusThread.endsAt ?? inboxRow?.ends_at ?? null : null;
-  const threadDurationMinutes =
-    focusThread?.kind === "game"
-      ? focusThread.durationMinutes ?? inboxRow?.duration_minutes ?? null
-      : null;
-  const threadStatus = focusThread?.kind === "game" ? inboxRow?.status ?? undefined : undefined;
-  const threadCreatedAt = focusThread?.kind === "game" ? focusThread.createdAt ?? null : null;
+  // Schedule, status and duration now come off `threadGame` below — one merged row instead of
+  // a field-by-field re-merge at every use site.
   const threadVisibility =
     focusThread?.kind === "game" ? focusThread.visibility ?? inboxRow?.visibility ?? null : null;
   const threadHostId =
@@ -952,17 +975,33 @@ export function GameMessengerSheet({
   const spotsLeft =
     focusThread?.kind === "game" ? focusThread.spotsRemaining ?? inboxRow?.spots_remaining ?? undefined : undefined;
 
-  const schedule =
-    focusThread?.kind === "game"
-      ? threadScheduleLines({
-          startsAt: threadStartsAt,
-          endsAt: threadEndsAt,
-          durationMinutes: threadDurationMinutes,
-          createdAt: threadCreatedAt,
-          status: threadStatus,
-          nowMs: headerNow,
-        })
-      : { timeLine: "", countdownLine: "", ended: false };
+  // One row for the whole header: the schedule lines and the action bar read the same object,
+  // so what the thread says and what its buttons allow can never drift apart.
+  const threadGame = useMemo(
+    () =>
+      focusThread?.kind === "game"
+        ? threadGameRow(focusThread, inboxRow ?? null)
+        : null,
+    [focusThread, inboxRow],
+  );
+
+  const threadRole = useMemo(
+    () =>
+      threadGame
+        ? gameViewerRole(threadGame, {
+            currentUserId,
+            // Being in the thread at all means you are in the game; the inbox only ever
+            // returns games you hold a participant row for.
+            joinedGameIds: new Set([threadGame.id]),
+            nowMs: headerNow,
+          })
+        : null,
+    [threadGame, currentUserId, headerNow],
+  );
+
+  const schedule = threadGame
+    ? threadScheduleLines(threadGame, headerNow)
+    : { timeLine: "", countdownLine: "", ended: false };
 
   // Resolve every visible chat member into a trust tier so we can badge / collapse / group.
   const trustMembers = useMemo(
@@ -996,21 +1035,18 @@ export function GameMessengerSheet({
   }, []);
 
   const handlePlanRematch = () => {
-    if (!focusThread || focusThread.kind !== "game" || !onPlanRematch) return;
+    if (!focusThread || focusThread.kind !== "game" || !onPlanRematch || !threadGame) return;
     onPlanRematch({
-      fromGameId: focusThread.gameId,
-      fromTitle: focusThread.title || "Pickup game",
-      sport: focusThread.sport,
-      spotsNeeded: focusThread.spotsRemaining != null && focusThread.participantCount != null
-        ? focusThread.spotsRemaining + focusThread.participantCount
-        : inboxRow?.participant_count != null && inboxRow?.spots_remaining != null
-          ? inboxRow.participant_count + inboxRow.spots_remaining
-          : 4,
-      durationMinutes: threadDurationMinutes,
-      visibility: threadVisibility,
-      lat: focusThread.lat ?? inboxRow?.lat ?? null,
-      lng: focusThread.lng ?? inboxRow?.lng ?? null,
-      locationLabel: focusThread.locationLabel ?? inboxRow?.location_label ?? null,
+      fromGameId: threadGame.id,
+      fromTitle: threadGame.title || "Pickup game",
+      sport: threadGame.sport,
+      // 4 only when the source game tells us nothing — a rematch for nobody isn't a rematch.
+      spotsNeeded: threadGame.spots_needed || 4,
+      durationMinutes: threadGame.duration_minutes ?? null,
+      visibility: threadGame.visibility ?? null,
+      lat: threadGame.lat || null,
+      lng: threadGame.lng || null,
+      locationLabel: threadGame.location_label ?? null,
     });
   };
 
@@ -1222,17 +1258,9 @@ export function GameMessengerSheet({
                     )}
                   </button>
                 ) : null}
-                {focusThread?.kind === "game" && onLeaveThread && (
-                  <button
-                    type="button"
-                    onClick={() => void handleLeaveChat()}
-                    disabled={leavingThread}
-                    className="ml-auto shrink-0 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-[11px] font-medium border border-slate-600 disabled:opacity-50 disabled:pointer-events-none transition-colors"
-                    aria-label="Leave chat and unjoin game"
-                  >
-                    {leavingThread ? "Leaving…" : "Leave"}
-                  </button>
-                )}
+                {/* Leave used to live here, offered to hosts too — and `leave_game` refuses
+                    hosts, so it could only ever fail. The controls now sit below, gated by the
+                    same role helper every other surface uses. */}
               </div>
               {focusThread?.kind === "game" && leaveThreadError ? (
                 <p className="text-xs text-amber-400 px-1" role="alert">
@@ -1322,6 +1350,32 @@ export function GameMessengerSheet({
                     ) : null}
                   </p>
                 </div>
+
+                {/*
+                  Run the game from the thread.
+
+                  Its own row rather than the icon strip above: back / expand / share /
+                  location already fill that on a phone. This is the only surface listing
+                  every game you are in whatever its date, so it is where a game next week
+                  gets started, ended, deleted — or, once it is over, archived.
+
+                  Outside the aria-live block on purpose: the countdown in there reprints
+                  every second, and a live region re-announces everything it contains.
+                */}
+                {threadGame && threadRole ? (
+                  <GameActionBar
+                    game={threadGame}
+                    role={threadRole}
+                    density="compact"
+                    className="pt-1"
+                    onLeave={onLeaveThread ? () => void handleLeaveChat() : undefined}
+                    onArchive={(g) => handleArchiveChat(g.id)}
+                    onStart={onStartHostedGame}
+                    onEnd={onEndHostedGame}
+                    onDelete={onDeleteHostedGame}
+                    onDeleted={() => onFocusThreadChange(null)}
+                  />
+                ) : null}
                 <SheetDescription className="sr-only">
                   {focusThread?.kind === "game"
                     ? `${focusThread.title}. ${schedule.timeLine}. ${schedule.countdownLine || ""}. ${rosterSummary || ""}`

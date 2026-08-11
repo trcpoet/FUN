@@ -55,6 +55,13 @@ never drifts far from live.
 > Applied on 2026-08-10: `20260809120000_note_likes_read_path`,
 > `20260810000000_drop_legacy_create_game_overload`,
 > `20260810120000_unified_feed_gender_gate`.
+>
+> Applied on 2026-08-11: `20260811000000_game_chat_archive` — verified live
+> (archive → thread leaves `get_my_game_inbox`, undo → it returns, other 23
+> threads untouched, test row restored to `chat_hidden_at = null`). The
+> "game must have ended" branch is **not** yet exercised against prod: every
+> game in `games` is currently past its window, so there was no standing game
+> to refuse. The predicate itself was evaluated over the real table.
 
 To apply a single migration deliberately, pass the **file** — do not inline it:
 

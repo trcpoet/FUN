@@ -87,6 +87,12 @@ type VenueInfoPopupProps = {
   /** Open messenger for a game (user should already be joined for chat). */
   onOpenChat?: (game: GameRow) => void;
   /**
+   * Open a listed game's full card. Games absorbed by this venue's composite pin have no pin
+   * of their own, so without this the card — walk time, roster, Start/End/Delete — is only
+   * reachable while the game happens to sit inside the live strip's 3-hour window.
+   */
+  onOpenGameDetails?: (game: GameRow) => void;
+  /**
    * Host-only controls for games listed here. Without these a host could see their own game
    * at a venue but had no way to start, end or delete it — the map popup was the only place
    * those existed.
@@ -128,6 +134,7 @@ function GameListRow({
   onJoin,
   onLeave,
   onChat,
+  onOpenDetails,
   onStart,
   onEnd,
   onDelete,
@@ -140,6 +147,7 @@ function GameListRow({
   onJoin?: (g: GameRow) => void;
   onLeave?: (g: GameRow) => void;
   onChat?: (g: GameRow) => void;
+  onOpenDetails?: (g: GameRow) => void;
   onStart?: (g: GameRow) => Promise<void> | void;
   onEnd?: (g: GameRow) => Promise<void> | void;
   onDelete?: (g: GameRow) => Promise<boolean> | void;
@@ -157,8 +165,34 @@ function GameListRow({
     nowMs: now,
   });
 
+  // The whole row opens the game's card, because for a game absorbed by this venue's pin
+  // there is no other way in. Same shape as the messenger's inbox rows: a role="button"
+  // container with the action strip stopping propagation so its buttons still fire.
+  const openDetails = onOpenDetails ? () => onOpenDetails(game) : undefined;
+
   return (
-    <li className="flex flex-wrap items-center gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2 py-2">
+    <li
+      role={openDetails ? "button" : undefined}
+      tabIndex={openDetails ? 0 : undefined}
+      onClick={openDetails}
+      onKeyDown={
+        openDetails
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                openDetails();
+              }
+            }
+          : undefined
+      }
+      aria-label={openDetails ? `${game.title || "Pickup"} — open game details` : undefined}
+      className={
+        "flex flex-wrap items-center gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2 py-2 outline-none" +
+        (openDetails
+          ? " cursor-pointer transition-colors hover:border-cyan-300/20 hover:bg-white/[0.055] focus-visible:ring-2 focus-visible:ring-cyan-500/40"
+          : "")
+      }
+    >
       <span
         className={
           "flex size-10 shrink-0 items-center justify-center rounded-2xl text-2xl " +
@@ -191,17 +225,21 @@ function GameListRow({
         {filled}/{total}
       </span>
 
-      <GameActionBar
-        game={game}
-        role={role}
-        density="compact"
-        onJoin={onJoin}
-        onLeave={onLeave}
-        onChat={onChat}
-        onStart={onStart}
-        onEnd={onEnd}
-        onDelete={onDelete}
-      />
+      {/* Buttons keep their own meaning — without this the row would swallow every one. */}
+      <span onClick={(e) => e.stopPropagation()} className="contents">
+        <GameActionBar
+          game={game}
+          role={role}
+          density="compact"
+          onJoin={onJoin}
+          onLeave={onLeave}
+          onChat={onChat}
+          onOpenDetails={onOpenDetails}
+          onStart={onStart}
+          onEnd={onEnd}
+          onDelete={onDelete}
+        />
+      </span>
     </li>
   );
 }
@@ -227,6 +265,7 @@ export function VenueInfoPopup({
   onJoinGame,
   onLeaveGame,
   onOpenChat,
+  onOpenGameDetails,
   onStartHostedGame,
   onEndHostedGame,
   onDeleteHostedGame,
@@ -800,6 +839,7 @@ export function VenueInfoPopup({
                                 onJoin={onJoinGame}
                                 onLeave={onLeaveGame}
                                 onChat={onOpenChat}
+                                onOpenDetails={onOpenGameDetails}
                                 onStart={onStartHostedGame}
                                 onEnd={onEndHostedGame}
                                 onDelete={onDeleteHostedGame}
@@ -825,6 +865,7 @@ export function VenueInfoPopup({
                                 onJoin={onJoinGame}
                                 onLeave={onLeaveGame}
                                 onChat={onOpenChat}
+                                onOpenDetails={onOpenGameDetails}
                                 onStart={onStartHostedGame}
                                 onEnd={onEndHostedGame}
                                 onDelete={onDeleteHostedGame}

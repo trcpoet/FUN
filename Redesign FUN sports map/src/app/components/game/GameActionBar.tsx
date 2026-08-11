@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LogOut, MessageCircle, Play, Square, Trash2 } from "lucide-react";
+import { Archive, Info, LogOut, MessageCircle, Play, Square, Trash2 } from "lucide-react";
 import type { GameRow } from "../../../lib/supabase";
 import type { GameViewerRole } from "../../lib/gameViewerRole";
 import { cn } from "../ui/utils";
@@ -18,6 +18,14 @@ export type GameActionBarProps = {
   onJoin?: (game: GameRow) => void;
   onLeave?: (game: GameRow) => void;
   onChat?: (game: GameRow) => void;
+  /**
+   * Open the game's full card. `compact` only — a list row can show a name and a countdown,
+   * but not the roster, the walk time or the rules, and a game absorbed by a venue pin has no
+   * other way in. The `full` popup is already the card, so it ignores this.
+   */
+  onOpenDetails?: (game: GameRow) => void;
+  /** Hide a finished game's chat without deleting the game. `compact` only. */
+  onArchive?: (game: GameRow) => Promise<void> | void;
   onStart?: (game: GameRow) => Promise<void> | void;
   onEnd?: (game: GameRow) => Promise<void> | void;
   /** Resolves true when the row was actually removed. */
@@ -40,6 +48,8 @@ export function GameActionBar({
   onJoin,
   onLeave,
   onChat,
+  onOpenDetails,
+  onArchive,
   onStart,
   onEnd,
   onDelete,
@@ -47,7 +57,7 @@ export function GameActionBar({
   onStarted,
   className,
 }: GameActionBarProps) {
-  const [busy, setBusy] = useState<"start" | "end" | "delete" | null>(null);
+  const [busy, setBusy] = useState<"start" | "end" | "delete" | "archive" | null>(null);
   // Pressing Start flips the buttons before the refetch lands, so the host isn't left staring
   // at a "Start game" button for a game they just started.
   const [optimisticLive, setOptimisticLive] = useState(false);
@@ -61,6 +71,7 @@ export function GameActionBar({
   const canStart = role.canStart && !optimisticLive && Boolean(onStart);
   const canEnd = role.isHost && live && !role.isEnded && Boolean(onEnd);
   const canDelete = role.canDelete && Boolean(onDelete);
+  const canArchive = role.canArchive && Boolean(onArchive);
   const isFull = game.spots_remaining != null && game.spots_remaining <= 0;
 
   const runStart = () => {
@@ -82,6 +93,12 @@ export function GameActionBar({
     if (density === "compact" && !window.confirm(END_CONFIRM)) return;
     setBusy("end");
     void Promise.resolve(onEnd(game)).finally(() => setBusy(null));
+  };
+
+  const runArchive = () => {
+    if (!onArchive) return;
+    setBusy("archive");
+    void Promise.resolve(onArchive(game)).finally(() => setBusy(null));
   };
 
   const runDelete = () => {
@@ -207,8 +224,24 @@ export function GameActionBar({
 
   function renderCompact() {
     const hasHostControls = canStart || canEnd || canDelete;
+    // The divider separates "you" from "the host". In the chat thread a host on an upcoming
+    // game has nothing on the left of it, and an unattached rule floating at the start of the
+    // row is just a mark on the screen.
+    const hasViewerActions =
+      Boolean(onOpenDetails) ||
+      (role.canJoin && Boolean(onJoin)) ||
+      (role.canChat && Boolean(onChat)) ||
+      (role.canLeave && Boolean(onLeave)) ||
+      canArchive;
     return (
       <div className={cn("flex shrink-0 items-center gap-1.5", className)}>
+        {/* Disclosure first, then what you can do, then what the host can do. */}
+        {onOpenDetails ? (
+          <IconAction label="Game details" onClick={() => onOpenDetails(game)} tone="cyan">
+            <Info className="h-3.5 w-3.5" aria-hidden />
+          </IconAction>
+        ) : null}
+
         {role.canJoin && onJoin ? (
           <button
             type="button"
@@ -241,7 +274,22 @@ export function GameActionBar({
           </IconAction>
         ) : null}
 
-        {hasHostControls ? (
+        {/* Labelled, not an icon: on a finished game this is the main thing left to do —
+            and for a host it is the only way out, since Leave never applies to them. */}
+        {canArchive ? (
+          <button
+            type="button"
+            onClick={runArchive}
+            disabled={busy !== null}
+            className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-slate-600/60 bg-slate-800/70 px-2.5 py-1.5 text-xs font-medium text-slate-100 transition-colors hover:bg-slate-700/80 disabled:opacity-50 disabled:pointer-events-none"
+            title="Hide this chat from your inbox. The game and its history stay."
+          >
+            <Archive className="h-3.5 w-3.5" aria-hidden />
+            {busy === "archive" ? "Archiving…" : "Archive"}
+          </button>
+        ) : null}
+
+        {hasHostControls && hasViewerActions ? (
           <span className="mx-0.5 h-5 w-px shrink-0 bg-amber-500/25" aria-hidden />
         ) : null}
 
@@ -268,6 +316,8 @@ export function GameActionBar({
 }
 
 const ICON_TONES = {
+  /** Disclosure, not action — same cool blue the messenger uses for its squad-info button. */
+  cyan: "border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20",
   amber: "border-amber-500/40 bg-amber-500/12 text-amber-200 hover:bg-amber-500/22",
   slate: "border-slate-600/60 bg-slate-800/70 text-slate-100 hover:bg-slate-700/80",
   rose: "border-rose-500/40 bg-rose-950/35 text-rose-200 hover:bg-rose-950/60",

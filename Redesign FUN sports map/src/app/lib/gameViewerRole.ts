@@ -28,6 +28,15 @@ export type GameViewerRole = {
   canStart: boolean;
   canEnd: boolean;
   canDelete: boolean;
+  /**
+   * Clear a finished game's chat out of your inbox without destroying it.
+   *
+   * This is the host's only exit — `leave_game` rejects hosts outright, so before this the
+   * one way to stop an ended game following you around was to delete it and take everyone's
+   * chat history with it. Deliberately open to players too: once a game is over, "leave" and
+   * "stop showing me this" are different wishes.
+   */
+  canArchive: boolean;
 };
 
 export type GameViewerRoleOptions = {
@@ -71,5 +80,6 @@ export function gameViewerRole(game: GameRow, opts: GameViewerRoleOptions): Game
     canStart: isHost && !live && !ended,
     canEnd: isHost && live,
     canDelete: isHost,
+    canArchive: isJoined && ended,
   };
 }
