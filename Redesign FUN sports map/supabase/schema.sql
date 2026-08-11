@@ -10,7 +10,7 @@
 -- Extension-owned objects (PostGIS, pg_trgm) are intentionally excluded — the
 -- `create extension` statements below bring them back.
 --
--- Generated: 2026-08-10T11:56:46.519Z
+-- Generated: 2026-08-11T00:19:43.639Z
 
 set search_path = public;
 
@@ -321,6 +321,13 @@ create table if not exists public.venue_comments (
   created_at timestamp with time zone default now() not null
 );
 
+create table if not exists public.venue_coverage (
+  tile_x integer not null,
+  tile_y integer not null,
+  warmed_at timestamp with time zone default now() not null,
+  venue_count integer default 0 not null
+);
+
 create table if not exists public.venue_photo_reports (
   photo_id uuid not null,
   user_id uuid not null,
@@ -414,6 +421,8 @@ alter table public.user_statuses add constraint user_statuses_pkey PRIMARY KEY (
 alter table public.venue_comment_likes add constraint venue_comment_likes_pkey PRIMARY KEY (comment_id, user_id);
 
 alter table public.venue_comments add constraint venue_comments_pkey PRIMARY KEY (id);
+
+alter table public.venue_coverage add constraint venue_coverage_pkey PRIMARY KEY (tile_x, tile_y);
 
 alter table public.venue_photo_reports add constraint venue_photo_reports_pkey PRIMARY KEY (photo_id, user_id);
 
@@ -706,6 +715,8 @@ CREATE INDEX IF NOT EXISTS venue_comment_likes_user_id_idx ON public.venue_comme
 CREATE INDEX IF NOT EXISTS venue_comments_user_id_idx ON public.venue_comments USING btree (user_id);
 
 CREATE INDEX IF NOT EXISTS venue_comments_venue_created_idx ON public.venue_comments USING btree (venue_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS venue_coverage_tile_idx ON public.venue_coverage USING btree (tile_x, tile_y, warmed_at);
 
 CREATE INDEX IF NOT EXISTS venue_photo_reports_user_id_idx ON public.venue_photo_reports USING btree (user_id);
 
@@ -1596,6 +1607,7 @@ AS $function$
       g.status <> 'live'
       or (coalesce(g.live_started_at, g.updated_at, g.created_at) > now() - interval '24 hours')
     )
+    -- Timed: expire at ends_at. Untimed: age out on the same 3-day map TTL as get_live_nearby.
     and (
       (g.ends_at is not null and g.ends_at > now())
       or (g.ends_at is null and g.created_at > now() - interval '3 days')
@@ -3569,6 +3581,8 @@ alter table public.venue_comment_likes enable row level security;
 
 alter table public.venue_comments enable row level security;
 
+alter table public.venue_coverage enable row level security;
+
 alter table public.venue_photo_reports enable row level security;
 
 alter table public.venue_photos enable row level security;
@@ -3762,6 +3776,8 @@ create policy "venue_comments: delete own" on public.venue_comments as PERMISSIV
 create policy "venue_comments: insert own" on public.venue_comments as PERMISSIVE for INSERT to authenticated with check ((( SELECT auth.uid() AS uid) = user_id));
 
 create policy "venue_comments: read all" on public.venue_comments as PERMISSIVE for SELECT to anon, authenticated using (true);
+
+create policy venue_coverage_public_read on public.venue_coverage as PERMISSIVE for SELECT to anon, authenticated using (true);
 
 create policy "venue_photo_reports: insert own" on public.venue_photo_reports as PERMISSIVE for INSERT to authenticated with check ((( SELECT auth.uid() AS uid) = user_id));
 
@@ -3982,6 +3998,12 @@ grant delete, insert, references, select, trigger, truncate, update on public.ve
 grant delete, insert, references, select, trigger, truncate, update on public.venue_comments to authenticated;
 
 grant delete, insert, references, select, trigger, truncate, update on public.venue_comments to service_role;
+
+grant delete, insert, references, select, trigger, truncate, update on public.venue_coverage to anon;
+
+grant delete, insert, references, select, trigger, truncate, update on public.venue_coverage to authenticated;
+
+grant delete, insert, references, select, trigger, truncate, update on public.venue_coverage to service_role;
 
 grant delete, insert, references, select, trigger, truncate, update on public.venue_photo_reports to anon;
 
