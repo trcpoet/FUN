@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { GameRow } from "../../lib/supabase";
-import { gamesToGeoJSON } from "./mapGeoJSON";
+import { gamesToGeoJSON, getGameStatus } from "./mapGeoJSON";
 
 const VENUE_LAT = 32.712213;
 const VENUE_LNG = -97.115704;
@@ -59,5 +59,40 @@ describe("gamesToGeoJSON absorption", () => {
 
     const partial = gamesToGeoJSON(pair, null, new Set(["g1"]));
     expect(partial.features[0]!.properties.marker_kind).toBe("colocated");
+  });
+});
+
+/**
+ * The pin's ring colour used to be derived from `starts_at` alone, which is a third, subtly
+ * different answer to "is this live?". A finished game still wore a red ring, and a
+ * host-started game whose scheduled start was in the future did not.
+ */
+describe("getGameStatus", () => {
+  const NOW = Date.parse("2026-08-06T12:00:00.000Z");
+  const MIN = 60_000;
+  const iso = (offset: number) => new Date(NOW + offset).toISOString();
+
+  it("reads live once the start time has passed", () => {
+    const g = game("g", { starts_at: iso(-10 * MIN), ends_at: iso(80 * MIN) });
+    expect(getGameStatus(g, NOW)).toBe("live");
+  });
+
+  it("reads live for a host-started game whose scheduled start is still ahead", () => {
+    const g = game("g", { status: "live", starts_at: iso(60 * MIN), ends_at: iso(90 * MIN) });
+    expect(getGameStatus(g, NOW)).toBe("live");
+  });
+
+  it("does not read live for a game that has already finished", () => {
+    const g = game("g", { starts_at: iso(-5 * 60 * MIN), ends_at: iso(-60 * MIN) });
+    expect(getGameStatus(g, NOW)).not.toBe("live");
+  });
+
+  it("reads soon within the hour, scheduled beyond it", () => {
+    expect(getGameStatus(game("a", { starts_at: iso(30 * MIN) }), NOW)).toBe("soon");
+    expect(getGameStatus(game("b", { starts_at: iso(3 * 60 * MIN) }), NOW)).toBe("scheduled");
+  });
+
+  it("reads scheduled for an untimed game", () => {
+    expect(getGameStatus(game("g", { starts_at: null }), NOW)).toBe("scheduled");
   });
 });

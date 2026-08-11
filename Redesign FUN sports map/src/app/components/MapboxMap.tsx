@@ -13,8 +13,8 @@ import type { MapNoteRow } from "../../lib/supabase";
 import { isVenueGame } from "../../lib/mapGameTimer";
 import type { NavigateToOptions } from "../../lib/directions";
 import { gamesToGeoJSON } from "../types/mapGeoJSON";
-import { fetchSportsVenuesWithProgress } from "../lib/sportsVenues";
-import type { SportsVenueGeoJSON } from "../lib/sportsVenues";
+import { loadVenuesForArea } from "../lib/sportsVenues";
+import type { SportsVenueGeoJSON, VenueLoadResult } from "../lib/sportsVenues";
 import type { VenueClusterPoint } from "../lib/sportsVenueTypes";
 import { venueSelectionFromProperties } from "../lib/venueSelection";
 import { enrichVenueGeoJSON } from "../lib/venueClusterEngine";
@@ -2995,26 +2995,45 @@ export function MapboxMap(props: MapboxMapProps) {
     let cancelled = false;
     let venueKickoffStarted = false;
     let idleFallbackId: number | undefined;
+    /** Timer for the "waiting on a background venue import" re-read; cleared on teardown. */
+    let warmPollId: number | undefined;
     const venueFetchAbort = new AbortController();
 
-    const applyVenueFetchResult = (
-      geojson: import("../lib/sportsVenueTypes").SportsVenueGeoJSON,
-      error?: string
-    ) => {
-      addVenueMarkers(geojson, () => {
+    /**
+     * Report what actually happened.
+     *
+     * These four cases used to collapse into two, and the collapse was the reason this bug
+     * survived two rounds of fixes: the venue read swallowed its errors, so a pipeline that
+     * was failing outright arrived here looking like an empty collection and told the user
+     * "no sports venues here". An un-imported city and a broken fetch both read as an
+     * uneventful neighbourhood, and nothing anywhere disagreed.
+     */
+    const applyVenueFetchResult = (result: VenueLoadResult, opts?: { warming?: boolean }) => {
+      addVenueMarkers(result.geojson, () => {
         if (cancelled) return;
+
+        // An import is running and rows will arrive without the user touching anything —
+        // hold the spinner rather than declaring the area empty.
+        if (opts?.warming) {
+          setMapUxHint("Finding venues near here — first visit to this area takes a moment");
+          return;
+        }
+
         finishLoading();
-        if (geojson.features.length === 0) {
-          if (error) {
-            setMapUxHint("Could not load venues — check your connection and try again");
-            if (import.meta.env.DEV) console.warn("[FUN] venue fetch:", error);
-          } else {
-            setMapUxHint("No sports venues here — try zooming in or widening your search radius");
-          }
-        } else {
+
+        if (result.geojson.features.length > 0) {
           setMapUxHint((hint) =>
             hint && (hint.includes("venues") || hint.includes("venue")) ? null : hint
           );
+          return;
+        }
+        if (result.status === "unavailable") {
+          setMapUxHint("Could not load venues — check your connection and try again");
+          if (import.meta.env.DEV) console.warn("[FUN] venue read failed:", result.error);
+        } else if (result.status === "warming") {
+          setMapUxHint("Still importing venues for this area — check back in a minute");
+        } else {
+          setMapUxHint("No sports venues here — try zooming in or widening your search radius");
         }
       });
     };
@@ -3064,40 +3083,77 @@ export function MapboxMap(props: MapboxMapProps) {
 
       onVenuesFetchLoadingChangeRef.current?.(true);
 
-      fetchSportsVenuesWithProgress(
-        debouncedVenueFetchCenter.lat,
-        debouncedVenueFetchCenter.lng,
-        venueFetchRadius,
-        {
-          signal: venueFetchAbort.signal,
-          sportFilter: venueSportsFilter,
-          onNearRing: (geojson) =>
-            new Promise<void>((resolve) => {
-              if (cancelled) {
-                resolve();
+      const readVenues = () =>
+        loadVenuesForArea(
+          debouncedVenueFetchCenter.lat,
+          debouncedVenueFetchCenter.lng,
+          venueFetchRadius,
+          { signal: venueFetchAbort.signal, sportFilter: venueSportsFilter }
+        );
+
+      const settle = (result: VenueLoadResult) => {
+        // Only `ok` and `empty` are answers about this ground, so only they may be recorded
+        // as coverage. Marking a warming (or failed) area as held would stop every later
+        // pan from retrying it — the map would sit empty until the user reloaded.
+        if (result.status === "ok" || result.status === "empty") {
+          venueCoverageRef.current = wanted;
+        } else {
+          venueCoverageRef.current = null;
+        }
+        applyVenueFetchResult(result);
+        // DEV-only: shout if the basemap is drawing pitches we put no marker on.
+        if (import.meta.env.DEV) {
+          window.setTimeout(() => {
+            if (cancelled) return;
+            reportVenueCoverageGaps(map, SRC_VENUE_POINTS, {
+              anchor: debouncedVenueFetchCenter,
+              radiusKm: venueFetchRadius,
+              sportFilter: venueSportsFilter,
+              lastSource: result.status,
+            });
+          }, 600);
+        }
+      };
+
+      /**
+       * Wait for a background import to land.
+       *
+       * `/api/warm-venues` commits tile by tile, so rows show up progressively rather than
+       * all at once — re-reading on a timer paints each tile as it arrives. Bounded, and
+       * only ever runs while an import is genuinely outstanding.
+       */
+      const pollWhileWarming = (attemptsLeft: number) => {
+        warmPollId = window.setTimeout(() => {
+          if (cancelled) return;
+          readVenues()
+            .then((result) => {
+              if (cancelled) return;
+              if (result.status === "warming" && attemptsLeft > 1) {
+                applyVenueFetchResult(result, { warming: true });
+                pollWhileWarming(attemptsLeft - 1);
                 return;
               }
-              addVenueMarkers(geojson, () => resolve());
-            }),
-        }
-      )
+              settle(result);
+            })
+            .catch((err: unknown) => {
+              if (cancelled) return;
+              if (err instanceof Error && err.name === "AbortError") return;
+              venueCoverageRef.current = null;
+              onVenuesFetchLoadingChangeRef.current?.(false);
+              setMapUxHint("Could not load venues — check your connection and try again");
+            });
+        }, MapCfg.VENUE_WARM_POLL_MS);
+      };
+
+      readVenues()
         .then((result) => {
           if (cancelled) return;
-          // Record what we now hold so nearby pans reuse it instead of refetching.
-          venueCoverageRef.current = wanted;
-          applyVenueFetchResult(result.geojson, result.error);
-          // DEV-only: shout if the basemap is drawing pitches we put no marker on.
-          if (import.meta.env.DEV) {
-            window.setTimeout(() => {
-              if (cancelled) return;
-              reportVenueCoverageGaps(map, SRC_VENUE_POINTS, {
-                anchor: debouncedVenueFetchCenter,
-                radiusKm: venueFetchRadius,
-                sportFilter: venueSportsFilter,
-                lastSource: result.source,
-              });
-            }, 600);
+          if (result.status === "warming") {
+            applyVenueFetchResult(result, { warming: true });
+            pollWhileWarming(MapCfg.VENUE_WARM_POLL_ATTEMPTS);
+            return;
           }
+          settle(result);
         })
         .catch((err: unknown) => {
           if (cancelled) return;
@@ -3130,6 +3186,7 @@ export function MapboxMap(props: MapboxMapProps) {
       cancelled = true;
       venueFetchAbort.abort();
       if (idleFallbackId !== undefined) clearTimeout(idleFallbackId);
+      if (warmPollId !== undefined) clearTimeout(warmPollId);
       map.off("idle", kickoffVenueFetch);
       map.off("zoomend", onVenueZoomForFetch);
       map.off("moveend", kickoffVenueFetch);
@@ -3284,7 +3341,11 @@ export function MapboxMap(props: MapboxMapProps) {
           viewerCoords={userCoords}
           onNavigateTo={onNavigateTo}
           onJoinGame={onJoinGame}
+          onLeaveGame={onLeaveGame}
           onOpenChat={onOpenMessagesForGame}
+          onStartHostedGame={onStartHostedGame}
+          onEndHostedGame={onEndHostedGame}
+          onDeleteHostedGame={onDeleteHostedGame}
           onClose={() => {
             // A shown route deliberately outlives this modal — the route chip's ✕ clears it.
             onSelectVenue(null);
@@ -3318,6 +3379,8 @@ export function MapboxMap(props: MapboxMapProps) {
             onDeleteHostedGame?.(g);
             setColocatedModalGames(null);
           }}
+          onStartGame={onStartHostedGame}
+          onEndGame={onEndHostedGame}
           onOpenChat={(g) => {
             onOpenMessagesForGame?.(g);
             setColocatedModalGames(null);

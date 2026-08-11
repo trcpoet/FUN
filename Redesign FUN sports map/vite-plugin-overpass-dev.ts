@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadEnv, type Plugin } from "vite";
-import { buildOsmVenueRow, osmVenueRowToGeoProperties, type OsmVenueTags } from "./server/lib/osmVenueTags";
 
 /** Vite middleware runs outside the client env graph — hydrate server-only .env keys here. */
 function applyServerEnv(mode: string, root: string): void {
@@ -50,28 +49,6 @@ async function forwardToApiHandler(
   res.end(Buffer.from(await response.arrayBuffer()));
 }
 
-type OsmEl = {
-  type?: string;
-  id?: number;
-  lat?: number;
-  lon?: number;
-  center?: { lat?: number; lon?: number };
-  tags?: OsmVenueTags;
-};
-
-function bboxQuery(bboxStr: string): string {
-  return `
-    [out:json][timeout:60];
-    (
-      node["leisure"="pitch"](${bboxStr});
-      way["leisure"="pitch"](${bboxStr});
-      node["leisure"="sports_centre"](${bboxStr});
-      way["leisure"="sports_centre"](${bboxStr});
-    );
-    out center;
-  `.replace(/\n\s+/g, " ");
-}
-
 async function fetchOverpassText(body: string): Promise<string> {
   const controllers = UPSTREAMS.map(() => new AbortController());
   const hardTimeoutMs = 18_000;
@@ -115,7 +92,7 @@ export function overpassDevProxy(): Plugin {
           const urlPath = req.url?.split("?")[0] ?? "";
           const isApiRoute =
             urlPath === "/api/overpass" ||
-            urlPath === "/api/auto-cache-venues" ||
+            urlPath === "/api/warm-venues" ||
             urlPath === "/api/venue-enrich" ||
             urlPath === "/api/venue-photo" ||
             urlPath === "/api/directions" ||
@@ -135,52 +112,23 @@ export function overpassDevProxy(): Plugin {
             return;
           }
 
-          // Auto-cache endpoint: fetch Overpass, return GeoJSON (no DB save in dev)
-          if (urlPath === "/api/auto-cache-venues") {
+          // Background venue import. Runs the REAL handler rather than a local
+          // reimplementation: the copy that used to live here had drifted to querying only
+          // `leisure=pitch|sports_centre`, so dev quietly imported a fraction of the venue
+          // types production does, and "works locally" meant nothing.
+          if (urlPath === "/api/warm-venues") {
             if (req.method === "OPTIONS") { res.statusCode = 204; res.end(); return; }
             if (req.method !== "POST") { res.statusCode = 405; res.end(); return; }
-            const raw = await readBody(req);
-            let bbox: { minLat?: number; minLng?: number; maxLat?: number; maxLng?: number } = {};
-            try { bbox = JSON.parse(raw); } catch { /* ignore */ }
-            const { minLat, minLng, maxLat, maxLng } = bbox;
-            const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
-            let features: unknown[] = [];
-            let rows: Record<string, unknown>[] = [];
             try {
-              const text = await fetchOverpassText(bboxQuery(bboxStr));
-              const json = JSON.parse(text) as { elements?: unknown[] };
-              const now = new Date().toISOString();
-              for (const raw of json.elements ?? []) {
-                const el = raw as OsmEl;
-                const lat = el.lat ?? el.center?.lat;
-                const lon = el.lon ?? el.center?.lon;
-                if (lat == null || lon == null || el.type == null || el.id == null) continue;
-                const row = buildOsmVenueRow(el.type, el.id, lat, lon, el.tags, now);
-                features.push({
-                  type: "Feature",
-                  geometry: { type: "Point", coordinates: [lon, lat] },
-                  properties: osmVenueRowToGeoProperties(row.id, row.osm_type, row.osm_id, row),
-                });
-                rows.push(row);
-              }
+              const body = await readBody(req);
+              const { default: handler } = await import("./api/warm-venues");
+              await forwardToApiHandler(req, res, handler, body);
             } catch (err) {
-              console.error("[Overpass proxy] failed:", err);
+              console.error("[warm-venues proxy] failed:", err);
+              res.setHeader("Content-Type", "application/json");
+              res.statusCode = 500;
+              res.end(JSON.stringify({ success: false, error: { code: "PROXY_ERROR", message: "Dev proxy failed" } }));
             }
-            // Save to DB in background so subsequent fetches are instant
-            const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
-            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-            if (supabaseUrl && serviceKey && rows.length > 0) {
-              const { createClient } = await import("@supabase/supabase-js");
-              const supabase = createClient(supabaseUrl, serviceKey);
-              const CHUNK = 400;
-              for (let i = 0; i < rows.length; i += CHUNK) {
-                supabase.from("osm_sports_venues").upsert(rows.slice(i, i + CHUNK), { onConflict: "id" }).then(() => {});
-              }
-            }
-
-            res.setHeader("Content-Type", "application/json; charset=utf-8");
-            res.statusCode = 200;
-            res.end(JSON.stringify({ type: "FeatureCollection", features }));
             return;
           }
 

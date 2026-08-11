@@ -2,12 +2,15 @@ import React, { useMemo, useState } from "react";
 import type { GameRow } from "../../lib/supabase";
 import { cn } from "./ui/utils";
 import { format } from "date-fns";
-import { Clock, Trash2, Navigation, Share2, Play, Square, MessageCircle, X, Users } from "lucide-react";
+import { Clock, Navigation, Share2, X, Users } from "lucide-react";
 import { sportEmojiFor } from "../../lib/sportDisplay";
 import { glassMessengerPanel } from "../styles/glass";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
 import type { NavigateToOptions } from "../../lib/directions";
 import { directionsHref } from "../lib/venueInfoHelpers";
+import { GoogleMapsLinkButton } from "./GoogleMapsLinkButton";
+import { GameActionBar } from "./game/GameActionBar";
+import { gameViewerRole } from "../lib/gameViewerRole";
 
 const SPORT_GRADIENT: Record<string, string> = {
   soccer:     'from-emerald-600 to-green-800',
@@ -71,15 +74,29 @@ export function GameEventPopup({
   viewerCoords = null,
   onNavigateTo,
 }: GameEventPopupProps) {
-  const [deleting, setDeleting] = useState(false);
-  const [hostBusy, setHostBusy] = useState<"start" | "end" | null>(null);
   const [optimisticLive, setOptimisticLive] = useState(false);
   const hasCoords = typeof game.lat === "number" && typeof game.lng === "number";
-  const isFull = game.spots_remaining != null && game.spots_remaining <= 0;
-  const isLive = game.status === "live";
-  const liveNow = isLive || optimisticLive;
 
-  const dest = hasCoords ? { lat: game.lat, lng: game.lng } : null;
+  // Membership belongs to the caller — it reads `game_participants` — so feed those props
+  // straight in rather than letting the role helper fall back to `created_by`.
+  const role = useMemo(
+    () =>
+      gameViewerRole(game, {
+        currentUserId: null,
+        joinedGameIds: joined ? new Set([game.id]) : new Set<string>(),
+        hostGameIds: isHost ? new Set([game.id]) : new Set<string>(),
+        substituteGameIds: isSubstitute ? new Set([game.id]) : new Set<string>(),
+        nowMs: Date.now(),
+      }),
+    [game, joined, isHost, isSubstitute],
+  );
+  const liveNow = role.isLive || optimisticLive;
+
+  // Memoized, not inline: a fresh object here churns every consumer below it.
+  const dest = useMemo(
+    () => (hasCoords ? { lat: game.lat, lng: game.lng } : null),
+    [hasCoords, game.lat, game.lng]
+  );
   const {
     summary: walkSummary,
     loading: walkLoading,
@@ -210,14 +227,7 @@ export function GameEventPopup({
               </a>
             )}
             {onNavigateTo && viewerCoords ? (
-              <a
-                href={mapsHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 text-[11px] font-medium text-white/60 hover:text-white/90"
-              >
-                Maps
-              </a>
+              <GoogleMapsLinkButton href={mapsHref} />
             ) : null}
           </div>
         ) : null}
@@ -276,130 +286,26 @@ export function GameEventPopup({
         ) : null}
 
         {/* Action buttons */}
-        <div className="grid grid-cols-2 gap-2">
-          {onJoin && !joined ? (
-            <button
-              type="button"
-              onClick={() => onJoin(game)}
-              className={cn(
-                "col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-lg text-white text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2",
-                isFull
-                  ? "bg-amber-600/80 hover:bg-amber-500 focus-visible:ring-amber-500/40"
-                  : "bg-emerald-600 hover:bg-emerald-500 focus-visible:ring-emerald-500/40"
-              )}
-            >
-              <span className="inline-flex items-center gap-2">
-                <Play className="w-4 h-4 opacity-90" aria-hidden />
-                {isFull ? "Join Waitlist" : "I'm In"}
-              </span>
-            </button>
-          ) : null}
-
-          {joined && isHost ? (
-            <span className="col-span-2 inline-flex h-10 items-center justify-center rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm font-semibold">
-              You&apos;re hosting
-            </span>
-          ) : null}
-
-          {isHost && onStartHostedGame && !liveNow ? (
-            <button
-              type="button"
-              disabled={hostBusy !== null}
-              onClick={() => {
-                setHostBusy("start");
-                void Promise.resolve(onStartHostedGame(game))
-                  .then(() => setOptimisticLive(true))
-                  .finally(() => setHostBusy(null));
-              }}
-              className={cn(
-                "inline-flex h-10 items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition-colors",
-                "border-rose-500/40 bg-rose-600/15 text-rose-100 hover:bg-rose-600/22",
-                "disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/30"
-              )}
-              aria-label="Start game"
-            >
-              <Play className="w-4 h-4" aria-hidden />
-              {hostBusy === "start" ? "Starting…" : "Start game"}
-            </button>
-          ) : null}
-
-          {isHost && onEndHostedGame && liveNow ? (
-            <button
-              type="button"
-              disabled={hostBusy !== null}
-              onClick={() => {
-                setHostBusy("end");
-                void Promise.resolve(onEndHostedGame(game)).finally(() => setHostBusy(null));
-              }}
-              className={cn(
-                "inline-flex h-10 items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition-colors",
-                "border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800",
-                "disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/20"
-              )}
-              aria-label="End game"
-            >
-              <Square className="w-4 h-4" aria-hidden />
-              {hostBusy === "end" ? "Ending…" : "End game"}
-            </button>
-          ) : null}
-
-          {joined && !isHost ? (
-            onLeave ? (
-              <button
-                type="button"
-                onClick={() => onLeave(game)}
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-rose-500/40 bg-rose-950/35 text-rose-100 text-sm font-semibold transition-colors hover:bg-rose-950/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/30"
-              >
-                {isSubstitute ? "Leave Waitlist" : "I'm Out"}
-              </button>
-            ) : (
-              <span className="inline-flex h-10 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm font-semibold">
-                {isSubstitute ? "On Waitlist" : "You're In"}
-              </span>
-            )
-          ) : null}
-
-          {joined && onOpenMessages ? (
-            <button
-              type="button"
-              onClick={() => {
-                onOpenMessages(game);
-                onClose();
-              }}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-100 text-sm font-semibold transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/20"
-              aria-label="Messages"
-            >
-              <MessageCircle className="w-4 h-4" aria-hidden />
-              Messages
-            </button>
-          ) : null}
-        </div>
-        {joined && isHost && onDeleteHostedGame && (
-          <button
-            type="button"
-            disabled={deleting}
-            onClick={async () => {
-              if (
-                !window.confirm(
-                  "Delete this game for everyone? Players will be removed and chat history will be lost. This cannot be undone."
-                )
-              ) {
-                return;
-              }
-              setDeleting(true);
-              try {
-                const ok = await onDeleteHostedGame(game);
-                if (ok) onClose();
-              } finally {
-                setDeleting(false);
-              }
-            }}
-            className="mt-2 w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-red-500/50 bg-red-950/40 text-red-200 text-sm font-medium hover:bg-red-950/70 disabled:opacity-50"
-          >
-            <Trash2 className="w-3.5 h-3.5 shrink-0" aria-hidden />
-            {deleting ? "Deleting…" : "Delete game"}
-          </button>
-        )}
+        <GameActionBar
+          game={game}
+          role={role}
+          density="full"
+          onJoin={onJoin}
+          onLeave={onLeave}
+          onChat={
+            onOpenMessages
+              ? (g) => {
+                  onOpenMessages(g);
+                  onClose();
+                }
+              : undefined
+          }
+          onStart={onStartHostedGame}
+          onEnd={onEndHostedGame}
+          onDelete={onDeleteHostedGame}
+          onDeleted={onClose}
+          onStarted={() => setOptimisticLive(true)}
+        />
       </div>
     </div>
   );

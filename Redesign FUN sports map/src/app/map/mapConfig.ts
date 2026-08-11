@@ -188,6 +188,25 @@ export const VENUE_FETCH_MIN_ZOOM = 9;
 /** Re-fetch only when the debounced center moves farther than this (km) — avoids touch-pan abort storms. */
 export const VENUE_FETCH_CENTER_ABORT_KM = 0.75;
 
+/**
+ * How often to re-read venues while `/api/warm-venues` is importing an area.
+ *
+ * That job commits one tile at a time, so re-reading fills the map in progressively
+ * instead of leaving it blank until everything is done.
+ */
+export const VENUE_WARM_POLL_MS = 4_000;
+
+/**
+ * How many times to re-read before giving up on a background import.
+ *
+ * At the interval above this is ~48s of patience, which covers a warm request's nine
+ * tiles at the ~4-5s each a healthy Overpass mirror takes. Throttled mirrors push it well
+ * past that, so giving up is NOT "the area is empty" — tiles are committed as they land,
+ * so the next pan or revisit picks up whatever arrived meanwhile. Hence the message tells
+ * the user to check back rather than declaring the neighbourhood empty.
+ */
+export const VENUE_WARM_POLL_ATTEMPTS = 12;
+
 // —— Zoom / bounds: when is “near me” meaningful? ——————————————
 
 /** Below this zoom: hide all game layers (clusters + individuals). World / continent view. */

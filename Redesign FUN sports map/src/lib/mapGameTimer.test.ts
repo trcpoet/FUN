@@ -20,6 +20,7 @@ import {
   getLiveStripBadgeTone,
   formatLiveStripCardSummary,
   filterGamesVisibleOnMap,
+  isUntimedGameExpired,
 } from "./mapGameTimer";
 
 // Fixed reference "now" — deterministic, independent of the real clock.
@@ -174,6 +175,46 @@ describe("getGameEndsAtMs", () => {
   });
   it("returns null when starts_at is an invalid ISO string and no ends_at", () => {
     expect(getGameEndsAtMs(makeGame({ starts_at: "garbage" }))).toBeNull();
+  });
+  it("prefers ended_at — a host who stopped early beats the scheduled window", () => {
+    const game = makeGame({ ended_at: iso(-10 * MIN), ends_at: iso(HOUR), starts_at: iso(-HOUR) });
+    expect(getGameEndsAtMs(game)).toBe(NOW - 10 * MIN);
+  });
+  it("skips an unparseable ended_at and continues down the chain", () => {
+    const game = makeGame({ ended_at: "not-a-date", ends_at: iso(HOUR) });
+    expect(getGameEndsAtMs(game)).toBe(NOW + HOUR);
+  });
+  it("never invents an end from created_at — posting a pickup game is not starting it", () => {
+    const game = makeGame({ starts_at: null, duration_minutes: 30 });
+    expect(getGameEndsAtMs(game)).toBeNull();
+  });
+});
+
+/**
+ * Untimed games have no end to reach, so `isGameEnded` can never retire them. Without this
+ * they would sit in every list forever.
+ */
+describe("isUntimedGameExpired", () => {
+  it("is false for a freshly posted untimed game", () => {
+    const game = makeGame({ starts_at: null, created_at: iso(-HOUR) });
+    expect(isUntimedGameExpired(game, NOW)).toBe(false);
+  });
+  it("is true once it outlives the map TTL", () => {
+    const game = makeGame({ starts_at: null, created_at: iso(-MAP_UNTIMED_TTL_MS - MIN) });
+    expect(isUntimedGameExpired(game, NOW)).toBe(true);
+  });
+  it("is false for a timed game no matter how old — ask isGameEnded about those", () => {
+    const game = makeGame({ starts_at: iso(-MAP_UNTIMED_TTL_MS - MIN) });
+    expect(isUntimedGameExpired(game, NOW)).toBe(false);
+  });
+  it("is false for an old untimed game a host has actually started", () => {
+    const game = makeGame({
+      starts_at: null,
+      created_at: iso(-MAP_UNTIMED_TTL_MS - MIN),
+      status: "live",
+      live_started_at: iso(-10 * MIN),
+    });
+    expect(isUntimedGameExpired(game, NOW)).toBe(false);
   });
 });
 

@@ -1,5 +1,5 @@
 /**
- * RETIRED. The runtime venue path is /api/auto-cache-venues (Overpass fetch + DB cache).
+ * RETIRED. The runtime venue path is /api/warm-venues (background Overpass import + DB cache).
  * This route used to be an open, unauthenticated Overpass proxy (CORS `*`) — an abuse
  * vector with no remaining client callers — so it now returns 410 Gone. Kept as a
  * tombstone to make the retirement explicit and avoid a silent 404.
@@ -22,7 +22,7 @@ export default function handler(request: Request): Response {
   }
   return apiResponse.error(
     "GONE",
-    "This endpoint has been retired. Venue data is served via /api/auto-cache-venues.",
+    "This endpoint has been retired. Venue data is served via /api/warm-venues.",
     410,
     { headers: CORS_HEADERS },
   );
