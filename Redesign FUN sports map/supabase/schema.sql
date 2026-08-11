@@ -10,7 +10,7 @@
 -- Extension-owned objects (PostGIS, pg_trgm) are intentionally excluded — the
 -- `create extension` statements below bring them back.
 --
--- Generated: 2026-08-11T00:19:43.639Z
+-- Generated: 2026-08-11T00:39:09.603Z
 
 set search_path = public;
 
@@ -3796,6 +3796,30 @@ create policy "venue_reviews: insert own" on public.venue_reviews as PERMISSIVE 
 create policy "venue_reviews: read all" on public.venue_reviews as PERMISSIVE for SELECT to anon, authenticated using (true);
 
 create policy "venue_reviews: update own" on public.venue_reviews as PERMISSIVE for UPDATE to authenticated using ((( SELECT auth.uid() AS uid) = user_id)) with check ((( SELECT auth.uid() AS uid) = user_id));
+
+-- ======================================================================
+-- Comments
+-- ======================================================================
+
+comment on table public.venue_coverage is 'Which 0.1-degree tiles of osm_sports_venues have been imported. Distinguishes "never fetched" from "fetched, genuinely empty" so the client knows whether to trigger a warm.';
+
+comment on column public.osm_sports_venues.google_photo_name is 'Places API (New) photo resource name — used by /api/venue-photo proxy.';
+
+comment on column public.osm_sports_venues.enrichment_source is 'google | wikidata — which provider supplied hero_image_url.';
+
+comment on column public.osm_sports_venues.tags is 'Whitelisted long-tail OSM tags (hoops, lanes, capacity, fee, covered, wheelchair, phone, image, wikimedia_commons, wikipedia, description, addr{...}). Display-only. Written by server/lib/osmVenueTags.ts buildOsmTagBag(). Deliberately NOT emitted into map GeoJSON properties — that path selects up to 8000 rows.';
+
+comment on column public.osm_sports_venues.photos is 'Merged gallery, priority-ordered: [{source:"google"|"osm"|"wikimedia"|"wikidata", ref?, url?, attribution, attribution_url}]. Google entries carry a photo RESOURCE NAME in `ref`, never bytes and never a Google URL — they are served through /api/venue-photo?venueId=..&i=N so the API key stays server-side.';
+
+comment on column public.osm_sports_venues.google_details is 'Google Places non-photo content (rating, userRatingCount, formattedAddress, phone, hours, editorialSummary, accessibility/parking, businessStatus, googleMapsUri) plus fetchedAt. SHORT 24h TTL per Places terms. NEVER contains review text — Google review text may not be commingled with first-party reviews, so it is not requested at all.';
+
+comment on column public.osm_sports_venues.enrichment_version is 'Bumped in api/venue-enrich.ts (ENRICHMENT_VERSION) whenever the enrichment shape changes. Rows below the current value are treated as stale regardless of enriched_at.';
+
+comment on column public.profiles.athlete_profile is 'Athlete-facing profile extensions (handle, sports, metrics, experience, highlights, trust UI). Validated in app.';
+
+comment on column public.profiles.display_name_search is 'Lowercased display_name for trigram search; maintained by DB.';
+
+comment on column public.profiles.handle_search is 'Lowercased @handle from athlete_profile JSON; maintained by DB.';
 
 -- ======================================================================
 -- Grants — tables

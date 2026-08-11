@@ -54,9 +54,10 @@ never drifts far from live.
 > `20260810000000_drop_legacy_create_game_overload`,
 > `20260810120000_unified_feed_gender_gate`.
 >
-> Note that production is also written to **out of band** — `public.venue_coverage`
-> appeared between two dumps taken minutes apart. Regenerate `schema.sql` before
-> assuming the baseline is current.
+> Regenerate `schema.sql` after applying anything, and re-check before trusting it:
+> work merging in from another branch can add migrations under you. `venue_coverage`
+> landed this way on 2026-08-10 (`20260810130000_venue_coverage.sql`, arriving with the
+> venue-pipeline merge) between two dumps taken minutes apart.
 
 To apply a single migration deliberately, pass the **file** — do not inline it:
 
