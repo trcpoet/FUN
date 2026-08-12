@@ -402,11 +402,46 @@ export async function fetchSportsVenuesFromDb(
 }
 
 /**
+ * Areas already answered this session, so asking for one again costs nothing.
+ *
+ * Venues load only for an explicit act — a double-tap, a search, a venue opened from the feed —
+ * and people revisit the same handful of places. Re-asking for one should be instant.
+ *
+ * This cache is for SPEED, NOT FOR DISPLAY. Nothing reads it except `loadVenuesForArea`, and
+ * `loadVenuesForArea` only runs for an explicit request, so panning across a cached area can
+ * never reveal it. Whatever the last explicit request returned is what stays on the map.
+ */
+const areaCache = new Map<string, VenueLoadResult>();
+
+/** Plenty for a session's worth of revisits, small enough not to matter. */
+const AREA_CACHE_MAX = 20;
+
+/**
+ * ~1km of latitude, which is well inside the smallest radius we ever request, so two taps that
+ * round together genuinely describe the same ground.
+ */
+function areaCacheKey(
+  centerLat: number,
+  centerLng: number,
+  radiusKm: number,
+  sportFilter: string[]
+): string {
+  const lat = centerLat.toFixed(2);
+  const lng = centerLng.toFixed(2);
+  // Sorted so ["Tennis","Soccer"] and ["Soccer","Tennis"] are one entry, not two.
+  return `${lat},${lng},${radiusKm},${[...sportFilter].sort().join("|")}`;
+}
+
+/** Drop the whole cache. Exported for tests and for a hard refresh of the venue layer. */
+export function clearVenueAreaCache(): void {
+  areaCache.clear();
+}
+
+/**
  * Load the venues around a point, and get an un-imported area moving without waiting for it.
  *
- * Never performs a slow network fetch, so it is safe to call on every map settle: the read is
- * a single indexed Supabase query, and the only other thing that can happen is a fire-and-
- * forget warm request.
+ * Never performs a slow network fetch: the read is a single indexed Supabase query, and the only
+ * other thing that can happen is a fire-and-forget warm request.
  */
 export async function loadVenuesForArea(
   centerLat: number,
@@ -414,14 +449,43 @@ export async function loadVenuesForArea(
   radiusKm: number,
   options?: { signal?: AbortSignal; sportFilter?: string[] }
 ): Promise<VenueLoadResult> {
+  const sportFilter = options?.sportFilter ?? [];
+  const key = areaCacheKey(centerLat, centerLng, radiusKm, sportFilter);
+
+  const cached = areaCache.get(key);
+  if (cached) {
+    // Refresh recency so the LRU keeps the places actually being revisited.
+    areaCache.delete(key);
+    areaCache.set(key, cached);
+    return cached;
+  }
+
   const bbox = bboxFromCenterRadius(centerLat, centerLng, radiusKm);
   const outcome = await fetchSportsVenuesFromDb(bbox, options);
 
+  /**
+   * Only answers get cached.
+   *
+   * `warming` and `unavailable` are both "we did not find out" — caching either would freeze
+   * that ground as permanently empty for the rest of the session, which is the same trap
+   * `venueCoverageRef` avoids in MapboxMap and the reason a failed Overpass fetch never writes
+   * a `venue_coverage` row.
+   */
+  const remember = (result: VenueLoadResult): VenueLoadResult => {
+    if (result.status !== "ok" && result.status !== "empty") return result;
+    areaCache.set(key, result);
+    if (areaCache.size > AREA_CACHE_MAX) {
+      const oldest = areaCache.keys().next();
+      if (!oldest.done) areaCache.delete(oldest.value);
+    }
+    return result;
+  };
+
   switch (outcome.status) {
     case "ok":
-      return { geojson: outcome.geojson, status: "ok" };
+      return remember({ geojson: outcome.geojson, status: "ok" });
     case "empty":
-      return { geojson: EMPTY_GEOJSON, status: "empty" };
+      return remember({ geojson: EMPTY_GEOJSON, status: "empty" });
     case "uncached":
       warmVenueArea(centerLat, centerLng);
       return { geojson: EMPTY_GEOJSON, status: "warming" };

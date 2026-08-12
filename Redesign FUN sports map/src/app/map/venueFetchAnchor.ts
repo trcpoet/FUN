@@ -1,15 +1,23 @@
 /**
  * Where to load venues for, and when to load them again.
  *
- * WHY THIS EXISTS
- * The Mapbox basemap paints `landuse` class `pitch` polygons for the whole world
- * (see mapTheme.ts) — a pitch is on screen whether or not FUN knows about it. Venue
- * icons, by contrast, only exist where we actually fetched `osm_sports_venues`.
+ * VENUES ARE A SEARCH RESULT, NOT A MAP LAYER
+ * They load in response to an explicit act — the first load at your own position, a
+ * double-tap, a search, or opening a venue from the feed — and they stay put after
+ * that. Panning and zooming never fetch.
  *
- * Venue fetching used to be anchored to the user's GPS (or their last explicit
- * search) and never re-ran on pan, so panning anywhere else produced a visible
- * pitch with no icon — and nothing errored, because the fetch had succeeded. These
- * helpers keep the fetched ring tied to what the user is actually looking at.
+ * THIS REPLACED A VIEWPORT-FOLLOWING RULE, ON PURPOSE
+ * The anchor used to fall back to the map centre so the fetched ring tracked whatever
+ * the camera was looking at. That was itself a fix: the Mapbox basemap paints `landuse`
+ * class `pitch` polygons for the whole world (see mapTheme.ts), so a pitch is on screen
+ * whether or not FUN knows about it, and an anchor left behind by a pan showed a pitch
+ * with no icon while nothing errored.
+ *
+ * Following the camera solved that by fetching everywhere the user drifted, which is the
+ * behaviour being removed here: venues appeared in cities the user had merely scrolled
+ * past. The trade is accepted deliberately — an un-asked-for fetch is worse than a pitch
+ * without an icon — so expect basemap pitches with no marker outside the loaded area, and
+ * do not "fix" it by reinstating the map-centre fallback.
  *
  * Kept pure (no mapbox-gl import) so the rules are unit-testable without a map.
  */
@@ -19,10 +27,16 @@ import { VENUE_FETCH_CENTER_ABORT_KM } from "./mapConfig";
 
 export type VenueAnchor = { lat: number; lng: number };
 
-/** What the current view needs covered. */
-export type VenueViewportNeed = VenueAnchor & {
-  /** Radius that actually has to be on screen right now. */
-  viewportRadiusKm: number;
+/** What the current request needs covered. */
+export type VenueFetchNeed = VenueAnchor & {
+  /**
+   * Radius that has to be covered.
+   *
+   * Comes from the user's venue-radius filter, NOT from the viewport. A radius derived from
+   * the visible width meant a zoom changed what was "needed" and tripped a refetch without
+   * the user asking for anything.
+   */
+  neededRadiusKm: number;
   /** Serialized sport filter — a different filter means different rows, so it must refetch. */
   sportSig: string;
 };
@@ -38,12 +52,6 @@ export type VenueFetchCoverage = VenueAnchor & {
 export const VENUE_FETCH_MIN_RADIUS_KM = 2;
 
 /**
- * Viewport width → the radius that must be on screen. The half-diagonal of a W-wide
- * square viewport is ~0.71W, so anything at or below W/2 leaves the corners uncovered.
- */
-export const VENUE_FETCH_VIEWPORT_RADIUS_FACTOR = 0.75;
-
-/**
  * Fetch this much more than the screen needs, so ordinary panning is served from data we
  * already hold. Without a buffer the fetched ring exactly equals the visible one, and then
  * *any* pan past the hysteresis threshold leaves coverage and costs a request.
@@ -53,69 +61,60 @@ export const VENUE_FETCH_BUFFER_FACTOR = 2.5;
 /**
  * Pick the point venues load around.
  *
- * An explicit centre (search result, tapped venue/game/note) wins only while the map
- * is still looking at it — otherwise a search from ten minutes ago keeps the venue
- * layer pinned to a place the user has long since left. Once they pan away, the
- * viewport takes over.
+ * Only two things can answer this, and the camera is not one of them. An explicit centre
+ * (double-tap, search, a venue opened from the feed) holds until the *next* explicit act —
+ * panning away from it does not release it, because a pan is not a request for venues
+ * somewhere else. `initialCenter` is the user's own position and only gets a look in before
+ * the first explicit act, so opening the app still shows what is nearby.
+ *
+ * Deliberately takes no map centre. See the module header before adding one back.
  */
 export function resolveVenueFetchAnchor(opts: {
   explicitCenter?: VenueAnchor | null;
-  mapCenter?: VenueAnchor | null;
-  userCoords?: VenueAnchor | null;
+  initialCenter?: VenueAnchor | null;
 }): VenueAnchor | null {
-  const { explicitCenter, mapCenter, userCoords } = opts;
-
-  if (explicitCenter) {
-    // No map yet (first paint): the explicit centre is all we have.
-    if (!mapCenter) return explicitCenter;
-    const drift = distanceKmBetween(
-      explicitCenter.lat,
-      explicitCenter.lng,
-      mapCenter.lat,
-      mapCenter.lng
-    );
-    // Still within the drift window — the map is likely mid-flight toward it.
-    if (drift <= VENUE_FETCH_CENTER_ABORT_KM) return explicitCenter;
-  }
-
-  return mapCenter ?? userCoords ?? null;
-}
-
-/** Radius the current viewport needs on screen, clamped to something worth a round-trip. */
-export function venueFetchRadiusKm(visibleWidthKm: number, maxRadiusKm: number): number {
-  const ceiling = Math.max(VENUE_FETCH_MIN_RADIUS_KM, maxRadiusKm);
-  const wanted = visibleWidthKm * VENUE_FETCH_VIEWPORT_RADIUS_FACTOR;
-  return Math.min(ceiling, Math.max(VENUE_FETCH_MIN_RADIUS_KM, wanted));
-}
-
-/** How wide a ring to actually request for a given on-screen need. */
-export function venueRequestRadiusKm(viewportRadiusKm: number, maxRadiusKm: number): number {
-  const ceiling = Math.max(VENUE_FETCH_MIN_RADIUS_KM, maxRadiusKm);
-  return Math.min(ceiling, viewportRadiusKm * VENUE_FETCH_BUFFER_FACTOR);
+  return opts.explicitCenter ?? opts.initialCenter ?? null;
 }
 
 /**
- * Should we fetch venues again?
+ * Radius one explicit request should cover, clamped to something worth a round-trip.
  *
- * Refetch when we hold nothing, when the filter changed, when zooming out needs more
- * than we fetched, or once the visible ring pokes outside the fetched one. Note the
- * asymmetry: the *viewport* radius is tested against the *fetched* radius, so panning
- * inside the buffer is free.
+ * This used to take the visible viewport width. It takes the user's own venue-radius filter
+ * now, which is the whole reason zooming no longer refetches — the need is a setting, not a
+ * consequence of where the camera happens to be.
+ */
+export function venueNeedRadiusKm(filterRadiusKm: number): number {
+  return Math.max(VENUE_FETCH_MIN_RADIUS_KM, filterRadiusKm);
+}
+
+/** How wide a ring to actually request for a given need. */
+export function venueRequestRadiusKm(neededRadiusKm: number, maxRadiusKm: number): number {
+  const ceiling = Math.max(VENUE_FETCH_MIN_RADIUS_KM, maxRadiusKm);
+  return Math.min(ceiling, neededRadiusKm * VENUE_FETCH_BUFFER_FACTOR);
+}
+
+/**
+ * Should this request actually go out?
+ *
+ * Only ever consulted for an explicit request now, so it is answering "do we already hold
+ * this ground?" rather than "has the camera wandered off?". Refetch when we hold nothing,
+ * when the sport filter changed, when the radius filter grew past what we fetched, or when
+ * the requested ring is not inside the one we hold.
  */
 export function shouldRefetchVenues(
-  need: VenueViewportNeed,
+  need: VenueFetchNeed,
   have: VenueFetchCoverage | null
 ): boolean {
   if (!have) return true;
   if (need.sportSig !== have.sportSig) return true;
 
-  // Zoomed out past the edge of our data — needed wherever the centre is.
-  if (need.viewportRadiusKm > have.fetchedRadiusKm) return true;
+  // The radius filter widened past the edge of our data.
+  if (need.neededRadiusKm > have.fetchedRadiusKm) return true;
 
   const drift = distanceKmBetween(need.lat, need.lng, have.lat, have.lng);
 
-  // The visible ring is still entirely inside what we fetched.
-  if (drift + need.viewportRadiusKm <= have.fetchedRadiusKm) return false;
+  // Asking for ground we already hold — a second double-tap near the first, say.
+  if (drift + need.neededRadiusKm <= have.fetchedRadiusKm) return false;
 
   // Outside — but ignore a nudge past the boundary so we don't thrash on its edge.
   return drift > VENUE_FETCH_CENTER_ABORT_KM;

@@ -436,6 +436,83 @@ describe("loadVenuesForArea", () => {
   });
 });
 
+/**
+ * Venues load only for an explicit act, and people re-ask for the same few places. The cache
+ * exists so the second ask is free — NOT so the map can paint venues the viewport happens to
+ * cross. Nothing reads it but `loadVenuesForArea`, which only an explicit act calls.
+ */
+describe("explicitly loaded areas are cached", () => {
+  const LAT = 32.73;
+  const LNG = -97.115;
+
+  it("serves a repeat request for the same area without touching the database", async () => {
+    const stub = makeSupabaseStub(withVenues([SOCCER_PITCH_ROW]));
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    const first = await loadVenuesForArea(LAT, LNG, 5);
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+    expect(readsAfterFirst).toBeGreaterThan(0);
+
+    const second = await loadVenuesForArea(LAT, LNG, 5);
+
+    expect(stub.rpc.mock.calls.length).toBe(readsAfterFirst);
+    expect(second.status).toBe("ok");
+    expect(second.geojson.features).toHaveLength(first.geojson.features.length);
+  });
+
+  it("misses when the sport filter differs, because those are different rows", async () => {
+    const stub = makeSupabaseStub(withVenues([SOCCER_PITCH_ROW]));
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    await loadVenuesForArea(LAT, LNG, 5, { sportFilter: ["Soccer"] });
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+    await loadVenuesForArea(LAT, LNG, 5, { sportFilter: ["Tennis"] });
+
+    expect(stub.rpc.mock.calls.length).toBeGreaterThan(readsAfterFirst);
+  });
+
+  it("treats a reordered sport filter as the same area", async () => {
+    const stub = makeSupabaseStub(withVenues([SOCCER_PITCH_ROW]));
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    await loadVenuesForArea(LAT, LNG, 5, { sportFilter: ["Soccer", "Tennis"] });
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+    await loadVenuesForArea(LAT, LNG, 5, { sportFilter: ["Tennis", "Soccer"] });
+
+    expect(stub.rpc.mock.calls.length).toBe(readsAfterFirst);
+  });
+
+  it("never caches a 'warming' area, or it would stay empty all session", async () => {
+    // Same trap venue_coverage avoids: an area we could not answer for must stay askable, or
+    // the import that is running right now would never be picked up.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    const stub = makeSupabaseStub(uncachedArea());
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    const first = await loadVenuesForArea(LAT, LNG, 5);
+    expect(first.status).toBe("warming");
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+
+    const second = await loadVenuesForArea(LAT, LNG, 5);
+
+    expect(second.status).toBe("warming");
+    expect(stub.rpc.mock.calls.length).toBeGreaterThan(readsAfterFirst);
+  });
+
+  it("never caches an unavailable read", async () => {
+    const stub = makeSupabaseStub({
+      osm_sports_venues: { data: null, error: { code: "08006", message: "connection failure" } },
+    });
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    expect((await loadVenuesForArea(LAT, LNG, 5)).status).toBe("unavailable");
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+
+    expect((await loadVenuesForArea(LAT, LNG, 5)).status).toBe("unavailable");
+    expect(stub.rpc.mock.calls.length).toBeGreaterThan(readsAfterFirst);
+  });
+});
+
 describe("missing-table skip latch", () => {
   it("expires instead of disabling DB reads for the whole session", async () => {
     const stub = makeSupabaseStub({
