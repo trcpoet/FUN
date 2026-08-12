@@ -45,23 +45,26 @@ never drifts far from live.
 
 ## Applying migrations to production
 
-> **Do not run `supabase db push` casually.** It applies *every* pending migration.
-> As of 2026-08-10 exactly one is intentionally **not** applied to production, and
-> pushing would deploy it by accident:
+> **Do not run `supabase db push` casually.** It applies *every* pending migration,
+> including any a teammate added since you last looked.
 >
-> - `20260808010000_games_nearby_untimed_ttl.sql` — verified absent from prod
->   (`get_games_nearby` has no `starts_at is null` branch)
->
-> Applied on 2026-08-10: `20260809120000_note_likes_read_path`,
+> As of 2026-08-10, **no migration is deliberately held back** — every file in
+> `migrations/` is live in production. Applied that day:
+> `20260808010000_games_nearby_untimed_ttl`, `20260809120000_note_likes_read_path`,
 > `20260810000000_drop_legacy_create_game_overload`,
 > `20260810120000_unified_feed_gender_gate`.
 >
 > Applied on 2026-08-11: `20260811000000_game_chat_archive` — verified live
 > (archive → thread leaves `get_my_game_inbox`, undo → it returns, other 23
 > threads untouched, test row restored to `chat_hidden_at = null`). The
-> "game must have ended" branch is **not** yet exercised against prod: every
-> game in `games` is currently past its window, so there was no standing game
-> to refuse. The predicate itself was evaluated over the real table.
+> "game must have ended" guard could not be exercised at the time — every game
+> in `games` was already past its window — and was confirmed by hand on
+> 2026-08-12: a game created for the future refused archiving until it ended.
+>
+> Regenerate `schema.sql` after applying anything, and re-check before trusting it:
+> work merging in from another branch can add migrations under you. `venue_coverage`
+> landed this way on 2026-08-10 (`20260810130000_venue_coverage.sql`, arriving with the
+> venue-pipeline merge) between two dumps taken minutes apart.
 
 To apply a single migration deliberately, pass the **file** — do not inline it:
 
