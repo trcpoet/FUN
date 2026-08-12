@@ -23,6 +23,7 @@
  */
 import { buildOsmVenueRow, type OsmVenueTags } from "../server/lib/osmVenueTags";
 import { buildVenueOverpassQuery } from "../server/lib/osmVenueQuery";
+import { attemptBudgetMs, REQUEST_BUDGET_MS } from "../server/lib/overpassBudget";
 import { rateLimit, validateBbox, apiResponse } from "../server/lib/apiGuards";
 import {
   isCoverageStale,
@@ -46,18 +47,8 @@ const UPSTREAMS = [
   "https://overpass.kumi.systems/api/interpreter",
 ] as const;
 
-/**
- * Give up on a single mirror after this long and try the next one.
- *
- * A healthy mirror answers a tile in ~4-5s. An unhealthy one does not fail fast — one was
- * observed accepting the connection and then hanging past 120s. Without a per-attempt
- * bound, a single dead mirror would consume the whole invocation while three working ones
- * sat unused.
- */
-const UPSTREAM_TIMEOUT_MS = 8_000;
-
-/** Hard ceiling for the whole request, keeping it well inside the Edge response budget. */
-const REQUEST_BUDGET_MS = 22_000;
+// Mirror budget arithmetic lives in server/lib so it can be unit-tested without importing this
+// Edge route — see overpassBudget.ts for why the attempt window is not a flat per-mirror timeout.
 
 type OsmEl = {
   type?: string;
@@ -98,12 +89,15 @@ type SupabaseLike = {
 async function fetchTileElements(bboxStr: string, deadlineAt: number): Promise<OsmEl[] | null> {
   const body = new URLSearchParams({ data: buildVenueOverpassQuery(bboxStr) }).toString();
 
-  for (const url of UPSTREAMS) {
-    const remaining = deadlineAt - Date.now();
-    if (remaining <= 0) return null;
+  for (let i = 0; i < UPSTREAMS.length; i++) {
+    const url = UPSTREAMS[i]!;
+    const attemptMs = attemptBudgetMs(deadlineAt - Date.now(), UPSTREAMS.length - i);
+    // Too little budget left for a request that could actually finish — stop rather than
+    // burn the remainder on an attempt we would abort anyway.
+    if (attemptMs === 0) return null;
 
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), Math.min(UPSTREAM_TIMEOUT_MS, remaining));
+    const timer = setTimeout(() => abort.abort(), attemptMs);
     try {
       const res = await fetch(url, {
         method: "POST",

@@ -166,21 +166,45 @@ async function isAreaCovered(
 }
 
 /**
- * Tiles we have already asked the server to import, so a map that re-reads while an import
- * is still running does not re-request the same ground on every pass.
+ * How long to leave a tile alone after the server refused to warm it.
+ *
+ * A refusal used to make the tile immediately requestable again, which was half right: a bad
+ * minute must not permanently poison ground the user can see. But `warmVenueArea` runs on every
+ * map settle, so "forget it happened" meant re-asking within seconds — producing a stream of
+ * 503s in the console and hammering the very Overpass mirrors that had just refused. Backing off
+ * keeps the self-healing property without the storm.
+ *
+ * Same shape as `DB_SKIP_COOLDOWN_MS` above, for the same reason: recover on your own, but do
+ * not hammer.
  */
-const warmRequested = new Set<string>();
+const WARM_RETRY_COOLDOWN_MS = 5 * 60_000;
+
+/**
+ * Tiles we have already asked the server to import → the time before which we must not ask
+ * again, so a map that re-reads while an import is still running does not re-request the same
+ * ground on every pass.
+ *
+ * `Infinity` means "asked and accepted, never re-ask this session"; a finite timestamp is a
+ * refusal we intend to retry after the cooldown.
+ */
+const warmRequested = new Map<string, number>();
 
 /** Guards against several warm walks running at once — see `warmVenueArea`. */
 let warmChainRunning = false;
 
 const tileKey = (tile: VenueTile) => `${tile.x},${tile.y}`;
 
+/** True while a tile is either already accepted or inside its post-refusal cooldown. */
+function warmSuppressed(key: string, now: number): boolean {
+  const until = warmRequested.get(key);
+  return until !== undefined && now < until;
+}
+
 /** Ask the server to import one tile. Resolves either way; never throws. */
 async function warmTile(tile: VenueTile): Promise<void> {
   const key = tileKey(tile);
-  if (warmRequested.has(key)) return;
-  warmRequested.add(key);
+  if (warmSuppressed(key, Date.now())) return;
+  warmRequested.set(key, Infinity);
 
   const b = tileToBbox(tile);
   try {
@@ -193,12 +217,12 @@ async function warmTile(tile: VenueTile): Promise<void> {
         lng: (b.minLng + b.maxLng) / 2,
       }),
     });
-    // Only a request the server accepted counts as "asked". A rejected one (rate-limited,
-    // Overpass down, or a deployment missing SUPABASE_URL, which answers 503) must be
-    // forgettable, or one bad minute would leave the tab unable to warm that ground again.
-    if (!res.ok) warmRequested.delete(key);
+    // Only a request the server accepted counts as "asked". A rejected one (rate-limited, or
+    // Overpass refusing every mirror, which answers 503) becomes retryable — but not until the
+    // cooldown elapses, or the next map settle would ask again immediately.
+    if (!res.ok) warmRequested.set(key, Date.now() + WARM_RETRY_COOLDOWN_MS);
   } catch {
-    warmRequested.delete(key);
+    warmRequested.set(key, Date.now() + WARM_RETRY_COOLDOWN_MS);
   }
 }
 
@@ -222,8 +246,12 @@ function warmVenueArea(centerLat: number, centerLng: number): void {
   if (warmChainRunning) return;
 
   const bbox = bboxFromCenterRadius(centerLat, centerLng, VENUE_WARM_RADIUS_KM);
+  const now = Date.now();
   const tiles = sortTilesByProximity(tilesForBbox(bbox), centerLat, centerLng)
-    .filter((t) => !warmRequested.has(tileKey(t)))
+    // Must ask `warmSuppressed`, not `warmRequested.has` — a refused tile keeps its entry as a
+    // retry-after timestamp, so `.has()` would exclude it from the walk forever and the
+    // cooldown would never actually expire.
+    .filter((t) => !warmSuppressed(tileKey(t), now))
     .slice(0, VENUE_WARM_MAX_TILES);
   if (tiles.length === 0) return;
 

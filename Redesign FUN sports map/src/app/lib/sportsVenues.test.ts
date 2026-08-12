@@ -88,6 +88,23 @@ const coveredRowsFor = (lat: number, lng: number, radiusKm: number) =>
     warmed_at: new Date().toISOString(),
   }));
 
+/**
+ * Wait for the fire-and-forget warm walk to stop issuing requests, then report how many it made.
+ *
+ * `warmVenueArea` deliberately does not block the read it was triggered from, and it walks
+ * several tiles in sequence — so reading `mock.calls.length` right after `loadVenuesForArea`
+ * resolves catches the chain mid-flight and yields a number that keeps changing.
+ */
+async function settledFetchCount(spy: { mock: { calls: unknown[] } }): Promise<number> {
+  let last = -1;
+  // Bounded: a runaway loop must fail the test, not hang the suite.
+  for (let i = 0; i < 50 && last !== spy.mock.calls.length; i++) {
+    last = spy.mock.calls.length;
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  return spy.mock.calls.length;
+}
+
 async function loadModule(supabaseStub: unknown) {
   vi.resetModules();
   vi.doMock("../../lib/supabase", () => ({ supabase: supabaseStub }));
@@ -305,6 +322,48 @@ describe("loadVenuesForArea", () => {
     await loadVenuesForArea(LAT + 0.001, LNG + 0.001, 5);
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("backs off a refused tile instead of re-asking on the next settle", async () => {
+    // The 503 storm. A refusal used to make the tile immediately requestable again, and
+    // `warmVenueArea` runs on every map settle — so a tile Overpass had just refused was
+    // re-requested seconds later, filling the console with 503s and hammering the mirrors that
+    // had already said no.
+    const fetchSpy = vi.fn(async () => new Response("", { status: 503 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { loadVenuesForArea } = await loadModule(makeSupabaseStub(uncachedArea()));
+
+    await loadVenuesForArea(LAT, LNG, 5);
+    // The warm walk is fire-and-forget and covers several tiles, so the count is still climbing
+    // when the read resolves. Let it drain before measuring, or this asserts against a moving
+    // number rather than against the cooldown.
+    const afterFirst = await settledFetchCount(fetchSpy);
+    expect(afterFirst).toBeGreaterThan(0);
+
+    // Immediately re-reading the same ground must not re-ask.
+    await loadVenuesForArea(LAT, LNG, 5);
+    expect(await settledFetchCount(fetchSpy)).toBe(afterFirst);
+  });
+
+  it("retries a refused tile once the cooldown has elapsed", async () => {
+    // The other half of the contract: backing off must not become giving up, or one bad minute
+    // would leave that ground permanently un-importable for the session.
+    const fetchSpy = vi.fn(async () => new Response("", { status: 503 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { loadVenuesForArea } = await loadModule(makeSupabaseStub(uncachedArea()));
+
+    await loadVenuesForArea(LAT, LNG, 5);
+    const afterFirst = await settledFetchCount(fetchSpy);
+
+    // Past the 5 minute cooldown.
+    const realNow = Date.now;
+    Date.now = () => realNow() + 6 * 60_000;
+    try {
+      await loadVenuesForArea(LAT, LNG, 5);
+      expect(await settledFetchCount(fetchSpy)).toBeGreaterThan(afterFirst);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   it("surfaces a failed read as 'unavailable' instead of an empty map", async () => {
