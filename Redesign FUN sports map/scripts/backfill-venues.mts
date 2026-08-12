@@ -92,11 +92,27 @@ type OsmEl = {
  */
 const UPSTREAM_TIMEOUT_MS = 30_000;
 
+/**
+ * The mirror that answered last, tried first next time.
+ *
+ * Public Overpass instances fail in long streaks rather than at random: when one is shedding
+ * load it usually keeps shedding for the length of a backfill. Walking the fixed list from the
+ * top for every tile therefore pays the full timeout of each dead mirror ahead of the live one,
+ * over and over. Observed 2026-08-12 with three of four mirrors down: ~53s of pure waiting per
+ * tile, which turns a 50-tile metro into a 44-minute job that is mostly sleep.
+ *
+ * Reset on failure, so a mirror that dies mid-run does not become a permanent 30s tax.
+ */
+let preferredUpstream: string | null = null;
+
 async function fetchOverpass(query: string): Promise<OsmEl[]> {
   const body = new URLSearchParams({ data: query }).toString();
   const ROUNDS = 4;
   for (let round = 0; round < ROUNDS; round++) {
-    for (const url of UPSTREAMS) {
+    const ordered = preferredUpstream
+      ? [preferredUpstream, ...UPSTREAMS.filter((u) => u !== preferredUpstream)]
+      : [...UPSTREAMS];
+    for (const url of ordered) {
       const abort = new AbortController();
       const timer = setTimeout(() => abort.abort(), UPSTREAM_TIMEOUT_MS);
       try {
@@ -107,12 +123,15 @@ async function fetchOverpass(query: string): Promise<OsmEl[]> {
           signal: abort.signal,
         });
         if (!res.ok) {
+          if (preferredUpstream === url) preferredUpstream = null;
           console.warn(`  ${url} → ${res.status}, trying next`);
           continue;
         }
         const json = (await res.json()) as { elements?: OsmEl[] };
+        preferredUpstream = url;
         return json.elements ?? [];
       } catch (e) {
+        if (preferredUpstream === url) preferredUpstream = null;
         console.warn(`  ${url} failed: ${(e as Error).message}, trying next`);
       } finally {
         clearTimeout(timer);

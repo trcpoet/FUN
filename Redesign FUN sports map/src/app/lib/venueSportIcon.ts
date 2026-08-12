@@ -57,6 +57,10 @@ const LEISURE_TO_SUFFIX: Record<string, string> = {
   adventure_park: "adventure_park",
   marina: "kayaking",
   slipway: "kayaking",
+  // Outdoor exercise equipment — Obstacle Course is the catalog entry that claims it. Added
+  // when the importer started collecting the token: 57 of these landed in DFW on the first
+  // re-warm, and without a mapping every one of them drew the generic 🏟️.
+  fitness_station: "obstacle",
 };
 
 /** Primary sport suffix for clustering / icon (first resolvable OSM sport token, else leisure, else other). */
