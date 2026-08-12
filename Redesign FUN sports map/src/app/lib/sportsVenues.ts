@@ -36,6 +36,18 @@ import {
 import type { SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 import { dbRowToVenueProperties } from "./venueSelection";
 import { venueAccessTier, VENUE_ACCESS_POSTGREST_FILTERS } from "./venueAccess";
+import { isMissingRpc } from "../../lib/rpcErrors";
+
+/**
+ * Rows to ask for per venue read.
+ *
+ * Not a tuning knob — PostgREST enforces `db-max-rows = 1000` on this project, verified against
+ * production (`?limit=5000` and `?limit=1500` both return exactly 1000). Asking for the 8000 the
+ * code used to request only made the ceiling invisible: the map has always been seeing 1000
+ * venues, and the reason that was a *bug* rather than a limit is that the old read ordered by
+ * `id`, so those 1000 were an arbitrary geographic sample rather than the nearest ones.
+ */
+const VENUE_READ_LIMIT = 1000;
 
 export type { SportsVenueProperties, SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 
@@ -285,22 +297,48 @@ export async function fetchSportsVenuesFromDb(
   const { minLat, minLng, maxLat, maxLng } = bbox;
 
   // A PostgREST builder can only be awaited once, so the whole query is rebuilt per attempt.
-  const buildQuery = () => {
+
+  /**
+   * Preferred read: nearest-first, ordered server-side.
+   *
+   * PostgREST caps every response at 1000 rows on this project, so whichever rows the database
+   * decides to hand back are the only ones that exist as far as the map is concerned. Ordering
+   * therefore has to happen before the cap, which a plain table read cannot express — `order=`
+   * only takes real columns and distance depends on where the viewer is.
+   */
+  const buildRpc = () => {
+    const query = supabase!.rpc("get_venues_in_bbox", {
+      p_min_lat: minLat,
+      p_min_lng: minLng,
+      p_max_lat: maxLat,
+      p_max_lng: maxLng,
+      p_limit: VENUE_READ_LIMIT,
+    });
+    return options?.signal ? query.abortSignal(options.signal) : query;
+  };
+
+  /**
+   * Fallback for a deployment that has not applied 20260812120000 yet.
+   *
+   * Returns the same shape and the same access filtering, just ordered by id — which is the old
+   * behaviour, and still better than no venues at all.
+   */
+  const buildTableQuery = () => {
     let query = supabase!
       .from("osm_sports_venues")
       .select(OSM_VENUE_MAP_SELECT)
-      // Stable ordering: without it the 8000-row cap would truncate an arbitrary,
-      // shifting subset — venues would appear and vanish as rows were re-written.
+      // Stable ordering: without it the row cap would truncate an arbitrary, shifting
+      // subset — venues would appear and vanish as rows were re-written.
       .order("id", { ascending: true })
       .gte("lat", minLat)
       .lte("lat", maxLat)
       .gte("lng", minLng)
       .lte("lng", maxLng)
-      .limit(8000);
+      .limit(VENUE_READ_LIMIT);
 
-    // Drop private and residential venues server-side, BEFORE the 8000-row cap applies.
-    // Over half the table is unnamed backyard pools, so without this a dense suburb spends its
-    // whole row budget on venues the client is about to discard, truncating the real pitches.
+    // Drop private and residential venues server-side, BEFORE the row cap applies. Over half
+    // the table is unnamed backyard pools, so without this a dense suburb spends its whole row
+    // budget on venues the client is about to discard, truncating the real pitches.
     // `venueAccessTier` below is still the rule — these filters are only ever allowed to be a
     // subset of it, which venueAccess.test.ts asserts.
     for (const filter of VENUE_ACCESS_POSTGREST_FILTERS) {
@@ -316,9 +354,11 @@ export async function fetchSportsVenuesFromDb(
   // Retried on a 5xx: the outcome union below already keeps "unavailable" distinct from
   // "empty", but a venue layer that gives up on the first blip still leaves the map bare.
   // Retries stop the moment the caller aborts — panning must not queue doomed requests.
-  const { data, error } = await retryTransient(buildQuery, {
-    shouldContinue: () => !options?.signal?.aborted,
-  });
+  const shouldContinue = () => !options?.signal?.aborted;
+  let { data, error } = await retryTransient(buildRpc, { shouldContinue });
+  if (error && isMissingRpc(error)) {
+    ({ data, error } = await retryTransient(buildTableQuery, { shouldContinue }));
+  }
   throwIfAborted(options?.signal);
   if (error) {
     if (isMissingTableError(error, "osm_sports_venues")) {
