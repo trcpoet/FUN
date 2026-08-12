@@ -90,18 +90,35 @@ describe("sortTilesByProximity", () => {
 });
 
 describe("isCoverageStale", () => {
+  const V = 12345;
+  const day = 24 * 60 * 60 * 1000;
+  /** A row imported now, under the current token set. */
+  const fresh = (ageDays = 0, import_version: number | null = V) => ({
+    warmed_at: new Date(Date.now() - ageDays * day).toISOString(),
+    import_version,
+  });
+
   it("trusts a fresh import and expires an old one", () => {
-    const day = 24 * 60 * 60 * 1000;
-    expect(isCoverageStale(new Date().toISOString())).toBe(false);
-    expect(
-      isCoverageStale(new Date(Date.now() - (VENUE_COVERAGE_TTL_DAYS - 1) * day).toISOString())
-    ).toBe(false);
-    expect(
-      isCoverageStale(new Date(Date.now() - (VENUE_COVERAGE_TTL_DAYS + 1) * day).toISOString())
-    ).toBe(true);
+    expect(isCoverageStale(fresh(), V)).toBe(false);
+    expect(isCoverageStale(fresh(VENUE_COVERAGE_TTL_DAYS - 1), V)).toBe(false);
+    expect(isCoverageStale(fresh(VENUE_COVERAGE_TTL_DAYS + 1), V)).toBe(true);
   });
 
   it("treats an unparseable timestamp as stale rather than trusting it forever", () => {
-    expect(isCoverageStale("not a date")).toBe(true);
+    expect(isCoverageStale({ warmed_at: "not a date", import_version: V }, V)).toBe(true);
+  });
+
+  it("expires a row imported under a different token set, however recent", () => {
+    // The gap this closes: on 2026-08-12 four leisure tokens were added and all 169 coverage
+    // rows stayed "fresh" while none of them had ever asked Overpass for the new types. Age
+    // cannot see that — only the version can.
+    expect(isCoverageStale(fresh(0, V + 1), V)).toBe(true);
+  });
+
+  it("treats a row written before versioning existed as stale", () => {
+    // The column defaults to 0 for rows that predate the migration; 0 means "unknown tag set".
+    expect(isCoverageStale(fresh(0, 0), V)).toBe(true);
+    expect(isCoverageStale({ warmed_at: new Date().toISOString() }, V)).toBe(true);
+    expect(isCoverageStale(fresh(0, null), V)).toBe(true);
   });
 });

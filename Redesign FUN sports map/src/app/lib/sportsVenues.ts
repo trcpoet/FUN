@@ -32,7 +32,9 @@ import {
   VENUE_WARM_MAX_TILES,
   VENUE_WARM_RADIUS_KM,
   type VenueTile,
+  type VenueCoverageRow,
 } from "../../../server/lib/venueTiles";
+import { VENUE_IMPORT_VERSION } from "../../../server/lib/osmVenueQuery";
 import type { SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 import { dbRowToVenueProperties } from "./venueSelection";
 import { venueAccessTier, VENUE_ACCESS_POSTGREST_FILTERS } from "./venueAccess";
@@ -150,7 +152,7 @@ async function isAreaCovered(
 
   let query = supabase
     .from("venue_coverage")
-    .select("tile_x,tile_y,warmed_at")
+    .select("tile_x,tile_y,warmed_at,import_version")
     .gte("tile_x", range.minX)
     .lte("tile_x", range.maxX)
     .gte("tile_y", range.minY)
@@ -170,8 +172,8 @@ async function isAreaCovered(
   const now = Date.now();
   let fresh = 0;
   for (const row of data) {
-    const { warmed_at: warmedAt } = row as unknown as { warmed_at: string };
-    if (!isCoverageStale(warmedAt, now)) fresh += 1;
+    const typed = row as unknown as VenueCoverageRow;
+    if (!isCoverageStale(typed, VENUE_IMPORT_VERSION, now)) fresh += 1;
   }
   // Partial coverage is not coverage: one un-imported tile in view is a hole in the map.
   return fresh >= tileCountForBbox(bbox);

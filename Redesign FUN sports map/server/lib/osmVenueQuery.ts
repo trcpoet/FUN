@@ -70,6 +70,37 @@ const SPORT_TOKENS = [
   "darts",
 ] as const;
 
+/**
+ * A number that changes whenever the set of tags we import changes.
+ *
+ * `venue_coverage.warmed_at` records *when* a tile was imported, never *what was asked for*.
+ * That gap bit on 2026-08-12: adding four leisure tokens left all 169 coverage rows
+ * chronologically fresh but semantically stale — imported under the old tag list — and nothing
+ * in the data could see it. Every tile had to be re-imported by hand with `--force`.
+ *
+ * Stamping this alongside `warmed_at` closes it: a row below the current version is stale no
+ * matter how recent it is, so changing the lists below re-imports visited areas on their own.
+ * Same idea as `osm_sports_venues.enrichment_version`.
+ *
+ * DERIVED, not hand-maintained, precisely because the failure being fixed was two lists drifting
+ * apart while someone forgot to reconcile them. Sorted, so reordering the arrays is not a change;
+ * adding or removing a token is.
+ */
+export function venueTokenSetVersion(tokens: readonly string[]): number {
+  // FNV-1a. Any stable hash works — it only has to be identical across the client, the warm
+  // route and the backfill script, which all import it from here.
+  let h = 2166136261;
+  for (const ch of [...tokens].sort().join(",")) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  // Mask to 31 bits so it always fits Postgres `integer`, and never 0 — the column defaults to
+  // 0 to mean "imported before versioning existed", which must stay distinguishable.
+  return ((h >>> 0) & 0x7fffffff) || 1;
+}
+
+export const VENUE_IMPORT_VERSION = venueTokenSetVersion([...LEISURE_TOKENS, ...SPORT_TOKENS]);
+
 /** Build the bounded Overpass query for a bbox string (`minLat,minLng,maxLat,maxLng`). */
 export function buildVenueOverpassQuery(bboxStr: string): string {
   const leisureRe = LEISURE_TOKENS.join("|");

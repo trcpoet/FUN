@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { buildVenueOverpassQuery } from "../../server/lib/osmVenueQuery";
+import {
+  buildVenueOverpassQuery,
+  venueTokenSetVersion,
+  VENUE_IMPORT_VERSION,
+} from "../../server/lib/osmVenueQuery";
 import { SPORTS_CATALOG } from "./sportsCatalog";
+
+/** A handful of real tokens, for the range check below. */
+const LEISURE_SAMPLE = ["pitch", "sports_centre", "swimming_pool", "park"];
 
 const BBOX = "32.68,-97.20,32.78,-97.05";
 
@@ -72,6 +79,27 @@ describe("buildVenueOverpassQuery", () => {
     for (const token of NOT_COLLECTED_ON_PURPOSE.keys()) {
       expect(imported.has(token)).toBe(false);
     }
+  });
+
+  it("changes the import version when the token set changes, not when it is reordered", () => {
+    // The version is what makes a token change invalidate existing venue_coverage rows. If it
+    // did not move, adding a token would repeat 2026-08-12: every tile chronologically fresh,
+    // none of them holding the new venue types, and no way for the data to say so.
+    const base = ["pitch", "park", "marina"];
+    expect(venueTokenSetVersion([...base].reverse())).toBe(venueTokenSetVersion(base));
+    expect(venueTokenSetVersion([...base, "adventure_park"])).not.toBe(venueTokenSetVersion(base));
+    expect(venueTokenSetVersion(base.slice(1))).not.toBe(venueTokenSetVersion(base));
+  });
+
+  it("produces a version Postgres `integer` can hold, and never 0", () => {
+    // 0 is reserved: the column defaults to it to mean "imported before versioning existed".
+    for (const tokens of [[], ["a"], [...LEISURE_SAMPLE]]) {
+      const v = venueTokenSetVersion(tokens);
+      expect(Number.isInteger(v)).toBe(true);
+      expect(v).toBeGreaterThan(0);
+      expect(v).toBeLessThanOrEqual(2147483647);
+    }
+    expect(VENUE_IMPORT_VERSION).toBeGreaterThan(0);
   });
 
   it("embeds the bbox and stays a bounded query (node + way, out center)", () => {
