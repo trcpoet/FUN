@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { bboxFromCenterRadius, tilesForBbox } from "../../../server/lib/venueTiles";
+import { VENUE_IMPORT_VERSION } from "../../../server/lib/osmVenueQuery";
 
 /**
  * These tests pin down the difference between "there are no venues here", "we have never
@@ -84,7 +85,7 @@ const BBOX_TILES = [
 const importedButEmptyArea = () => ({
   osm_sports_venues: { data: [], error: null },
   venue_coverage: {
-    data: BBOX_TILES.map((t) => ({ ...t, warmed_at: new Date().toISOString() })),
+    data: BBOX_TILES.map((t) => ({ ...t, warmed_at: new Date().toISOString(), import_version: VENUE_IMPORT_VERSION })),
     error: null,
   },
 });
@@ -101,7 +102,7 @@ const coveredRowsFor = (lat: number, lng: number, radiusKm: number) =>
   tilesForBbox(bboxFromCenterRadius(lat, lng, radiusKm)).map((t) => ({
     tile_x: t.x,
     tile_y: t.y,
-    warmed_at: new Date().toISOString(),
+    warmed_at: new Date().toISOString(), import_version: VENUE_IMPORT_VERSION,
   }));
 
 /**
@@ -240,6 +241,41 @@ describe("fetchSportsVenuesFromDb outcomes", () => {
     expect((await fetchSportsVenuesFromDb(BBOX)).status).toBe("empty");
   });
 
+  it("treats coverage from an older token set as 'uncached', however recent it is", async () => {
+    // The 2026-08-12 gap: four leisure tokens were added and all 169 coverage rows stayed
+    // chronologically fresh while none had ever asked Overpass for the new venue types, so
+    // every tile needed a manual --force re-import. A stamped version makes that self-healing.
+    const { fetchSportsVenuesFromDb } = await loadModule(
+      makeSupabaseStub({
+        osm_sports_venues: { data: [], error: null },
+        venue_coverage: {
+          data: BBOX_TILES.map((t) => ({
+            ...t,
+            warmed_at: new Date().toISOString(),
+            import_version: VENUE_IMPORT_VERSION - 1,
+          })),
+          error: null,
+        },
+      })
+    );
+    expect((await fetchSportsVenuesFromDb(BBOX)).status).toBe("uncached");
+  });
+
+  it("treats coverage written before versioning existed as 'uncached'", async () => {
+    // The column defaults to 0 for pre-migration rows, which is honest: nothing recorded what
+    // tag set they used, so they cannot be trusted to hold the current venue types.
+    const { fetchSportsVenuesFromDb } = await loadModule(
+      makeSupabaseStub({
+        osm_sports_venues: { data: [], error: null },
+        venue_coverage: {
+          data: BBOX_TILES.map((t) => ({ ...t, warmed_at: new Date().toISOString(), import_version: 0 })),
+          error: null,
+        },
+      })
+    );
+    expect((await fetchSportsVenuesFromDb(BBOX)).status).toBe("uncached");
+  });
+
   it("treats expired coverage as 'uncached' so the cache refreshes on its own", async () => {
     const longAgo = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
     const { fetchSportsVenuesFromDb } = await loadModule(
@@ -259,7 +295,7 @@ describe("fetchSportsVenuesFromDb outcomes", () => {
       makeSupabaseStub({
         osm_sports_venues: { data: [], error: null },
         venue_coverage: {
-          data: [{ ...BBOX_TILES[0]!, warmed_at: new Date().toISOString() }],
+          data: [{ ...BBOX_TILES[0]!, warmed_at: new Date().toISOString(), import_version: VENUE_IMPORT_VERSION }],
           error: null,
         },
       })

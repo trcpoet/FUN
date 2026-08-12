@@ -159,9 +159,34 @@ export function sortTilesByProximity(tiles: VenueTile[], lat: number, lng: numbe
   });
 }
 
-/** `true` once a coverage row is older than {@link VENUE_COVERAGE_TTL_DAYS}. */
-export function isCoverageStale(warmedAtIso: string, now: number = Date.now()): boolean {
-  const warmedAt = Date.parse(warmedAtIso);
+/** One `venue_coverage` row, as far as freshness is concerned. */
+export type VenueCoverageRow = {
+  warmed_at: string;
+  /**
+   * Absent on rows written before migration 20260813, and on any deployment that has not
+   * applied it. Treated as 0 — "imported under an unknown tag set" — which is stale.
+   */
+  import_version?: number | null;
+};
+
+/**
+ * `true` when a coverage row can no longer be trusted.
+ *
+ * Two independent reasons, and either is enough:
+ *
+ *  - **Age.** Older than {@link VENUE_COVERAGE_TTL_DAYS}, so OSM has probably moved on.
+ *  - **Tag set.** Imported under a different set of Overpass tokens than we ask for now. A row
+ *    can be minutes old and still be missing entire venue types, which is exactly what happened
+ *    when four leisure tokens were added on 2026-08-12 — 169 rows stayed "fresh" while none of
+ *    them had ever asked for the new types. Time alone cannot see that.
+ */
+export function isCoverageStale(
+  row: VenueCoverageRow,
+  currentImportVersion: number,
+  now: number = Date.now()
+): boolean {
+  if ((row.import_version ?? 0) !== currentImportVersion) return true;
+  const warmedAt = Date.parse(row.warmed_at);
   if (Number.isNaN(warmedAt)) return true;
   return now - warmedAt > VENUE_COVERAGE_TTL_DAYS * 24 * 60 * 60 * 1000;
 }

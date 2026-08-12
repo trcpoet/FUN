@@ -22,7 +22,7 @@
  * progressively and an interrupted sequence keeps everything that already landed.
  */
 import { buildOsmVenueRow, type OsmVenueTags } from "../server/lib/osmVenueTags";
-import { buildVenueOverpassQuery } from "../server/lib/osmVenueQuery";
+import { buildVenueOverpassQuery, VENUE_IMPORT_VERSION } from "../server/lib/osmVenueQuery";
 import { attemptBudgetMs, REQUEST_BUDGET_MS } from "../server/lib/overpassBudget";
 import { rateLimit, validateBbox, apiResponse } from "../server/lib/apiGuards";
 import {
@@ -60,7 +60,7 @@ type OsmEl = {
 };
 
 type DbError = { message: string } | null;
-type CoverageRow = { warmed_at: string };
+type CoverageRow = { warmed_at: string; import_version?: number | null };
 
 /** Just the slice of the PostgREST builder this route uses, so the client stays untyped-safe. */
 type CoverageQuery = PromiseLike<{ data: CoverageRow[] | null; error: DbError }> & {
@@ -136,11 +136,11 @@ function elementsToRows(elements: OsmEl[]): Record<string, unknown>[] {
 async function isTileFresh(supabase: SupabaseLike, tile: VenueTile): Promise<boolean> {
   const { data, error } = await supabase
     .from("venue_coverage")
-    .select("warmed_at")
+    .select("warmed_at,import_version")
     .eq("tile_x", tile.x)
     .eq("tile_y", tile.y);
   if (error || !data?.length) return false;
-  return !isCoverageStale(data[0]!.warmed_at);
+  return !isCoverageStale(data[0]!, VENUE_IMPORT_VERSION);
 }
 
 export default async function handler(request: Request): Promise<Response> {
@@ -220,7 +220,14 @@ export default async function handler(request: Request): Promise<Response> {
   // Only after the venues are safely stored: coverage is the client's promise that the
   // rows it can see are all the rows there are.
   const { error: coverageError } = await supabase.from("venue_coverage").upsert(
-    { tile_x: tile.x, tile_y: tile.y, warmed_at: new Date().toISOString(), venue_count: rows.length },
+    {
+      tile_x: tile.x,
+      tile_y: tile.y,
+      warmed_at: new Date().toISOString(),
+      venue_count: rows.length,
+      // Stamped so a later change to the Overpass token set invalidates this row on its own.
+      import_version: VENUE_IMPORT_VERSION,
+    },
     { onConflict: "tile_x,tile_y" }
   );
   if (coverageError) {

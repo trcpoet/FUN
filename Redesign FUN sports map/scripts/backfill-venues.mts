@@ -25,7 +25,7 @@
  *   npx tsx scripts/backfill-venues.mts 33.70 -118.70 34.35 -118.10
  */
 import { readFileSync } from "node:fs";
-import { buildVenueOverpassQuery } from "../server/lib/osmVenueQuery";
+import { buildVenueOverpassQuery, VENUE_IMPORT_VERSION } from "../server/lib/osmVenueQuery";
 import { buildOsmVenueRow, type OsmVenueTags } from "../server/lib/osmVenueTags";
 import {
   isCoverageStale,
@@ -33,6 +33,7 @@ import {
   tileToBbox,
   tilesForBbox,
   type VenueTile,
+  type VenueCoverageRow,
 } from "../server/lib/venueTiles";
 import { createClient } from "@supabase/supabase-js";
 
@@ -175,7 +176,14 @@ async function backfillTile(tile: VenueTile): Promise<number> {
   // can see are all the rows there are. Recording it after a failed fetch would convince
   // the map that a real city is empty — permanently, and silently.
   const { error: coverageError } = await supabase.from("venue_coverage").upsert(
-    { tile_x: tile.x, tile_y: tile.y, warmed_at: new Date().toISOString(), venue_count: rows.length },
+    {
+      tile_x: tile.x,
+      tile_y: tile.y,
+      warmed_at: new Date().toISOString(),
+      venue_count: rows.length,
+      // Stamped so a later token-set change invalidates this row without a manual --force.
+      import_version: VENUE_IMPORT_VERSION,
+    },
     { onConflict: "tile_x,tile_y" },
   );
   if (coverageError) throw new Error(`coverage upsert failed: ${coverageError.message}`);
@@ -189,7 +197,7 @@ async function freshTileKeys(): Promise<Set<string>> {
   const fresh = new Set<string>();
   const { data, error } = await supabase
     .from("venue_coverage")
-    .select("tile_x,tile_y,warmed_at")
+    .select("tile_x,tile_y,warmed_at,import_version")
     .gte("tile_x", range.minX)
     .lte("tile_x", range.maxX)
     .gte("tile_y", range.minY)
@@ -199,8 +207,8 @@ async function freshTileKeys(): Promise<Set<string>> {
     console.warn(`Could not read venue_coverage (${error.message}) — importing every tile.`);
     return fresh;
   }
-  for (const row of (data ?? []) as { tile_x: number; tile_y: number; warmed_at: string }[]) {
-    if (!isCoverageStale(row.warmed_at)) fresh.add(`${row.tile_x},${row.tile_y}`);
+  for (const row of (data ?? []) as ({ tile_x: number; tile_y: number } & VenueCoverageRow)[]) {
+    if (!isCoverageStale(row, VENUE_IMPORT_VERSION)) fresh.add(`${row.tile_x},${row.tile_y}`);
   }
   return fresh;
 }
