@@ -178,6 +178,49 @@ section(
   )
 );
 
+// ----------------------------------------------------------------- comments
+// COMMENT ON is documentation that lives in the database (migrations set it, and
+// Supabase Studio shows it). Without this section a rebuild from schema.sql would
+// silently lose every table/column/function comment.
+section(
+  "Comments",
+  col(
+    q(`select 'comment on table public.' || quote_ident(c.relname)
+         || ' is ' || quote_literal(d.description) || ';' as ddl
+       from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       join pg_description d on d.objoid = c.oid and d.objsubid = 0
+       where n.nspname = 'public' and c.relkind = 'r'
+         and not exists (select 1 from pg_depend dep where dep.objid = c.oid and dep.deptype = 'e')
+       order by c.relname;`),
+    "ddl"
+  ).concat(
+    col(
+      q(`select 'comment on column public.' || quote_ident(c.relname) || '.' || quote_ident(a.attname)
+           || ' is ' || quote_literal(d.description) || ';' as ddl
+         from pg_description d
+         join pg_class c on c.oid = d.objoid
+         join pg_namespace n on n.oid = c.relnamespace
+         join pg_attribute a on a.attrelid = c.oid and a.attnum = d.objsubid
+         where n.nspname = 'public' and c.relkind = 'r' and d.objsubid > 0
+           and not exists (select 1 from pg_depend dep where dep.objid = c.oid and dep.deptype = 'e')
+         order by c.relname, a.attnum;`),
+      "ddl"
+    ),
+    col(
+      q(`select 'comment on function public.' || quote_ident(p.proname)
+           || '(' || pg_get_function_identity_arguments(p.oid) || ')'
+           || ' is ' || quote_literal(d.description) || ';' as ddl
+         from pg_description d
+         join pg_proc p on p.oid = d.objoid
+         join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and ${NOT_FROM_EXTENSION}
+         order by p.proname;`),
+      "ddl"
+    )
+  )
+);
+
 // ------------------------------------------------------------------- grants
 section(
   "Grants — tables",

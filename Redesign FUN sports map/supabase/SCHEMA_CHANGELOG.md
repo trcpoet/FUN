@@ -26,6 +26,15 @@ in no snippet at all. **Snippets are historical scratch, not a source of truth.*
 Everything in the "critical" column below is now captured in `schema.sql`, so all of it is
 safe to delete from the dashboard.
 
+**Deletion clearance (verified 2026-08-10).** The snippets create **44 distinct functions and
+21 distinct tables**. Every one of them was checked against production *and* against
+`schema.sql`: **0 missing in either**. No snippet is the last copy of anything. The raw text
+is archived verbatim at `supabase/snapshots/2026-08-10-sql-editor-snippets.sql` (marked
+DO NOT RUN — it is not dependency-ordered and several snippets are broken).
+
+The only snippet worth keeping is one you **wrote but never ran** — a draft of work still
+pending. That exists nowhere else. Everything else can go.
+
 ### Broken — do NOT re-run
 
 | Snippet | Defect |
