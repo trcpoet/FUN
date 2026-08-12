@@ -8,15 +8,16 @@ import {
   formatKm,
   pickActiveVenues,
   venueActivity,
+  UNNAMED_VENUE,
   type HotPickVenue,
   type VenueActivity,
 } from "../lib/hotPicks";
 import { partitionGamesByVenue } from "../lib/venueActivity";
 import { VENUE_GAME_LIST_RADIUS_METERS } from "../map/mapConfig";
 import { getGamesNearby } from "../../lib/api";
-import { sportEmoji } from "../../lib/sportVisuals";
 import { getSportIconEmoji } from "../map/gameSportIcons";
 import { isOpenNow, formatOpeningHours } from "../lib/openingHours";
+import { formatAccess } from "../lib/venueInfoHelpers";
 import { reverseGeocodeLabel } from "../../lib/geocoding";
 import { cn } from "../components/ui/utils";
 import { glassMessengerPage } from "../styles/glass";
@@ -37,9 +38,12 @@ const COARSE_TICK_MS = 30_000;
 
 /** OSM values are snake_case (`sports_centre`, `multi;soccer`) — make them readable. */
 function cap(s: string): string {
+  // Commas count as separators too: OSM writes multi-values both ways ("grass;dirt",
+  // "grass,dirt"), and without this the second form rendered as "Grass,Dirt".
   return s
-    .replace(/[_;]+/g, " ")
+    .replace(/[_;,]+/g, " ")
     .trim()
+    .replace(/\s+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -79,12 +83,36 @@ function groupVenuesBySport(venues: HotPickVenue[]): VenueGroup[] {
   );
 }
 
-/** Place-quality line: the reason to go when nothing is on. */
+/**
+ * Place-quality line: the reason to go when nothing is on.
+ *
+ * `access` is only worth a chip when it is a real constraint. The raw tag used to be printed
+ * straight through, so an `access=yes` venue rendered a chip reading just "Yes" — a word that
+ * tells nobody anything. `formatAccess` turns the tag into language, and "Public" is dropped
+ * because it is the assumption every other row already makes.
+ */
 function qualityMeta(v: HotPickVenue): string {
-  return [v.surface, v.access, v.lit === "yes" ? "lit" : null]
+  const access = formatAccess(v.access);
+  return [
+    v.surface ? cap(v.surface) : null,
+    access && access !== "Public" ? access : null,
+    v.lit === "yes" ? "Lit" : null,
+  ]
     .filter(Boolean)
-    .map((s) => cap(s as string))
     .join(" · ");
+}
+
+/**
+ * The tile glyph for one venue.
+ *
+ * Resolved through `primaryVenueSportSuffix` rather than `sportEmoji(v.sport)` so a row agrees
+ * with the group it sits in. Passing the raw tag broke on multi-sport venues: "baseball;softball"
+ * matches nothing in the catalog and fell through to a keyword fallback where `includes("ball")`
+ * returns the volleyball glyph — so every multi-sport baseball field showed 🏐.
+ */
+function venueEmoji(v: HotPickVenue): string {
+  const suffix = primaryVenueSportSuffix(v.sport, v.leisure);
+  return SUFFIX_META.get(suffix)?.emoji ?? OTHER_GROUP.emoji;
 }
 
 function ActivityChip({ activity }: { activity: VenueActivity }) {
@@ -156,6 +184,14 @@ const VenueRow = React.memo(function VenueRow({
   const active = activity.tier !== "none";
   const meta = qualityMeta(v);
   const hours = formatOpeningHours(v.openingHours) ?? v.openingHours;
+  const kind = venueKind(v);
+  /**
+   * Roughly seven in ten venues here carry no OSM name, and they used to read
+   * "Unnamed venue" over "Baseball · Pitch" — two lines that together said one thing, repeated
+   * down the whole list. Promote the kind to the title instead and drop the now-duplicate line.
+   */
+  const unnamed = v.name === UNNAMED_VENUE;
+  const title = unnamed ? kind : v.name;
 
   return (
     <button
@@ -177,24 +213,23 @@ const VenueRow = React.memo(function VenueRow({
           loading="lazy"
           className="size-12 shrink-0 rounded-2xl object-cover"
         />
-      ) : v.sport ? (
+      ) : (
+        // One treatment for every venue. Sport-less rows used to fall back to a grey map pin,
+        // so a list of pools was half glyphs and half pins for no reason the reader could see —
+        // `primaryVenueSportSuffix` resolves leisure too, so a pool gets 🏊 rather than a pin.
         <span
           className={cn(
             "flex size-12 shrink-0 items-center justify-center rounded-2xl text-2xl",
             active ? "bg-emerald-500/10" : "bg-blue-500/10",
           )}
         >
-          {sportEmoji(v.sport)}
-        </span>
-      ) : (
-        <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
-          <MapPin className="size-5" />
+          {venueEmoji(v)}
         </span>
       )}
 
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm font-bold text-white">{v.name}</span>
+          <span className="truncate text-sm font-bold text-white">{title}</span>
           {active ? (
             <ActivityChip activity={activity} />
           ) : (
@@ -202,9 +237,11 @@ const VenueRow = React.memo(function VenueRow({
           )}
         </span>
 
-        <span className="mt-0.5 block truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {venueKind(v)}
-        </span>
+        {unnamed ? null : (
+          <span className="mt-0.5 block truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {kind}
+          </span>
+        )}
 
         {active ? (
           <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px]">
@@ -248,6 +285,52 @@ const VenueRow = React.memo(function VenueRow({
     </button>
   );
 });
+
+/**
+ * How many venues a group shows before asking.
+ *
+ * An open group used to render every venue it had. With 113 baseball pitches in range that is a
+ * 9,476px panel of near-identical rows, and two groups open by default put ~12,000px of DOM on
+ * screen at load. Eight is roughly a phone screen of results — enough to judge whether the
+ * nearest few are worth the trip, which is the actual job of this list.
+ */
+const GROUP_PREVIEW_COUNT = 8;
+
+/** One sport's venues, revealed a screenful at a time. */
+function VenueGroupList({
+  venues,
+  now,
+  onOpen,
+}: {
+  venues: HotPickVenue[];
+  now: number;
+  onOpen: (venueId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? venues : venues.slice(0, GROUP_PREVIEW_COUNT);
+  const remaining = venues.length - shown.length;
+
+  return (
+    <>
+      <ul className="grid grid-cols-1 gap-2 pb-1">
+        {shown.map((v) => (
+          <li key={v.id}>
+            <VenueRow v={v} now={now} onOpen={onOpen} />
+          </li>
+        ))}
+      </ul>
+      {remaining > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="mt-2 w-full rounded-2xl border border-white/[0.08] bg-white/[0.02] py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 transition-colors hover:border-blue-500/30 hover:bg-white/[0.04] hover:text-white cursor-pointer"
+        >
+          Show {remaining} more
+        </button>
+      )}
+    </>
+  );
+}
 
 function RowSkeleton() {
   return (
@@ -482,16 +565,19 @@ export default function PopularVenues() {
                       <span className="shrink-0 rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-bold tabular-nums text-slate-400">
                         {g.venues.length}
                       </span>
+                      {/*
+                        Nearest distance in the header, so a collapsed group still answers the
+                        only question worth asking about it: is any of this close enough to go to?
+                      */}
+                      {formatKm(g.venues[0]?.distanceKm ?? null) && (
+                        <span className="shrink-0 text-[10px] font-bold tabular-nums text-slate-500">
+                          from {formatKm(g.venues[0]!.distanceKm)}
+                        </span>
+                      )}
                     </span>
                   </AccordionTrigger>
                   <AccordionContent>
-                    <ul className="grid grid-cols-1 gap-2 pb-1">
-                      {g.venues.map((v) => (
-                        <li key={v.id}>
-                          <VenueRow v={v} now={coarseNow} onOpen={openVenue} />
-                        </li>
-                      ))}
-                    </ul>
+                    <VenueGroupList venues={g.venues} now={coarseNow} onOpen={openVenue} />
                   </AccordionContent>
                 </AccordionItem>
               ))}

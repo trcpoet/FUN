@@ -12,6 +12,15 @@ import {
 
 export type LatLng = { lat: number; lng: number };
 
+/**
+ * Stand-in name for a venue OSM never named.
+ *
+ * Exported because roughly seven in ten venues hit it, and surfaces that want to render those
+ * rows differently have to be able to ask "is this the placeholder?" without string-matching a
+ * literal that could drift.
+ */
+export const UNNAMED_VENUE = "Unnamed venue";
+
 export type HotPickVenue = {
   id: string;
   name: string;
@@ -140,7 +149,7 @@ export function rankHotPickVenues(
     const distanceKm = center ? distanceKmBetween(center.lat, center.lng, lat, lng) : null;
     mapped.push({
       id: p.id,
-      name: optStr(p.name) ?? "Unnamed venue",
+      name: optStr(p.name) ?? UNNAMED_VENUE,
       sport: optStr(p.sport),
       leisure: optStr(p.leisure),
       lat,
