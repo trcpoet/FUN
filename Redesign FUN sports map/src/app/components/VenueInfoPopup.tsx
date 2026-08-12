@@ -12,6 +12,8 @@ import {
   Clock,
   Globe,
   ExternalLink,
+  KeyRound,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { VenueSelection } from "./mapboxMapTypes";
@@ -20,6 +22,7 @@ import { formatVenueGameTimerSummary, isGameLive } from "../../lib/mapGameTimer"
 import { haversineDistanceMeters } from "../lib/gamesAtVenue";
 import { getSportIconEmoji } from "../map/gameSportIcons";
 import { venueSportEmoji } from "../lib/venueSportIcon";
+import { venueAccessTier } from "../lib/venueAccess";
 import { noteCreatedLabel, noteVisibilityLabel } from "../lib/noteVisibility";
 import { fetchVenueById, fetchVenueEnrichment } from "../../lib/api";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
@@ -493,6 +496,18 @@ export function VenueInfoPopup({
   );
 
   /**
+   * Whether this venue may host a game, and what to say if not.
+   *
+   * `hidden` venues are filtered out of the map layer, so the only way to land on one here is a
+   * shared link or a stale selection — which is exactly why the gate lives on the verdict rather
+   * than on "did this render as a pin".
+   */
+  const accessVerdict = useMemo(
+    () => venueAccessTier({ access: details.access, leisure: details.leisure, name: details.name }),
+    [details.access, details.leisure, details.name]
+  );
+
+  /**
    * Header summary — "0.4 mi away · 2 games · 1 note".
    *
    * Counts are tinted to match the map pin's badges and the tabs below (violet games, cyan
@@ -924,6 +939,36 @@ export function VenueInfoPopup({
                     {walkLoading ? "Calculating walk time…" : walkSummary}
                   </p>
                 ) : null}
+                {/*
+                  Access advisory. Deliberately sits inside the footer group and borrows the
+                  buttons' geometry, so it reads as a condition on the actions below it rather
+                  than as a floating alert. Amber is the one unclaimed accent in the palette
+                  (emerald = primary, violet = games, cyan = notes) and reads as "caution", not
+                  "error" — `restricted` still offers Create game at full strength.
+                */}
+                {accessVerdict.advisory ? (
+                  <div
+                    className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 ${
+                      accessVerdict.tier === "restricted"
+                        ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                        : "border-white/10 bg-white/5 text-slate-300"
+                    }`}
+                  >
+                    {accessVerdict.tier === "restricted" ? (
+                      <KeyRound className="mt-0.5 w-4 h-4 shrink-0" aria-hidden />
+                    ) : (
+                      <Lock className="mt-0.5 w-4 h-4 shrink-0" aria-hidden />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium leading-tight">{accessVerdict.advisory}</p>
+                      {accessVerdict.advisoryDetail ? (
+                        <p className="mt-0.5 text-xs leading-snug opacity-80">
+                          {accessVerdict.advisoryDetail}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="flex items-center gap-2">
                   {onNavigateTo && viewerCoords ? (
                     <motion.button
@@ -952,7 +997,7 @@ export function VenueInfoPopup({
                   {onNavigateTo && viewerCoords ? (
                     <GoogleMapsLinkButton href={mapsHref} />
                   ) : null}
-                  {onCreateGame ? (
+                  {onCreateGame && accessVerdict.canCreateGame ? (
                     <motion.button
                       {...createGamePress}
                       type="button"

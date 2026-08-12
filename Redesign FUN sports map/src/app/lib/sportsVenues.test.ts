@@ -36,7 +36,7 @@ function makeSupabaseStub(byTable: Record<string, TableResult>) {
   const from = vi.fn((table: string) => {
     const result = byTable[table] ?? { data: [], error: null };
     const builder: Record<string, unknown> = {};
-    for (const m of ["select", "gte", "lte", "limit", "order", "abortSignal", "eq", "in"]) {
+    for (const m of ["select", "gte", "lte", "limit", "order", "abortSignal", "eq", "in", "or"]) {
       builder[m] = vi.fn(() => builder);
     }
     builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve);
@@ -114,6 +114,48 @@ describe("fetchSportsVenuesFromDb outcomes", () => {
     if (out.status !== "ok") return;
     expect(out.geojson.features).toHaveLength(1);
     expect(out.geojson.features[0]!.properties.id).toBe("way/461237079");
+  });
+
+  it("drops private and residential venues from the layer", async () => {
+    // The query already excludes these server-side; this covers the per-row backstop, which is
+    // what protects the map if that filter and `venueAccessTier` ever drift apart.
+    const { fetchSportsVenuesFromDb } = await loadModule(
+      makeSupabaseStub(
+        withVenues([
+          SOCCER_PITCH_ROW,
+          { ...SOCCER_PITCH_ROW, id: "way/1", access: "private" },
+          { ...SOCCER_PITCH_ROW, id: "way/2", leisure: "swimming_pool", sport: null, name: null },
+        ])
+      )
+    );
+    const out = await fetchSportsVenuesFromDb(BBOX);
+    expect(out.status).toBe("ok");
+    if (out.status !== "ok") return;
+    expect(out.geojson.features.map((f) => f.properties.id)).toEqual(["way/461237079"]);
+  });
+
+  it("keeps a named pool and a members-only venue", async () => {
+    const { fetchSportsVenuesFromDb } = await loadModule(
+      makeSupabaseStub(
+        withVenues([
+          { ...SOCCER_PITCH_ROW, id: "way/3", leisure: "swimming_pool", sport: null, name: "City Pool" },
+          { ...SOCCER_PITCH_ROW, id: "way/4", access: "customers" },
+        ])
+      )
+    );
+    const out = await fetchSportsVenuesFromDb(BBOX);
+    expect(out.status).toBe("ok");
+    if (out.status !== "ok") return;
+    expect(out.geojson.features.map((f) => f.properties.id)).toEqual(["way/3", "way/4"]);
+  });
+
+  it("reports 'empty' — not 'uncached' — when access filtering removed every row", async () => {
+    // Same contract as the sport filter: rows existed, so re-importing would return the same
+    // rows. Treating this as a missing import would warm the tile forever.
+    const { fetchSportsVenuesFromDb } = await loadModule(
+      makeSupabaseStub(withVenues([{ ...SOCCER_PITCH_ROW, access: "private" }]))
+    );
+    expect((await fetchSportsVenuesFromDb(BBOX)).status).toBe("empty");
   });
 
   it("reports 'uncached' — NOT 'empty' — when nobody has imported the area", async () => {
@@ -367,5 +409,51 @@ describe("bboxFromCenterRadius", () => {
     expect(box.minLng).toBeGreaterThanOrEqual(-180);
     expect(box.maxLng).toBeLessThanOrEqual(180);
     expect(box.maxLat).toBeLessThanOrEqual(90);
+  });
+});
+
+/**
+ * A 5xx from the API layer says nothing about which venues exist. On 2026-08-11 one such
+ * window blanked the whole map, so the venue read retries before reporting "unavailable".
+ */
+describe("fetchSportsVenuesFromDb retries a transient API failure", () => {
+  /** Like makeSupabaseStub, but hands out a different result on each call to `from`. */
+  function makeSequencedStub(table: string, results: TableResult[]) {
+    let i = 0;
+    const from = vi.fn((t: string) => {
+      const result = t === table ? results[Math.min(i++, results.length - 1)]! : { data: [], error: null };
+      const builder: Record<string, unknown> = {};
+      for (const m of ["select", "gte", "lte", "limit", "order", "abortSignal", "eq", "in", "or"]) {
+        builder[m] = vi.fn(() => builder);
+      }
+      builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve);
+      return builder;
+    });
+    return { stub: { from }, attempts: () => i };
+  }
+
+  it("recovers when the retry succeeds, instead of reporting the area unavailable", async () => {
+    const seq = makeSequencedStub("osm_sports_venues", [
+      { data: null, error: { status: 503, message: "Service Unavailable" } },
+      { data: [SOCCER_PITCH_ROW], error: null },
+    ]);
+    const { fetchSportsVenuesFromDb } = await loadModule(seq.stub);
+
+    const out = await fetchSportsVenuesFromDb(BBOX);
+
+    expect(seq.attempts()).toBe(2);
+    expect(out.status).toBe("ok");
+  });
+
+  it("does not retry an error that is a final answer", async () => {
+    const seq = makeSequencedStub("osm_sports_venues", [
+      { data: null, error: { code: "42501", message: "permission denied for table osm_sports_venues" } },
+    ]);
+    const { fetchSportsVenuesFromDb } = await loadModule(seq.stub);
+
+    const out = await fetchSportsVenuesFromDb(BBOX);
+
+    expect(seq.attempts()).toBe(1);
+    expect(out.status).toBe("unavailable");
   });
 });
