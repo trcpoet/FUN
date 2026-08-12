@@ -1,5 +1,63 @@
 import { describe, it, expect } from "vitest";
-import { classifyRpcError, isPermissionDenied, friendlyRpcError, mapAuthError } from "./rpcErrors";
+import {
+  classifyRpcError,
+  isPermissionDenied,
+  isTransientRpcError,
+  friendlyRpcError,
+  mapAuthError,
+} from "./rpcErrors";
+
+describe("transient server failures", () => {
+  // 2026-08-11: the API layer returned 500s then a wall of 503s across every endpoint while
+  // Postgres sat healthy. These all used to classify as "other", which callers render as data.
+  it("classifies 5xx status codes as unavailable", () => {
+    for (const status of [500, 502, 503, 504]) {
+      expect(classifyRpcError({ status, message: "Service Unavailable" })).toBe("unavailable");
+    }
+  });
+
+  it("classifies gateway and connection failures by message", () => {
+    for (const message of [
+      "Service Unavailable",
+      "502 Bad Gateway",
+      "gateway timeout",
+      "upstream connect error",
+      "Database connection lost",
+      "remaining connection slots are reserved",
+    ]) {
+      expect(classifyRpcError({ message })).toBe("unavailable");
+    }
+  });
+
+  it("does not mistake a 503 body for a missing function", () => {
+    // The gateway's 503 text can contain "does not exist"-adjacent wording; a transient
+    // outage must never be reported to the user as "run the migration".
+    expect(classifyRpcError({ status: 503, message: "service unavailable: upstream does not exist" })).toBe(
+      "unavailable",
+    );
+  });
+
+  it("marks unavailable and network as retryable, and nothing else", () => {
+    expect(isTransientRpcError({ status: 503, message: "Service Unavailable" })).toBe(true);
+    expect(isTransientRpcError({ message: "TypeError: Failed to fetch" })).toBe(true);
+
+    expect(isTransientRpcError({ code: "42501", message: "permission denied" })).toBe(false);
+    expect(isTransientRpcError({ code: "PGRST202", message: "Could not find the function" })).toBe(false);
+    expect(isTransientRpcError({ message: "some ordinary error" })).toBe(false);
+    expect(isTransientRpcError(null)).toBe(false);
+  });
+
+  it("keeps permission errors ahead of the 5xx check", () => {
+    // A 403 carries a status too; it must stay a final answer.
+    expect(classifyRpcError({ status: 403, message: "permission denied" })).toBe("permission-denied");
+  });
+
+  it("tells the user the server is busy rather than showing raw text", () => {
+    expect(friendlyRpcError({ status: 503, message: "Service Unavailable" }, "The map")).toContain(
+      "server is busy",
+    );
+  });
+});
 
 describe("classifyRpcError", () => {
   it("classifies Postgres 42501 as permission-denied even when the message names the function", () => {

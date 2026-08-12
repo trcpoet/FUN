@@ -32,6 +32,7 @@ import { useTotalUnreadMessages } from "../hooks/useTotalUnreadMessages";
 import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById, fetchVenueById } from "../lib/api";
 import { isPermissionDenied, friendlyRpcError } from "../lib/rpcErrors";
+import { retryTransient } from "../lib/retryTransient";
 import { SignInGate, type SignInGateAction } from "./components/SignInGate";
 import {
   fetchDirections,
@@ -536,7 +537,11 @@ export default function App() {
 
   const reloadJoinedGameIds = useCallback(async () => {
     if (!supabase || !currentUserId) return;
-    const { data } = await supabase.from("game_participants").select("game_id, role").eq("user_id", currentUserId);
+    // Retried: this is where host identity comes from. Losing it to a blip on first load
+    // makes you look like a stranger to your own games — no Start, no Delete, no chat.
+    const { data } = await retryTransient(() =>
+      supabase!.from("game_participants").select("game_id, role").eq("user_id", currentUserId),
+    );
     if (data) {
       setJoinedGameIds(new Set(data.map((r) => r.game_id)));
       setHostGameIds(new Set(data.filter((r) => r.role === "host").map((r) => r.game_id)));

@@ -7,6 +7,7 @@
 
 import { supabase } from "./supabase";
 import { isMissingRpc } from "./rpcErrors";
+import { retryTransient } from "./retryTransient";
 import { subscribeWithRetry } from "./realtimeRetry";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
 import { parseGender, type Gender } from "./gamePreferenceOptions";
@@ -113,12 +114,16 @@ export async function fetchNotesNearby(params: {
   limit?: number;
 }): Promise<{ data: MapNoteRow[]; error: Error | null }> {
   if (!supabase) return { data: [], error: new Error("Supabase not configured") };
-  const { data, error } = await supabase.rpc("get_notes_nearby", {
-    p_lat: params.lat,
-    p_lng: params.lng,
-    p_radius_km: params.radiusKm ?? 10,
-    p_limit: params.limit ?? 50,
-  });
+  // Retried for the same reason as the map's game reads: a 5xx from the API layer is not an
+  // answer about which notes are nearby.
+  const { data, error } = await retryTransient(() =>
+    supabase!.rpc("get_notes_nearby", {
+      p_lat: params.lat,
+      p_lng: params.lng,
+      p_radius_km: params.radiusKm ?? 10,
+      p_limit: params.limit ?? 50,
+    }),
+  );
   if (error && isMissingMapNotesRpc(error)) {
     return { data: [], error: null };
   }
@@ -982,12 +987,13 @@ export async function updateMyPresence(params: {
   if (mode !== "ghost" && mode !== "close_friends" && mode !== "public") {
     return { error: new Error("Invalid visibility mode") };
   }
-  const { error } = await supabase.rpc("update_my_presence", {
-    p_lat: lat,
-    p_lng: lng,
-    p_mode: mode,
-  });
-  return { error: error ? new Error(error.message) : null };
+  // The one write worth retrying. It is idempotent — "my position is here, now" — so a repeat
+  // is indistinguishable from the next heartbeat, and the cost of losing it is that you drop
+  // off other people's maps until the following tick.
+  const { error } = await retryTransient(() =>
+    supabase!.rpc("update_my_presence", { p_lat: lat, p_lng: lng, p_mode: mode }),
+  );
+  return { error: error ? new Error(error.message ?? "Presence update failed") : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -998,12 +1004,16 @@ export async function fetchMyFollowedIds(): Promise<{ data: Set<string>; error: 
   if (!supabase) return { data: new Set(), error: new Error("Supabase not configured") };
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: new Set(), error: null };
-  const { data, error } = await supabase
-    .from("user_follows")
-    .select("followed_id")
-    .eq("follower_id", user.id)
-    .eq("status", "accepted");
-  if (error) return { data: new Set(), error: new Error(error.message) };
+  // Retried: an empty follow set is not a harmless default. It downgrades every mutual to a
+  // stranger and hides friends-only games, so a 503 here quietly changes what the map shows.
+  const { data, error } = await retryTransient(() =>
+    supabase!
+      .from("user_follows")
+      .select("followed_id")
+      .eq("follower_id", user.id)
+      .eq("status", "accepted"),
+  );
+  if (error) return { data: new Set(), error: new Error(error.message ?? "Follow list unavailable") };
   return { data: new Set((data ?? []).map((r) => r.followed_id as string)), error: null };
 }
 
@@ -1215,7 +1225,8 @@ function isMissingAthleteProfileColumnError(err: {
   message?: string;
   code?: string;
   details?: string;
-  hint?: string;
+  // Nullable to match `RpcErrorLike`, which is what the retried probe now hands back.
+  hint?: string | null;
 } | null): boolean {
   if (!err) return false;
   const blob = `${err.message ?? ""} ${err.details ?? ""} ${err.hint ?? ""} ${err.code ?? ""}`.toLowerCase();
@@ -1236,11 +1247,16 @@ async function probeProfileRowWithAthlete(userId: string): Promise<{ ok: true; r
   if (existing) return existing;
 
   const p = (async (): Promise<{ ok: true; row: Record<string, unknown> } | { ok: false }> => {
-    const res = await supabase!
-      .from("profiles")
-      .select(PROFILE_SELECT_WITH_ATHLETE)
-      .eq("id", userId)
-      .maybeSingle();
+    // Retried before the missing-column verdict below: a 503 here would otherwise be recorded
+    // as "this database has no athlete_profile column" and cached in localStorage, degrading
+    // the profile for the rest of the session over a blip.
+    const res = await retryTransient(() =>
+      supabase!
+        .from("profiles")
+        .select(PROFILE_SELECT_WITH_ATHLETE)
+        .eq("id", userId)
+        .maybeSingle(),
+    );
     if (!res.error && res.data) {
       writeAthleteProfileColumnState("present");
       return { ok: true, row: res.data as Record<string, unknown> };
@@ -1485,12 +1501,10 @@ export async function getMyStats(): Promise<{ data: UserStatsRow | null; error: 
   if (!supabase) return { data: null, error: null };
   const user = await getAuthUserDeduped();
   if (!user) return { data: null, error: null };
-  const { data, error } = await supabase
-    .from("user_stats")
-    .select("*")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (error) return { data: null, error: new Error(error.message) };
+  const { data, error } = await retryTransient(() =>
+    supabase!.from("user_stats").select("*").eq("user_id", user.id).maybeSingle(),
+  );
+  if (error) return { data: null, error: new Error(error.message ?? "Stats unavailable") };
   return { data: data as UserStatsRow | null, error: null };
 }
 
@@ -1516,13 +1530,15 @@ export async function getMyNotifications(limit = 20): Promise<{
   if (!supabase) return { data: [], error: null };
   const user = await getAuthUserDeduped();
   if (!user) return { data: [], error: null };
-  const { data, error } = await supabase
-    .from("notifications")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) return { data: [], error: new Error(error.message) };
+  const { data, error } = await retryTransient(() =>
+    supabase!
+      .from("notifications")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+  );
+  if (error) return { data: [], error: new Error(error.message ?? "Notifications unavailable") };
   return { data: (data as NotificationRow[]) ?? [], error: null };
 }
 
@@ -1679,12 +1695,10 @@ export async function fetchVenueById(
   id: string
 ): Promise<{ data: VenueSelection | null; error: Error | null }> {
   if (!supabase) return { data: null, error: new Error("Supabase not configured") };
-  const { data, error } = await supabase
-    .from("osm_sports_venues")
-    .select(OSM_VENUE_SELECT)
-    .eq("id", id)
-    .maybeSingle();
-  if (error) return { data: null, error: new Error(error.message) };
+  const { data, error } = await retryTransient(() =>
+    supabase!.from("osm_sports_venues").select(OSM_VENUE_SELECT).eq("id", id).maybeSingle(),
+  );
+  if (error) return { data: null, error: new Error(error.message ?? "Venue unavailable") };
   if (!data) return { data: null, error: null };
   // Via unknown: the client is untyped, so PostgREST hands back a loose row shape.
   return { data: venueSelectionFromDbRow(data as unknown as OsmSportsVenueRow), error: null };

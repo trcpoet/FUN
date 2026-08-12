@@ -18,6 +18,7 @@
 
 import { venueMatchesSelectedSports } from "../../lib/osmSportTags";
 import { supabase } from "../../lib/supabase";
+import { retryTransient } from "../../lib/retryTransient";
 import type { OsmSportsVenueRow } from "../../lib/supabase";
 import { OSM_VENUE_MAP_SELECT } from "../../lib/osmVenueColumns";
 import {
@@ -34,6 +35,7 @@ import {
 } from "../../../server/lib/venueTiles";
 import type { SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 import { dbRowToVenueProperties } from "./venueSelection";
+import { venueAccessTier, VENUE_ACCESS_POSTGREST_FILTERS } from "./venueAccess";
 
 export type { SportsVenueProperties, SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 
@@ -254,23 +256,41 @@ export async function fetchSportsVenuesFromDb(
   throwIfAborted(options?.signal);
   const { minLat, minLng, maxLat, maxLng } = bbox;
 
-  let query = supabase
-    .from("osm_sports_venues")
-    .select(OSM_VENUE_MAP_SELECT)
-    // Stable ordering: without it the 8000-row cap would truncate an arbitrary,
-    // shifting subset — venues would appear and vanish as rows were re-written.
-    .order("id", { ascending: true })
-    .gte("lat", minLat)
-    .lte("lat", maxLat)
-    .gte("lng", minLng)
-    .lte("lng", maxLng)
-    .limit(8000);
+  // A PostgREST builder can only be awaited once, so the whole query is rebuilt per attempt.
+  const buildQuery = () => {
+    let query = supabase!
+      .from("osm_sports_venues")
+      .select(OSM_VENUE_MAP_SELECT)
+      // Stable ordering: without it the 8000-row cap would truncate an arbitrary,
+      // shifting subset — venues would appear and vanish as rows were re-written.
+      .order("id", { ascending: true })
+      .gte("lat", minLat)
+      .lte("lat", maxLat)
+      .gte("lng", minLng)
+      .lte("lng", maxLng)
+      .limit(8000);
 
-  if (options?.signal) {
-    query = query.abortSignal(options.signal);
-  }
+    // Drop private and residential venues server-side, BEFORE the 8000-row cap applies.
+    // Over half the table is unnamed backyard pools, so without this a dense suburb spends its
+    // whole row budget on venues the client is about to discard, truncating the real pitches.
+    // `venueAccessTier` below is still the rule — these filters are only ever allowed to be a
+    // subset of it, which venueAccess.test.ts asserts.
+    for (const filter of VENUE_ACCESS_POSTGREST_FILTERS) {
+      query = query.or(filter);
+    }
 
-  const { data, error } = await query;
+    if (options?.signal) {
+      query = query.abortSignal(options.signal);
+    }
+    return query;
+  };
+
+  // Retried on a 5xx: the outcome union below already keeps "unavailable" distinct from
+  // "empty", but a venue layer that gives up on the first blip still leaves the map bare.
+  // Retries stop the moment the caller aborts — panning must not queue doomed requests.
+  const { data, error } = await retryTransient(buildQuery, {
+    shouldContinue: () => !options?.signal?.aborted,
+  });
   throwIfAborted(options?.signal);
   if (error) {
     if (isMissingTableError(error, "osm_sports_venues")) {
@@ -298,6 +318,9 @@ export async function fetchSportsVenuesFromDb(
     // Via unknown: the client is untyped, so PostgREST hands back a loose row shape.
     const typed = row as unknown as OsmSportsVenueRow;
     if (!venueMatchesSelectedSports(typed.sport, sportFilter, typed.leisure)) continue;
+    // Backstop for the query filter above, and the single source of truth for the tier. A row
+    // reaching here that the classifier hides means the two have drifted.
+    if (!venueAccessTier(typed).canRender) continue;
     features.push({
       type: "Feature",
       geometry: { type: "Point", coordinates: [typed.lng, typed.lat] },
