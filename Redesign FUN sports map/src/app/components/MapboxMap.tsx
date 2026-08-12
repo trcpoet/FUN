@@ -29,7 +29,7 @@ import {
 import { limitGamesForMapViewport, approxVisibleBoundsWidthKm } from "../map/mapBounds";
 import {
   resolveVenueFetchAnchor,
-  venueFetchRadiusKm,
+  venueNeedRadiusKm,
   venueRequestRadiusKm,
   shouldRefetchVenues,
   type VenueFetchCoverage,
@@ -409,28 +409,20 @@ export function MapboxMap(props: MapboxMapProps) {
   userCoordsRef.current = userCoords;
   const lastAppliedStyleUrlRef = useRef(activeStyleUrl);
   /**
-   * What the map is currently looking at. Venues MUST follow this.
+   * Where venues load. Explicit acts only — the camera is deliberately not an input.
    *
-   * The venue layer used to be anchored to `venuesCenter ?? userCoords` and never
-   * re-fetched on pan, while the Mapbox basemap draws `landuse` pitch polygons for the
-   * whole world — so panning anywhere off that anchor showed a pitch with no icon and
-   * no error. Sampled on moveend/zoomend (see the effect below).
+   * `venuesCenter` is `mapSearchLocation`, which every explicit trigger already funnels
+   * through: double-tap, search, and a venue opened from the feed. `userCoords` only answers
+   * before the first of those, so opening the app still shows what is nearby.
    */
-  const [mapViewport, setMapViewport] = useState<{ lat: number; lng: number; widthKm: number } | null>(
-    null
-  );
-  // Explicit centre (search / tapped venue) wins only while the map is still on it.
   const venuesFetchCenter = resolveVenueFetchAnchor({
     explicitCenter: venuesCenter,
-    mapCenter: mapViewport,
-    userCoords,
+    initialCenter: userCoords,
   });
-  /** What the current view needs on screen… */
-  const venueViewportRadius = mapViewport
-    ? venueFetchRadiusKm(mapViewport.widthKm, venueSearchRadiusKm)
-    : venueSearchRadiusKm;
-  /** …and the wider ring we actually request, so panning is served from data we hold. */
-  const venueFetchRadius = venueRequestRadiusKm(venueViewportRadius, venueSearchRadiusKm);
+  /** What one request must cover — the user's radius filter, never the visible width. */
+  const venueNeedRadius = venueNeedRadiusKm(venueSearchRadiusKm);
+  /** The ring actually requested. */
+  const venueFetchRadius = venueRequestRadiusKm(venueNeedRadius, venueSearchRadiusKm);
   /** What we last actually fetched — the guard against re-requesting ground we already hold. */
   const venueCoverageRef = useRef<VenueFetchCoverage | null>(null);
   /** Debounced anchor so rapid search / map moves don’t spam Overpass + Supabase. */
@@ -455,31 +447,9 @@ export function MapboxMap(props: MapboxMapProps) {
     setDebouncedVenueFetchCenter(venuesFetchCenter);
   }, [mapSearchEpoch, venuesFetchCenter?.lat, venuesFetchCenter?.lng]);
 
-  // Track what the map is looking at, so venue loading can follow it. `moveend`/`zoomend`
-  // fire once per gesture, and the venue fetch itself is guarded by `shouldRefetchVenues`,
-  // so this is cheap.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
-
-    const sample = () => {
-      const c = map.getCenter();
-      const widthKm = approxVisibleBoundsWidthKm(map);
-      setMapViewport((prev) =>
-        prev && prev.lat === c.lat && prev.lng === c.lng && prev.widthKm === widthKm
-          ? prev
-          : { lat: c.lat, lng: c.lng, widthKm }
-      );
-    };
-
-    sample();
-    map.on("moveend", sample);
-    map.on("zoomend", sample);
-    return () => {
-      map.off("moveend", sample);
-      map.off("zoomend", sample);
-    };
-  }, [mapLoaded]);
+  // The `moveend`/`zoomend` sampler that used to live here is gone with the viewport-following
+  // anchor. It set state nothing reads any more, so keeping it would re-render the map on every
+  // gesture purely to record where the camera was.
   const venueClustersRef = useRef<VenueClusterPoint[]>([]);
   /** Last `mapSearchEpoch` whose stale venue pins were wiped — one wipe per double-tap. */
   const lastWipedSearchEpochRef = useRef(0);
@@ -903,17 +873,10 @@ export function MapboxMap(props: MapboxMapProps) {
 
       // "fly" = move to a single coordinate.
       if (req.kind === "fly") {
-        // Seed the tracked viewport with the fly target immediately, rather than waiting
-        // ~1.4s for `moveend` to report it. Without this, `resolveVenueFetchAnchor` measures
-        // drift against the *stale* (pre-fly) viewport for the whole animation and keeps
-        // discarding the new explicit center, so venues near a freshly searched location
-        // don't start loading until the camera has fully arrived. `widthKm` is reused as a
-        // best-effort estimate — `sample()` corrects it for real once `moveend` fires.
-        setMapViewport((prev) => ({
-          lat: req.lat,
-          lng: req.lng,
-          widthKm: prev?.widthKm ?? FALLBACK_VIEWPORT_WIDTH_KM,
-        }));
+        // The tracked viewport used to be seeded with the fly target here, because
+        // `resolveVenueFetchAnchor` measured drift against the stale pre-fly viewport for the
+        // whole 1.4s animation and kept discarding the new explicit centre. The anchor no
+        // longer looks at the camera at all, so there is nothing left to race.
         m.flyTo({
           center: [req.lng, req.lat],
           zoom: req.zoom ?? 13,
@@ -3100,7 +3063,7 @@ export function MapboxMap(props: MapboxMapProps) {
       const need = {
         lat: debouncedVenueFetchCenter.lat,
         lng: debouncedVenueFetchCenter.lng,
-        viewportRadiusKm: venueViewportRadius,
+        neededRadiusKm: venueNeedRadius,
         sportSig: venueSportSig,
       };
       const wanted: VenueFetchCoverage = {
@@ -3123,8 +3086,6 @@ export function MapboxMap(props: MapboxMapProps) {
         idleFallbackId = undefined;
       }
       map.off("idle", kickoffVenueFetch);
-      map.off("zoomend", onVenueZoomForFetch);
-      map.off("moveend", kickoffVenueFetch);
 
       onVenuesFetchLoadingChangeRef.current?.(true);
 
@@ -3212,16 +3173,21 @@ export function MapboxMap(props: MapboxMapProps) {
         });
     };
 
-    const onVenueZoomForFetch = () => {
-      if (!venueKickoffStarted && map.getZoom() >= MapCfg.VENUE_FETCH_MIN_ZOOM) {
-        kickoffVenueFetch();
-      }
-    };
-
+    /*
+     * `idle` only, deliberately.
+     *
+     * `moveend` and `zoomend` used to be bound here so that panning to a new area would load
+     * it — which is exactly the behaviour being removed: it fetched wherever the camera went.
+     * `idle` is still needed because the fetch has to wait for the map to settle after an
+     * explicit act, and it is safe to leave bound: it re-runs `kickoffVenueFetch`, which now
+     * reads an anchor that only an explicit act can move, short-circuits on
+     * `venueKickoffStarted` once a fetch has run, and asks `shouldRefetchVenues` before
+     * spending anything. A pan therefore reaches it and does nothing.
+     *
+     * It also replaces the old `zoomend` retry: a kickoff that bailed because the map was
+     * below VENUE_FETCH_MIN_ZOOM leaves `idle` bound, so zooming in still lets it through.
+     */
     map.on("idle", kickoffVenueFetch);
-    map.on("zoomend", onVenueZoomForFetch);
-    // On every platform, not just mobile: panning to a new area must be able to load it.
-    map.on("moveend", kickoffVenueFetch);
     idleFallbackId = window.setTimeout(kickoffVenueFetch, 2500);
     if (map.isStyleLoaded()) {
       kickoffVenueFetch();
@@ -3233,8 +3199,6 @@ export function MapboxMap(props: MapboxMapProps) {
       if (idleFallbackId !== undefined) clearTimeout(idleFallbackId);
       if (warmPollId !== undefined) clearTimeout(warmPollId);
       map.off("idle", kickoffVenueFetch);
-      map.off("zoomend", onVenueZoomForFetch);
-      map.off("moveend", kickoffVenueFetch);
       onVenuesFetchLoadingChangeRef.current?.(false);
     };
   }, [
@@ -3244,7 +3208,7 @@ export function MapboxMap(props: MapboxMapProps) {
     venueFetchDataKey,
     debouncedVenueFetchCenter,
     venueFetchRadius,
-    venueViewportRadius,
+    venueNeedRadius,
     venueSportSig,
     venueSportsFilter,
     onSelectVenue,

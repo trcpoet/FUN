@@ -36,6 +36,18 @@ import {
 import type { SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 import { dbRowToVenueProperties } from "./venueSelection";
 import { venueAccessTier, VENUE_ACCESS_POSTGREST_FILTERS } from "./venueAccess";
+import { isMissingRpc } from "../../lib/rpcErrors";
+
+/**
+ * Rows to ask for per venue read.
+ *
+ * Not a tuning knob — PostgREST enforces `db-max-rows = 1000` on this project, verified against
+ * production (`?limit=5000` and `?limit=1500` both return exactly 1000). Asking for the 8000 the
+ * code used to request only made the ceiling invisible: the map has always been seeing 1000
+ * venues, and the reason that was a *bug* rather than a limit is that the old read ordered by
+ * `id`, so those 1000 were an arbitrary geographic sample rather than the nearest ones.
+ */
+const VENUE_READ_LIMIT = 1000;
 
 export type { SportsVenueProperties, SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 
@@ -285,22 +297,48 @@ export async function fetchSportsVenuesFromDb(
   const { minLat, minLng, maxLat, maxLng } = bbox;
 
   // A PostgREST builder can only be awaited once, so the whole query is rebuilt per attempt.
-  const buildQuery = () => {
+
+  /**
+   * Preferred read: nearest-first, ordered server-side.
+   *
+   * PostgREST caps every response at 1000 rows on this project, so whichever rows the database
+   * decides to hand back are the only ones that exist as far as the map is concerned. Ordering
+   * therefore has to happen before the cap, which a plain table read cannot express — `order=`
+   * only takes real columns and distance depends on where the viewer is.
+   */
+  const buildRpc = () => {
+    const query = supabase!.rpc("get_venues_in_bbox", {
+      p_min_lat: minLat,
+      p_min_lng: minLng,
+      p_max_lat: maxLat,
+      p_max_lng: maxLng,
+      p_limit: VENUE_READ_LIMIT,
+    });
+    return options?.signal ? query.abortSignal(options.signal) : query;
+  };
+
+  /**
+   * Fallback for a deployment that has not applied 20260812120000 yet.
+   *
+   * Returns the same shape and the same access filtering, just ordered by id — which is the old
+   * behaviour, and still better than no venues at all.
+   */
+  const buildTableQuery = () => {
     let query = supabase!
       .from("osm_sports_venues")
       .select(OSM_VENUE_MAP_SELECT)
-      // Stable ordering: without it the 8000-row cap would truncate an arbitrary,
-      // shifting subset — venues would appear and vanish as rows were re-written.
+      // Stable ordering: without it the row cap would truncate an arbitrary, shifting
+      // subset — venues would appear and vanish as rows were re-written.
       .order("id", { ascending: true })
       .gte("lat", minLat)
       .lte("lat", maxLat)
       .gte("lng", minLng)
       .lte("lng", maxLng)
-      .limit(8000);
+      .limit(VENUE_READ_LIMIT);
 
-    // Drop private and residential venues server-side, BEFORE the 8000-row cap applies.
-    // Over half the table is unnamed backyard pools, so without this a dense suburb spends its
-    // whole row budget on venues the client is about to discard, truncating the real pitches.
+    // Drop private and residential venues server-side, BEFORE the row cap applies. Over half
+    // the table is unnamed backyard pools, so without this a dense suburb spends its whole row
+    // budget on venues the client is about to discard, truncating the real pitches.
     // `venueAccessTier` below is still the rule — these filters are only ever allowed to be a
     // subset of it, which venueAccess.test.ts asserts.
     for (const filter of VENUE_ACCESS_POSTGREST_FILTERS) {
@@ -316,9 +354,11 @@ export async function fetchSportsVenuesFromDb(
   // Retried on a 5xx: the outcome union below already keeps "unavailable" distinct from
   // "empty", but a venue layer that gives up on the first blip still leaves the map bare.
   // Retries stop the moment the caller aborts — panning must not queue doomed requests.
-  const { data, error } = await retryTransient(buildQuery, {
-    shouldContinue: () => !options?.signal?.aborted,
-  });
+  const shouldContinue = () => !options?.signal?.aborted;
+  let { data, error } = await retryTransient(buildRpc, { shouldContinue });
+  if (error && isMissingRpc(error)) {
+    ({ data, error } = await retryTransient(buildTableQuery, { shouldContinue }));
+  }
   throwIfAborted(options?.signal);
   if (error) {
     if (isMissingTableError(error, "osm_sports_venues")) {
@@ -362,11 +402,46 @@ export async function fetchSportsVenuesFromDb(
 }
 
 /**
+ * Areas already answered this session, so asking for one again costs nothing.
+ *
+ * Venues load only for an explicit act — a double-tap, a search, a venue opened from the feed —
+ * and people revisit the same handful of places. Re-asking for one should be instant.
+ *
+ * This cache is for SPEED, NOT FOR DISPLAY. Nothing reads it except `loadVenuesForArea`, and
+ * `loadVenuesForArea` only runs for an explicit request, so panning across a cached area can
+ * never reveal it. Whatever the last explicit request returned is what stays on the map.
+ */
+const areaCache = new Map<string, VenueLoadResult>();
+
+/** Plenty for a session's worth of revisits, small enough not to matter. */
+const AREA_CACHE_MAX = 20;
+
+/**
+ * ~1km of latitude, which is well inside the smallest radius we ever request, so two taps that
+ * round together genuinely describe the same ground.
+ */
+function areaCacheKey(
+  centerLat: number,
+  centerLng: number,
+  radiusKm: number,
+  sportFilter: string[]
+): string {
+  const lat = centerLat.toFixed(2);
+  const lng = centerLng.toFixed(2);
+  // Sorted so ["Tennis","Soccer"] and ["Soccer","Tennis"] are one entry, not two.
+  return `${lat},${lng},${radiusKm},${[...sportFilter].sort().join("|")}`;
+}
+
+/** Drop the whole cache. Exported for tests and for a hard refresh of the venue layer. */
+export function clearVenueAreaCache(): void {
+  areaCache.clear();
+}
+
+/**
  * Load the venues around a point, and get an un-imported area moving without waiting for it.
  *
- * Never performs a slow network fetch, so it is safe to call on every map settle: the read is
- * a single indexed Supabase query, and the only other thing that can happen is a fire-and-
- * forget warm request.
+ * Never performs a slow network fetch: the read is a single indexed Supabase query, and the only
+ * other thing that can happen is a fire-and-forget warm request.
  */
 export async function loadVenuesForArea(
   centerLat: number,
@@ -374,14 +449,43 @@ export async function loadVenuesForArea(
   radiusKm: number,
   options?: { signal?: AbortSignal; sportFilter?: string[] }
 ): Promise<VenueLoadResult> {
+  const sportFilter = options?.sportFilter ?? [];
+  const key = areaCacheKey(centerLat, centerLng, radiusKm, sportFilter);
+
+  const cached = areaCache.get(key);
+  if (cached) {
+    // Refresh recency so the LRU keeps the places actually being revisited.
+    areaCache.delete(key);
+    areaCache.set(key, cached);
+    return cached;
+  }
+
   const bbox = bboxFromCenterRadius(centerLat, centerLng, radiusKm);
   const outcome = await fetchSportsVenuesFromDb(bbox, options);
 
+  /**
+   * Only answers get cached.
+   *
+   * `warming` and `unavailable` are both "we did not find out" — caching either would freeze
+   * that ground as permanently empty for the rest of the session, which is the same trap
+   * `venueCoverageRef` avoids in MapboxMap and the reason a failed Overpass fetch never writes
+   * a `venue_coverage` row.
+   */
+  const remember = (result: VenueLoadResult): VenueLoadResult => {
+    if (result.status !== "ok" && result.status !== "empty") return result;
+    areaCache.set(key, result);
+    if (areaCache.size > AREA_CACHE_MAX) {
+      const oldest = areaCache.keys().next();
+      if (!oldest.done) areaCache.delete(oldest.value);
+    }
+    return result;
+  };
+
   switch (outcome.status) {
     case "ok":
-      return { geojson: outcome.geojson, status: "ok" };
+      return remember({ geojson: outcome.geojson, status: "ok" });
     case "empty":
-      return { geojson: EMPTY_GEOJSON, status: "empty" };
+      return remember({ geojson: EMPTY_GEOJSON, status: "empty" });
     case "uncached":
       warmVenueArea(centerLat, centerLng);
       return { geojson: EMPTY_GEOJSON, status: "warming" };

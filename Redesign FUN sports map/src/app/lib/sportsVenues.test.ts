@@ -32,7 +32,11 @@ type TableResult = { data: unknown[] | null; error: unknown };
  * Table-aware because a zero-row venue read now asks `venue_coverage` whether anyone has
  * ever imported the area — the two answers have to be independently controllable.
  */
-function makeSupabaseStub(byTable: Record<string, TableResult>) {
+function makeSupabaseStub(
+  byTable: Record<string, TableResult>,
+  /** `rpcMissing` simulates a deployment that has not applied the proximity migration yet. */
+  opts?: { rpcMissing?: boolean }
+) {
   const from = vi.fn((table: string) => {
     const result = byTable[table] ?? { data: [], error: null };
     const builder: Record<string, unknown> = {};
@@ -42,7 +46,19 @@ function makeSupabaseStub(byTable: Record<string, TableResult>) {
     builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve);
     return builder;
   });
-  return { from };
+
+  // The venue read prefers `get_venues_in_bbox`, which serves the same rows as the table.
+  // Params are declared so assertions can read back the function name and arguments.
+  const rpc = vi.fn((_fn: string, _args?: Record<string, unknown>) => {
+    const result: TableResult = opts?.rpcMissing
+      ? { data: null, error: { code: "PGRST202", message: "Could not find the function" } }
+      : (byTable.osm_sports_venues ?? { data: [], error: null });
+    const builder: Record<string, unknown> = { abortSignal: vi.fn(() => builder) };
+    builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve);
+    return builder;
+  });
+
+  return { from, rpc };
 }
 
 /** Venue rows present, coverage irrelevant. */
@@ -131,6 +147,43 @@ describe("fetchSportsVenuesFromDb outcomes", () => {
     if (out.status !== "ok") return;
     expect(out.geojson.features).toHaveLength(1);
     expect(out.geojson.features[0]!.properties.id).toBe("way/461237079");
+  });
+
+  it("reads through the proximity RPC, not a bbox table scan", async () => {
+    // PostgREST caps responses at 1000 rows, so whichever rows come back are the only ones the
+    // map can ever see. Ordering by distance has to happen server-side, before that cap — the
+    // old `.order("id")` read returned an arbitrary geographic sample and then sorted it, which
+    // is how a 33 km pitch outranked venues that were never fetched.
+    const stub = makeSupabaseStub(withVenues([SOCCER_PITCH_ROW]));
+    const { fetchSportsVenuesFromDb } = await loadModule(stub);
+
+    const out = await fetchSportsVenuesFromDb(BBOX);
+
+    expect(out.status).toBe("ok");
+    expect(stub.rpc).toHaveBeenCalledTimes(1);
+    expect(stub.rpc.mock.calls[0]![0]).toBe("get_venues_in_bbox");
+    expect(stub.rpc.mock.calls[0]![1]).toMatchObject({
+      p_min_lat: BBOX.minLat,
+      p_max_lat: BBOX.maxLat,
+      p_min_lng: BBOX.minLng,
+      p_max_lng: BBOX.maxLng,
+    });
+    // The table read is the fallback only; it must not fire when the RPC answers.
+    expect(stub.from).not.toHaveBeenCalledWith("osm_sports_venues");
+  });
+
+  it("falls back to the bbox table read when the RPC is not deployed yet", async () => {
+    // The migration ships separately from the bundle, so a deployment can legitimately run this
+    // code before the function exists. Venues ordered by id beat no venues at all.
+    const stub = makeSupabaseStub(withVenues([SOCCER_PITCH_ROW]), { rpcMissing: true });
+    const { fetchSportsVenuesFromDb } = await loadModule(stub);
+
+    const out = await fetchSportsVenuesFromDb(BBOX);
+
+    expect(out.status).toBe("ok");
+    if (out.status !== "ok") return;
+    expect(out.geojson.features).toHaveLength(1);
+    expect(stub.from).toHaveBeenCalledWith("osm_sports_venues");
   });
 
   it("drops private and residential venues from the layer", async () => {
@@ -383,6 +436,83 @@ describe("loadVenuesForArea", () => {
   });
 });
 
+/**
+ * Venues load only for an explicit act, and people re-ask for the same few places. The cache
+ * exists so the second ask is free — NOT so the map can paint venues the viewport happens to
+ * cross. Nothing reads it but `loadVenuesForArea`, which only an explicit act calls.
+ */
+describe("explicitly loaded areas are cached", () => {
+  const LAT = 32.73;
+  const LNG = -97.115;
+
+  it("serves a repeat request for the same area without touching the database", async () => {
+    const stub = makeSupabaseStub(withVenues([SOCCER_PITCH_ROW]));
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    const first = await loadVenuesForArea(LAT, LNG, 5);
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+    expect(readsAfterFirst).toBeGreaterThan(0);
+
+    const second = await loadVenuesForArea(LAT, LNG, 5);
+
+    expect(stub.rpc.mock.calls.length).toBe(readsAfterFirst);
+    expect(second.status).toBe("ok");
+    expect(second.geojson.features).toHaveLength(first.geojson.features.length);
+  });
+
+  it("misses when the sport filter differs, because those are different rows", async () => {
+    const stub = makeSupabaseStub(withVenues([SOCCER_PITCH_ROW]));
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    await loadVenuesForArea(LAT, LNG, 5, { sportFilter: ["Soccer"] });
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+    await loadVenuesForArea(LAT, LNG, 5, { sportFilter: ["Tennis"] });
+
+    expect(stub.rpc.mock.calls.length).toBeGreaterThan(readsAfterFirst);
+  });
+
+  it("treats a reordered sport filter as the same area", async () => {
+    const stub = makeSupabaseStub(withVenues([SOCCER_PITCH_ROW]));
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    await loadVenuesForArea(LAT, LNG, 5, { sportFilter: ["Soccer", "Tennis"] });
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+    await loadVenuesForArea(LAT, LNG, 5, { sportFilter: ["Tennis", "Soccer"] });
+
+    expect(stub.rpc.mock.calls.length).toBe(readsAfterFirst);
+  });
+
+  it("never caches a 'warming' area, or it would stay empty all session", async () => {
+    // Same trap venue_coverage avoids: an area we could not answer for must stay askable, or
+    // the import that is running right now would never be picked up.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    const stub = makeSupabaseStub(uncachedArea());
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    const first = await loadVenuesForArea(LAT, LNG, 5);
+    expect(first.status).toBe("warming");
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+
+    const second = await loadVenuesForArea(LAT, LNG, 5);
+
+    expect(second.status).toBe("warming");
+    expect(stub.rpc.mock.calls.length).toBeGreaterThan(readsAfterFirst);
+  });
+
+  it("never caches an unavailable read", async () => {
+    const stub = makeSupabaseStub({
+      osm_sports_venues: { data: null, error: { code: "08006", message: "connection failure" } },
+    });
+    const { loadVenuesForArea } = await loadModule(stub);
+
+    expect((await loadVenuesForArea(LAT, LNG, 5)).status).toBe("unavailable");
+    const readsAfterFirst = stub.rpc.mock.calls.length;
+
+    expect((await loadVenuesForArea(LAT, LNG, 5)).status).toBe("unavailable");
+    expect(stub.rpc.mock.calls.length).toBeGreaterThan(readsAfterFirst);
+  });
+});
+
 describe("missing-table skip latch", () => {
   it("expires instead of disabling DB reads for the whole session", async () => {
     const stub = makeSupabaseStub({
@@ -393,19 +523,22 @@ describe("missing-table skip latch", () => {
     });
     const { fetchSportsVenuesFromDb } = await loadModule(stub);
 
+    // Counted on `rpc`, not `from`: the venue read is the proximity RPC now, and `from` only
+    // serves the coverage lookup, which an errored read never reaches.
     await fetchSportsVenuesFromDb(BBOX);
-    const callsAfterFirst = stub.from.mock.calls.length;
+    const callsAfterFirst = stub.rpc.mock.calls.length;
+    expect(callsAfterFirst).toBeGreaterThan(0);
 
     // Immediately after: skipped (no new query).
     await fetchSportsVenuesFromDb(BBOX);
-    expect(stub.from.mock.calls.length).toBe(callsAfterFirst);
+    expect(stub.rpc.mock.calls.length).toBe(callsAfterFirst);
 
     // After the cooldown: retried.
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 5 * 60_000);
     await fetchSportsVenuesFromDb(BBOX);
     vi.useRealTimers();
-    expect(stub.from.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+    expect(stub.rpc.mock.calls.length).toBeGreaterThan(callsAfterFirst);
   });
 });
 
@@ -476,23 +609,29 @@ describe("bboxFromCenterRadius", () => {
  * window blanked the whole map, so the venue read retries before reporting "unavailable".
  */
 describe("fetchSportsVenuesFromDb retries a transient API failure", () => {
-  /** Like makeSupabaseStub, but hands out a different result on each call to `from`. */
-  function makeSequencedStub(table: string, results: TableResult[]) {
+  /**
+   * Like makeSupabaseStub, but hands out a different result on each venue read.
+   *
+   * The venue read is the proximity RPC now, so that is what the sequence drives; `from` only
+   * serves the coverage lookup and always answers empty.
+   */
+  function makeSequencedStub(results: TableResult[]) {
     let i = 0;
-    const from = vi.fn((t: string) => {
-      const result = t === table ? results[Math.min(i++, results.length - 1)]! : { data: [], error: null };
+    const thenable = (result: TableResult) => {
       const builder: Record<string, unknown> = {};
       for (const m of ["select", "gte", "lte", "limit", "order", "abortSignal", "eq", "in", "or"]) {
         builder[m] = vi.fn(() => builder);
       }
       builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve);
       return builder;
-    });
-    return { stub: { from }, attempts: () => i };
+    };
+    const rpc = vi.fn(() => thenable(results[Math.min(i++, results.length - 1)]!));
+    const from = vi.fn(() => thenable({ data: [], error: null }));
+    return { stub: { from, rpc }, attempts: () => i };
   }
 
   it("recovers when the retry succeeds, instead of reporting the area unavailable", async () => {
-    const seq = makeSequencedStub("osm_sports_venues", [
+    const seq = makeSequencedStub([
       { data: null, error: { status: 503, message: "Service Unavailable" } },
       { data: [SOCCER_PITCH_ROW], error: null },
     ]);
@@ -505,7 +644,7 @@ describe("fetchSportsVenuesFromDb retries a transient API failure", () => {
   });
 
   it("does not retry an error that is a final answer", async () => {
-    const seq = makeSequencedStub("osm_sports_venues", [
+    const seq = makeSequencedStub([
       { data: null, error: { code: "42501", message: "permission denied for table osm_sports_venues" } },
     ]);
     const { fetchSportsVenuesFromDb } = await loadModule(seq.stub);
