@@ -181,11 +181,8 @@ export default function App() {
 
   const notesErrorToastedRef = useRef(false);
   const refetchNotes = useCallback(async () => {
-    // Map notes are signed-in only (privacy); guests browse games + venues only.
-    if (!currentUserId) {
-      setMapNotes([]);
-      return;
-    }
+    // Guests get notes too, through the wrapper that returns public ones with no
+    // author attached — a note about a court is about the court.
     const { data, error } = await fetchNotesNearby({
       lat: gamesFetchLat,
       lng: gamesFetchLng,

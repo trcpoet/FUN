@@ -139,7 +139,15 @@ export function NoteThreadDialog({
     knownCount == null ? "Comments" : `${knownCount} ${knownCount === 1 ? "comment" : "comments"}`;
 
   const noteId = note.id;
-  const handleLike = useCallback(() => toggleMapNoteLike(noteId), [noteId]);
+  const handleLike = useCallback(async () => {
+    if (isGuest) {
+      // The heart still shows the count — tapping it is a reason to have an
+      // account, not an error message.
+      onRequestSignIn?.();
+      return { liked: false, error: null };
+    }
+    return toggleMapNoteLike(noteId);
+  }, [isGuest, noteId, onRequestSignIn]);
 
   /** Same source: null until the caller passes viewer coordinates to the note lookup. */
   const distanceLabel = useMemo(() => {

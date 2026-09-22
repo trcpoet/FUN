@@ -185,8 +185,9 @@ export default function Profile() {
   const handleSignOut = async () => {
     await signOut();
     // Stay on Profile: signed out, it is the sign-in screen. Bouncing to the map
-    // would leave the person wondering whether it worked.
-    navigate("/profile", { replace: true });
+    // would leave the person wondering whether it worked. Sign-in rather than
+    // sign-up, because they plainly have an account.
+    navigate("/profile?auth=signin", { replace: true });
   };
 
   const handleShare = async () => {
