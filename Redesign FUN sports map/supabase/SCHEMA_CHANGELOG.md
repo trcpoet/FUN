@@ -1,5 +1,29 @@
 # Schema changelog
 
+## 2026-09-22 — Game reads enforce their own rules
+
+`20260922120000_game_read_visibility_and_invite_tokens.sql`.
+
+Two things were true of production until today: any signed-in account could read
+every game's `invite_token` (and `redeem_invite_token` asks for nothing else, so
+that is a key to every invite-only game), and the "Same gender" rule was enforced
+only inside the read RPCs while the table itself answered `select *` to anyone —
+including a signed-out caller. The gate that migration `20260801130000` moved out
+of the client was never put on the door the rows actually leave through.
+
+Now: `games` and `game_participants` have SELECT policies that mirror the RPCs
+(host, participant, or gender-and-visibility eligible) and `invite_token` is
+revoked from the client roles, readable only through the new
+`get_game_invite_token()` for the host and joined players. `anon` keeps the
+column grants but matches no policy, so signed-out reads come back empty rather
+than as an error — the two SECURITY INVOKER feed RPCs read `games` under the
+caller's rights and would otherwise fail outright for guests.
+
+Caveat to carry forward: column-level grants do not cover columns added later. A
+new column on `games` needs adding to that grant, or clients get
+`permission denied` for it.
+
+
 ## 2026-08-10 — Baseline recovered, SQL Editor snippets triaged
 
 ### What happened

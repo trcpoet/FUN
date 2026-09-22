@@ -83,7 +83,6 @@ export type GameThreadFocus = {
   /** Drives chat membership UX (stranger badges, invite panel, etc.). */
   visibility?: GameVisibility | null;
   /** Sharable token for invite-only games (`/g/<token>`). */
-  inviteToken?: string | null;
   /** Coords + label so "Plan rematch" pre-fills location without an extra fetch. */
   lat?: number | null;
   lng?: number | null;
@@ -1428,7 +1427,6 @@ export function GameMessengerSheet({
                         spotsRemaining: row.spots_remaining,
                         createdBy: row.created_by ?? null,
                         visibility: row.visibility ?? null,
-                        inviteToken: row.invite_token ?? null,
                         lat: row.lat ?? null,
                         lng: row.lng ?? null,
                         locationLabel: row.location_label ?? null,
@@ -1820,7 +1818,6 @@ export function GameMessengerSheet({
                 <InviteAdminPanel
                   gameId={focusThread.gameId}
                   visibility={focusThread.visibility ?? inboxRow?.visibility ?? null}
-                  inviteToken={focusThread.inviteToken ?? inboxRow?.invite_token ?? null}
                   isHost={
                     currentUserId != null &&
                     (focusThread.createdBy ?? inboxRow?.created_by ?? null) === currentUserId

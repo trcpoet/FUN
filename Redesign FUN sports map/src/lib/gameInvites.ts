@@ -118,6 +118,28 @@ export async function getMyPendingInvites(): Promise<{
   return { data: (data as PendingInviteRow[]) ?? [], error: null };
 }
 
+/**
+ * The host's (or a joined player's) invite token.
+ *
+ * `games.invite_token` is not a readable column for client roles — it was, and
+ * holding it is enough to join an invite-only game through `redeem_invite_token`,
+ * so anyone could read every token off the table and walk into any private game.
+ * See `supabase/migrations/20260922120000_game_read_visibility_and_invite_tokens.sql`.
+ * Returns null when the caller is not in the game: the same answer as a game that
+ * does not exist, so this cannot be used to probe.
+ */
+export async function getGameInviteToken(
+  gameId: string
+): Promise<{ token: string | null; error: Error | null }> {
+  if (!supabase) return { token: null, error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_game_invite_token", { p_game_id: gameId });
+  if (error) {
+    if (rpcMissing(error)) return { token: null, error: null }; // migration not applied yet
+    return { token: null, error: new Error(error.message) };
+  }
+  return { token: (data as string | null) ?? null, error: null };
+}
+
 /** Build the canonical invite-only URL the host shares. */
 export function inviteTokenUrl(token: string): string {
   const origin =

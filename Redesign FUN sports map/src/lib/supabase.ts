@@ -50,8 +50,6 @@ export type GameRow = {
   ends_at?: string | null;
   /** 'public' | 'friends_only' | 'invite_only'. Drives chat membership rules. */
   visibility?: GameVisibility | null;
-  /** UUID for invite-only sharable links (`/g/<token>`). */
-  invite_token?: string | null;
   location_label?: string | null;
   description?: string | null;
   /** Host preferences from create-game (skill, age, etc.). */
@@ -78,7 +76,6 @@ export type GameInboxRow = {
   ends_at?: string | null;
   duration_minutes?: number | null;
   visibility?: GameVisibility | null;
-  invite_token?: string | null;
   /** Game host id — needed to render host-only controls in the chat header. */
   created_by?: string | null;
   status?: "open" | "full" | "live" | "completed" | "cancelled";

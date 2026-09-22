@@ -25,7 +25,6 @@ export type ThreadGameSource = {
   spotsRemaining?: number;
   createdBy?: string | null;
   visibility?: GameVisibility | null;
-  inviteToken?: string | null;
   lat?: number | null;
   lng?: number | null;
   locationLabel?: string | null;
@@ -66,7 +65,6 @@ export function threadGameRow(
     ends_at: pick(focus.endsAt, inboxRow?.ends_at),
     duration_minutes: pick(focus.durationMinutes, inboxRow?.duration_minutes),
     visibility: pick(focus.visibility, inboxRow?.visibility),
-    invite_token: pick(focus.inviteToken, inboxRow?.invite_token),
     location_label: pick(focus.locationLabel, inboxRow?.location_label),
     // Not carried by the inbox. Nothing the thread renders reads them, and inventing a
     // distance here would put a wrong number on screen the moment one did.

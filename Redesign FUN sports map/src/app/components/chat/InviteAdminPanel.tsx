@@ -3,6 +3,7 @@ import { Check, Copy, Loader2, ShieldCheck, X as XIcon } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { cn } from "../ui/utils";
 import {
+  getGameInviteToken,
   getMyPendingInvites,
   inviteTokenUrl,
   respondToInvite,
@@ -13,7 +14,6 @@ import type { GameVisibility } from "../../../lib/supabase";
 type InviteAdminPanelProps = {
   gameId: string;
   visibility: GameVisibility | null | undefined;
-  inviteToken: string | null | undefined;
   /** True when the current user is the game host (only host gets the controls). */
   isHost: boolean;
   /** Bumped on changes (approve/deny/revoke) so callers can refetch member roster. */
@@ -29,10 +29,14 @@ type InviteAdminPanelProps = {
 export function InviteAdminPanel({
   gameId,
   visibility,
-  inviteToken,
   isHost,
   onChange,
 }: InviteAdminPanelProps) {
+  /**
+   * Fetched, never handed down. The token is not a readable column any more, so
+   * it arrives only for a caller the server recognises as part of the game.
+   */
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingInviteRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [respondingId, setRespondingId] = useState<string | null>(null);
@@ -54,6 +58,20 @@ export function InviteAdminPanel({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!isHost || visibility !== "invite_only") {
+      setInviteToken(null);
+      return;
+    }
+    let cancelled = false;
+    void getGameInviteToken(gameId).then(({ token }) => {
+      if (!cancelled) setInviteToken(token);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isHost, visibility, gameId]);
 
   const handleRespond = async (inviteId: string, action: "approve" | "deny") => {
     setRespondingId(inviteId);

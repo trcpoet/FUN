@@ -99,9 +99,19 @@ select oid::regprocedure from pg_proc
 where proname = '<name>' and pronargs = <n> and pronamespace = 'public'::regnamespace;
 ```
 
+## Pending — apply in this order
+
+- **`20260922120000_game_read_visibility_and_invite_tokens.sql` — deploy the client FIRST.**
+  It revokes client privilege on `games.invite_token`, and the currently deployed
+  `fetchMyGameInbox` still names that column in its select, so applying this first
+  breaks every signed-in user's chat inbox with `permission denied`. The build that
+  drops it also adds `getGameInviteToken()`, which is how the host's share link is
+  read afterwards. Verified against a local Postgres reproduction of the policies:
+  a man no longer reads a woman-hosted "Same gender" game, a non-participant reads
+  no `invite_token`, and friends-only / invite-only games still reach the people
+  who follow the host or hold an approved invite.
+
 ## Known gaps
 
-- **`get_unified_feed` skips the gender gate.** It lists games that `get_games_nearby`
-  and `get_live_nearby` deliberately hide. Found 2026-08-10, knowingly not fixed.
 - The SQL Editor snippets in the Supabase dashboard are **historical scratch**, not a
   source of truth. Production is ahead of them. See `SCHEMA_CHANGELOG.md`.
