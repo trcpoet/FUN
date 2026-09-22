@@ -1,11 +1,19 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../app/contexts/AuthContext";
 import { getMyProfile, updateMyAvatarId, updateMyProfile } from "../lib/api";
 import type { AthleteProfilePayload } from "../lib/athleteProfile";
 import { emptyAthleteProfile, parseAthleteProfile } from "../lib/athleteProfile";
 import type { Gender } from "../lib/gamePreferenceOptions";
 
 export function useMyProfile() {
+  /**
+   * Keyed on the signed-in user, because this used to fetch once per mount and
+   * never again: signing in from the profile tab left the map holding the guest's
+   * empty profile until the next full page load.
+   */
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [avatarId, setAvatarId] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -38,7 +46,7 @@ export function useMyProfile() {
       return;
     }
     refetch();
-  }, [refetch]);
+  }, [refetch, userId]);
 
   const setAvatar = useCallback(async (newAvatarId: string | null) => {
     if (!supabase) return;

@@ -1,6 +1,7 @@
 import React from "react";
 import { Navigate, useLocation } from "react-router";
 import { useAuth } from "../contexts/AuthContext";
+import { profileAuthPath } from "../../lib/guestAccess";
 
 export function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -14,7 +15,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     );
   }
   if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return <Navigate to={profileAuthPath("signin")} state={{ from: location }} replace />;
   }
   return <>{children}</>;
 }

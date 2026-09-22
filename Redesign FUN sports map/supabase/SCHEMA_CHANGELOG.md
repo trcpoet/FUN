@@ -1,5 +1,30 @@
 # Schema changelog
 
+## 2026-09-22 — Guests browse; the database is what says so
+
+`20260922130000_guest_browse_read_paths.sql`, then (after the client ships)
+`20260922140000_guest_browse_lock_anon_tables.sql`.
+
+Before: a signed-out visitor saw an empty map, because `can_view_game_for_gender`
+answered "no gender on file, no games" — and at the same time could read every
+profile, the whole follow graph, every public note with its author, and every
+venue review with its `user_id`, straight off the tables. The product said
+"guests see nothing about people" while the database said the opposite.
+
+After: guests read six `get_guest_*` functions and nothing else. Each is a thin
+SECURITY DEFINER select over the function members already use, projecting no
+`created_by` and no `user_id`, filtered to public games and public notes. The
+gender rule now reads "Co-ed is open to everyone; Same gender needs an exact
+match", which is what every other part of the app already assumed, and which also
+gives a member who skipped onboarding the Co-ed games instead of an empty map.
+The identity tables move to `authenticated`, so the anonymity is a property of
+the schema rather than of the UI.
+
+Note the deploy order: part 1 is additive and can go first; part 2 removes access
+the shipped client still uses, so it follows the deploy. MIGRATION_ORDER.md has
+the detail.
+
+
 ## 2026-09-22 — Game reads enforce their own rules
 
 `20260922120000_game_read_visibility_and_invite_tokens.sql`.

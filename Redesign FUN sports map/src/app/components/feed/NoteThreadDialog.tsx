@@ -42,6 +42,13 @@ type Props = {
   onCenterOnMap?: () => void;
   /** Called after a successful delete so the caller can drop the pin without a refetch. */
   onDeleted?: () => void;
+  /**
+   * Signed out. The note itself is public and stays readable; the conversation
+   * under it is between members, and so is the name on top of it.
+   */
+  isGuest?: boolean;
+  /** Guest reached for the thread or the reply box. */
+  onRequestSignIn?: () => void;
 };
 
 export function NoteThreadDialog({
@@ -51,6 +58,8 @@ export function NoteThreadDialog({
   currentUserId,
   onCenterOnMap,
   onDeleted,
+  isGuest = false,
+  onRequestSignIn,
 }: Props) {
   const [comments, setComments] = useState<MapNoteCommentRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -66,6 +75,12 @@ export function NoteThreadDialog({
 
   useEffect(() => {
     if (!open) return;
+    if (isGuest) {
+      setLoading(false);
+      setLoaded(false);
+      setComments([]);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -88,10 +103,10 @@ export function NoteThreadDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, note.id]);
+  }, [open, note.id, isGuest]);
 
   useEffect(() => {
-    if (!open || !note.created_by) {
+    if (!open || !note.created_by || isGuest) {
       setAuthorName(null);
       return;
     }
@@ -107,7 +122,7 @@ export function NoteThreadDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, note.created_by, currentUserId]);
+  }, [open, note.created_by, currentUserId, isGuest]);
 
   const placeLabel = note.place_name?.trim() || "Pinned to this location";
   const createdLabel = noteCreatedLabel(note.created_at);
@@ -270,7 +285,22 @@ export function NoteThreadDialog({
           ref={scrollerRef}
           className="min-h-0 flex-1 overflow-y-auto border-t border-white/10 px-4 py-3 scrollbar-hide"
         >
-          {loading ? (
+          {isGuest ? (
+            <div className="py-6 text-center">
+              <p className="text-xs text-slate-400">
+                {knownCount == null || knownCount === 0
+                  ? "No replies yet."
+                  : `${commentCountLabel} from players here.`}
+              </p>
+              <button
+                type="button"
+                onClick={onRequestSignIn}
+                className="mt-2 rounded text-xs font-semibold text-emerald-300 underline-offset-4 transition hover:text-emerald-200 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+              >
+                Sign up to read and reply
+              </button>
+            </div>
+          ) : loading ? (
             <p className="py-6 text-center text-xs text-slate-500">Loading replies…</p>
           ) : comments.length === 0 ? (
             <p className="py-6 text-center text-xs text-slate-500">Be the first to reply.</p>
@@ -316,6 +346,15 @@ export function NoteThreadDialog({
               {error}
             </p>
           ) : null}
+          {isGuest ? (
+            <button
+              type="button"
+              onClick={onRequestSignIn}
+              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-300 transition hover:border-emerald-400/40 hover:text-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+            >
+              Create an account to reply
+            </button>
+          ) : (
           <div className="flex items-end gap-2">
             <textarea
               value={draft}
@@ -349,7 +388,8 @@ export function NoteThreadDialog({
               )}
             </button>
           </div>
-          {remaining <= 200 ? (
+          )}
+          {!isGuest && remaining <= 200 ? (
             <p className="mt-1 text-right text-[10px] tabular-nums text-slate-500">
               {remaining} left
             </p>

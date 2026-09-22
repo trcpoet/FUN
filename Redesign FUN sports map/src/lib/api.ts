@@ -8,6 +8,7 @@
 import { supabase } from "./supabase";
 import { isMissingRpc } from "./rpcErrors";
 import { retryTransient } from "./retryTransient";
+import { pickReadRpc } from "./guestRpc";
 import { subscribeWithRetry } from "./realtimeRetry";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
 import { parseGender, type Gender } from "./gamePreferenceOptions";
@@ -114,10 +115,12 @@ export async function fetchNotesNearby(params: {
   limit?: number;
 }): Promise<{ data: MapNoteRow[]; error: Error | null }> {
   if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  // Guests read the anonymised wrapper: public notes only, no author.
+  const fn = await pickReadRpc("get_notes_nearby", "get_guest_notes_nearby");
   // Retried for the same reason as the map's game reads: a 5xx from the API layer is not an
   // answer about which notes are nearby.
   const { data, error } = await retryTransient(() =>
-    supabase!.rpc("get_notes_nearby", {
+    supabase!.rpc(fn, {
       p_lat: params.lat,
       p_lng: params.lng,
       p_radius_km: params.radiusKm ?? 10,

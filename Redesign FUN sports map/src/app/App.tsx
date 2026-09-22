@@ -59,6 +59,7 @@ import { useStableItems } from "../lib/stableItems";
 import { gameMatchesFilters, countMatchingGames, deriveDefaultFiltersFromProfile, gameVisibleToViewer } from "./lib/gameFilters";
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
 import { readFollowedIds, writeFollowedIds } from "../lib/localFollows";
+import { profileAuthPath, returnToForGame, returnToForNote, returnToForVenue } from "../lib/guestAccess";
 import { updateMyPresence, migrateLocalFollowsToDb } from "../lib/api";
 import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
@@ -215,8 +216,9 @@ export default function App() {
     profilesLat: userCoords?.lat ?? effectiveUserCoords.lat,
     profilesLng: userCoords?.lng ?? effectiveUserCoords.lng,
     athletesRadiusKm: appliedFilters.athletesRadiusKm,
-    // Player locations are signed-in only (privacy); guests see games only.
-    includeProfiles: !!currentUserId,
+    // Player locations are signed-in only (privacy); a guest's games come from
+    // the anonymised wrapper, and neither viewer's results are cached for the other.
+    viewerId: currentUserId,
   });
   const [venuesFetchLoading, setVenuesFetchLoading] = useState(false);
   const [filterApplySync, setFilterApplySync] = useState(false);
@@ -254,11 +256,15 @@ export default function App() {
     avatarUrl,
     athleteProfile,
     gender: viewerGender,
-    loading: profileLoading,
   } = useMyProfile();
 
-  /** Auth must be settled first, or the prompt flashes on every cold load. */
-  const showGenderGatePrompt = !authLoading && !profileLoading && viewerGender == null;
+  /*
+   * The "Games are hidden" card is gone with the rule it explained. Co-ed games
+   * are visible to every viewer now — guests included — and only same-gender
+   * games still need a gender on file (see
+   * `20260922130000_guest_browse_read_paths.sql`). A map that shows games needs
+   * no card apologising for showing none.
+   */
 
   // Seed filter defaults from the user's profile prefs once (skill/age/matchType), filling only unset
   // fields. Guarded by localStorage so user Apply / persisted filters always win afterwards.
@@ -480,7 +486,7 @@ export default function App() {
     if (authLoading) return;
 
     if (!currentUserId) {
-      navigate("/login", { replace: true });
+      navigate(profileAuthPath("signin"), { replace: true, state: { from: location } });
       return;
     }
 
@@ -564,13 +570,31 @@ export default function App() {
     prefetchMapboxGl();
   }, []);
 
+  /**
+   * Have the account screen ready before anyone reaches for it.
+   *
+   * React Router wraps navigation in `startTransition`, so a route whose chunk
+   * has not been fetched leaves the current screen up with no feedback at all —
+   * which is exactly what "tapping Sign up does nothing" was. Fetching it while
+   * the map is idle costs a few KB and removes the wait entirely.
+   */
+  const prefetchAccountScreen = useCallback(() => {
+    void (currentUserId ? import("./pages/Profile") : import("./pages/GuestProfile"));
+  }, [currentUserId]);
+  useEffect(() => {
+    if (!secondaryReady) return;
+    prefetchAccountScreen();
+  }, [secondaryReady, prefetchAccountScreen]);
+
   // Guests get a friendly "sign in to continue" sheet instead of a hard redirect.
   const [signInGate, setSignInGate] = useState<SignInGateAction | null>(null);
+  const [signInGateReturnTo, setSignInGateReturnTo] = useState<string | null>(null);
   const ensureSession = useCallback(
-    async (action: SignInGateAction = "join"): Promise<boolean> => {
+    async (action: SignInGateAction = "join", returnTo?: string | null): Promise<boolean> => {
       if (currentUserId) return true;
       const { data: { session } } = await supabase!.auth.getSession();
       if (session?.user) return true;
+      setSignInGateReturnTo(returnTo ?? null);
       setSignInGate(action);
       return false;
     },
@@ -651,7 +675,7 @@ export default function App() {
   };
 
   const handleJoinGame = async (gameId: string) => {
-    const ok = await ensureSession();
+    const ok = await ensureSession("join", returnToForGame(gameId));
     if (!ok) return;
     const result = await joinGame(gameId);
     if (result.error) {
@@ -663,7 +687,7 @@ export default function App() {
   };
 
   const handleLeaveGame = async (gameId: string): Promise<Error | null> => {
-    const ok = await ensureSession();
+    const ok = await ensureSession("join", returnToForGame(gameId));
     if (!ok) return new Error("Sign in to leave this game.");
 
     const err = await leaveGame(gameId);
@@ -776,6 +800,7 @@ export default function App() {
     anchorLng: searchAnchorLng,
     excludeUserId: currentUserId,
     games: mapCountableGames,
+    includePeople: !!currentUserId,
   });
 
   useEffect(() => {
@@ -919,6 +944,8 @@ export default function App() {
             }}
             note={activeMapNote}
             currentUserId={currentUserId}
+            isGuest={!currentUserId}
+            onRequestSignIn={() => void ensureSession("comment", returnToForNote(activeMapNote.id))}
             onCenterOnMap={() => {
               handleCenterOnCoords({ lat: activeMapNote.lat, lng: activeMapNote.lng });
               setActiveMapNote(null);
@@ -1037,31 +1064,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Games are gender-gated server-side, so a viewer with no gender on file
-          gets an empty map. Say why instead of looking broken. */}
-      {showGenderGatePrompt && (
-        <div className="pointer-events-none absolute inset-x-0 top-24 z-[54] flex justify-center px-4">
-          <div className="pointer-events-auto max-w-sm rounded-2xl border border-white/12 bg-slate-950/92 px-4 py-3 text-center shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-md">
-            <p className="text-sm font-semibold text-slate-100">Games are hidden</p>
-            <p className="mt-1 text-[13px] leading-snug text-slate-400">
-              {currentUserId
-                ? "Add your gender to see games. Games open to one gender are only shown to matching players."
-                : "Sign in and add your gender to see games near you."}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                if (currentUserId) navigate("/profile?settings=1");
-                else setSignInGate("join");
-              }}
-              className="mt-3 inline-flex min-h-9 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
-            >
-              {currentUserId ? "Set my gender" : "Sign in"}
-            </button>
-          </div>
-        </div>
-      )}
-
       {satelliteOn && (
         <div
           className="pointer-events-none absolute left-1/2 top-[72px] z-40 -translate-x-1/2 rounded-full border border-white/12 bg-[#0A0F1C]/85 px-3 py-1 text-[11px] font-medium text-slate-200 shadow-[var(--shadow-control)] backdrop-blur-md"
@@ -1087,9 +1089,14 @@ export default function App() {
           filterApplyStartedAtRef.current = Date.now();
         }}
         onOpenMessages={() => {
+          if (!currentUserId) {
+            setSignInGate("chat");
+            return;
+          }
           setMessengerFocus(null);
           setMessagesOpen(true);
         }}
+        onGuestGate={(action) => setSignInGate(action)}
         satelliteOn={satelliteOn}
         onToggleSatellite={() => setSatelliteOn((v) => !v)}
         notifications={notifications}
@@ -1100,6 +1107,7 @@ export default function App() {
         locationVisibility={locationVisibility}
         onLocationVisibilityChange={applyVisibilityMode}
         onOpenProfile={() => navigate("/profile")}
+        onProfilePrefetch={prefetchAccountScreen}
         userAvatarUrl={avatarUrl ?? null}
         favoriteSport={favoriteSport}
         mapSearch={{
@@ -1145,6 +1153,10 @@ export default function App() {
           liveNowOpen={liveNowOpen}
           mapMinuteEpoch={mapMinuteEpoch}
           onOpenMessages={() => {
+            if (!currentUserId) {
+              setSignInGate("chat");
+              return;
+            }
             setMessengerFocus(null);
             setMessagesOpen(true);
           }}
@@ -1277,7 +1289,28 @@ export default function App() {
       />
       ) : null}
 
-      <SignInGate action={signInGate} onClose={() => setSignInGate(null)} />
+      <SignInGate
+        action={signInGate}
+        /*
+         * Where to come back to. Callers that know the subject pass it; otherwise
+         * the card standing open behind the sheet IS the subject, and App already
+         * reopens any of the three from a `/?focus…` link.
+         */
+        returnTo={
+          signInGateReturnTo ??
+          (selectedGame
+            ? returnToForGame(selectedGame.id)
+            : selectedVenue
+              ? returnToForVenue(selectedVenue.id)
+              : activeMapNote
+                ? returnToForNote(activeMapNote.id)
+                : null)
+        }
+        onClose={() => {
+          setSignInGate(null);
+          setSignInGateReturnTo(null);
+        }}
+      />
       </Suspense>
     </main>
   );

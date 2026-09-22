@@ -1,6 +1,7 @@
 import React from "react";
 import { Navigate } from "react-router";
 import { useAuth } from "../contexts/AuthContext";
+import { profileAuthPath } from "../../lib/guestAccess";
 
 export function RequireOnboarding({ children }: { children: React.ReactNode }) {
   const { user, onboardingCompleted, loading } = useAuth();
@@ -13,7 +14,7 @@ export function RequireOnboarding({ children }: { children: React.ReactNode }) {
     );
   }
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={profileAuthPath("signin")} replace />;
   }
   if (!onboardingCompleted) {
     return <Navigate to="/onboarding" replace />;

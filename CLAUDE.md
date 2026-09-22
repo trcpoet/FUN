@@ -102,6 +102,22 @@ Core schema: `supabase/schema.sql` (tables, RLS, RPCs, functions)
 
 ## Dev Conventions (Critical)
 
+### Guests browse; members act
+A signed-out visitor sees **what** is happening, **where**, **when** and **how many** are in —
+never **who**. The map, venue cards, public Co-ed games and public notes are all open; anything
+that writes, names a person, or opens a member surface (feed, messenger, profiles) asks for an
+account at the moment it is tapped, and returns the person to what they tapped.
+
+- Enforced in SQL, not in JSX: guests may execute only the `get_guest_*` functions, which project
+  no `created_by`/`user_id`. Every identity-bearing table is `to authenticated`.
+  See `supabase/migrations/20260922130000_*` and `..._20260922140000_*`.
+- Client reads pick their function by session in one place — `src/lib/guestRpc.ts`. A component
+  that needs to know asks `currentUserId == null`, never the network.
+- Gating copy and the "back where I was" links live in `src/lib/guestAccess.ts`; the sheet is
+  `SignInGate`, the page-level equivalent is `RequireMember`.
+- Auth lives in exactly one place: the Profile tab. `/login` and `/signup` are aliases that
+  redirect there. There are no auth controls on the map.
+
 ### Centralized API Rule
 **Never call `supabase` directly from components.** All data operations go through `src/lib/api.ts`. This:
 - Keeps permissions logic in one place
@@ -154,7 +170,9 @@ The app uses localStorage flags like `fun_profiles_athlete_column` to gracefully
 
 ## Testing & Debugging
 
-There is **no test framework installed** currently. Manual testing workflow:
+Vitest covers the pure logic (`npm test`, 40+ files under `src/**/*.test.ts`), and
+`npm run typecheck` covers both tsconfigs; CI runs both on every PR. There are no component or
+end-to-end tests, so the rest is manual:
 - Run `npm run dev` locally
 - Use browser DevTools to inspect network requests to Supabase
 - Check Supabase Studio for schema, data, and Realtime activity

@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { pickReadRpc } from "./guestRpc";
 import type { MapNoteCommentRow, MapNoteRow, NoteInboxRow } from "./supabase";
 import { isMissingRpc } from "./rpcErrors";
 import { subscribeWithRetry } from "./realtimeRetry";
@@ -117,7 +118,8 @@ export async function fetchNoteById(
   viewer?: { lat: number; lng: number } | null,
 ): Promise<{ data: MapNoteRow | null; error: Error | null }> {
   if (!supabase) return { data: null, error: new Error("Supabase not configured") };
-  const rpc = await supabase.rpc("get_note_by_id", {
+  const fn = await pickReadRpc("get_note_by_id", "get_guest_note_by_id");
+  const rpc = await supabase.rpc(fn, {
     p_note_id: id,
     p_lat: viewer?.lat ?? null,
     p_lng: viewer?.lng ?? null,

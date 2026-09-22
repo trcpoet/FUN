@@ -3626,6 +3626,8 @@ export function MapboxMap(props: MapboxMapProps) {
                   eventPopup.game.created_by === currentUserId)
               }
               isSubstitute={substituteSet.has(eventPopup.game.id)}
+              isGuest={!currentUserId}
+              onRequestSignIn={() => void props.ensureSession?.("players")}
               onDeleteHostedGame={onDeleteHostedGame}
               onStartHostedGame={onStartHostedGame}
               onEndHostedGame={onEndHostedGame}

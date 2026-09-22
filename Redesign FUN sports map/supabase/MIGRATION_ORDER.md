@@ -101,6 +101,21 @@ where proname = '<name>' and pronargs = <n> and pronamespace = 'public'::regname
 
 ## Pending — apply in this order
 
+- **`20260922130000_guest_browse_read_paths.sql` — apply BEFORE deploying guest mode.**
+  Additive: relaxes `can_view_game_for_gender` (no gender on file now means "Co-ed
+  only" rather than "nothing at all") and adds the six `get_guest_*` wrappers,
+  granted to `anon`. Safe with the current client, which never calls them. Applying
+  it early simply lets members with no gender see Co-ed games.
+
+- **`20260922140000_guest_browse_lock_anon_tables.sql` — apply AFTER that client is live.**
+  Restrictive: moves every identity-bearing read policy from `public`/`anon` to
+  `authenticated` and revokes `anon` (and PUBLIC) EXECUTE on the member read RPCs.
+  A client that still reads `profiles`, `map_notes` or `get_venue_reviews` as a
+  guest gets empty results or 42501 afterwards, so this one waits for the deploy.
+  Guests keep `osm_sports_venues`, `venue_coverage`, the badge catalogue and the
+  `get_guest_*` functions — nothing else.
+
+
 - **`20260922120000_game_read_visibility_and_invite_tokens.sql` — deploy the client FIRST.**
   It revokes client privilege on `games.invite_token`, and the currently deployed
   `fetchMyGameInbox` still names that column in its select, so applying this first

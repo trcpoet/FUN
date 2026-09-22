@@ -1,9 +1,10 @@
 import React, { Component, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router";
-import { AuthProvider } from "./app/contexts/AuthContext";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router";
+import { AuthProvider, useAuth } from "./app/contexts/AuthContext";
 import { RequireAuth } from "./app/components/RequireAuth";
 import { RequireOnboarding } from "./app/components/RequireOnboarding";
+import { RequireMember } from "./app/components/RequireMember";
 import { PublicOnly } from "./app/components/PublicOnly";
 import "./styles/index.css";
 import { FunOrbitLoader } from "./app/components/FunOrbitLoader";
@@ -12,12 +13,11 @@ import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 
 const App = lazy(() => import("./app/App.tsx"));
-const Login = lazy(() => import("./app/pages/Login.tsx"));
-const SignUp = lazy(() => import("./app/pages/SignUp.tsx"));
 const ForgotPassword = lazy(() => import("./app/pages/ForgotPassword.tsx"));
 const ResetPassword = lazy(() => import("./app/pages/ResetPassword.tsx"));
 const Onboarding = lazy(() => import("./app/pages/Onboarding.tsx"));
 const Profile = lazy(() => import("./app/pages/Profile.tsx"));
+const GuestProfile = lazy(() => import("./app/pages/GuestProfile.tsx"));
 const PublicProfile = lazy(() => import("./app/pages/PublicProfile.tsx"));
 const Feed = lazy(() => import("./app/pages/Feed.tsx"));
 const RecommendedGames = lazy(() => import("./app/pages/RecommendedGames.tsx"));
@@ -26,6 +26,36 @@ const RedeemInvite = lazy(() => import("./app/pages/RedeemInvite.tsx"));
 
 function RouteFallback() {
   return <FunOrbitLoader />;
+}
+
+/**
+ * Profile is the app's only account surface.
+ *
+ * Signed out it IS the sign-in screen; signed in it is your profile. There is no
+ * `/login` page behind the map any more, because a first-time visitor should meet
+ * the map, not a form — and when they do want an account, "Profile" is the one
+ * place to look, exactly as it is for a member.
+ */
+function ProfileRoute() {
+  const { user, loading } = useAuth();
+  if (loading) return <RouteFallback />;
+  if (!user) return <GuestProfile />;
+  return (
+    <RequireOnboarding>
+      <Profile />
+    </RequireOnboarding>
+  );
+}
+
+/**
+ * `/login` and `/signup` live on as aliases: password-reset mails, old bookmarks
+ * and `?redirect=` links from invites all still point at them.
+ */
+function AuthAlias({ mode }: { mode: "signin" | "signup" }) {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  search.set("auth", mode);
+  return <Navigate to={{ pathname: "/profile", search: `?${search.toString()}` }} state={location.state} replace />;
 }
 
 type RouteErrorBoundaryProps = { children: React.ReactNode };
@@ -69,22 +99,8 @@ createRoot(document.getElementById("root")!).render(
         <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/" element={<App />} />
-            <Route
-              path="/login"
-              element={
-                <PublicOnly>
-                  <Login />
-                </PublicOnly>
-              }
-            />
-            <Route
-              path="/signup"
-              element={
-                <PublicOnly>
-                  <SignUp />
-                </PublicOnly>
-              }
-            />
+            <Route path="/login" element={<AuthAlias mode="signin" />} />
+            <Route path="/signup" element={<AuthAlias mode="signup" />} />
             <Route
               path="/forgot-password"
               element={
@@ -104,20 +120,51 @@ createRoot(document.getElementById("root")!).render(
                 </RequireAuth>
               }
             />
+            <Route path="/profile" element={<ProfileRoute />} />
             <Route
-              path="/profile"
+              path="/feed"
               element={
-                <RequireAuth>
-                  <RequireOnboarding>
-                    <Profile />
-                  </RequireOnboarding>
-                </RequireAuth>
+                <RequireMember
+                  title="The feed is for players"
+                  body="Recaps, notes and what the players near you are up to. The map stays open to everyone."
+                >
+                  <Feed />
+                </RequireMember>
               }
             />
-            <Route path="/feed" element={<Feed />} />
-            <Route path="/feed/games" element={<RecommendedGames />} />
-            <Route path="/feed/venues" element={<PopularVenues />} />
-            <Route path="/athlete/:userId" element={<PublicProfile />} />
+            <Route
+              path="/feed/games"
+              element={
+                <RequireMember
+                  title="Recommended games are for players"
+                  body="We match games to your sports, level and week once you have a profile. Browse the map meanwhile."
+                >
+                  <RecommendedGames />
+                </RequireMember>
+              }
+            />
+            <Route
+              path="/feed/venues"
+              element={
+                <RequireMember
+                  title="Popular venues are for players"
+                  body="This ranks courts by what players are actually doing there. Every venue is still on the map."
+                >
+                  <PopularVenues />
+                </RequireMember>
+              }
+            />
+            <Route
+              path="/athlete/:userId"
+              element={
+                <RequireMember
+                  title="Players are visible to players"
+                  body="Profiles, stats and histories are for people with an account — which means they can see yours too."
+                >
+                  <PublicProfile />
+                </RequireMember>
+              }
+            />
             <Route path="/g/:token" element={<RedeemInvite />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

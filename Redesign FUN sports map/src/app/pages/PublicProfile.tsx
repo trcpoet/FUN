@@ -232,7 +232,7 @@ export default function PublicProfile() {
                   onClick={() => {
                     if (!userId) return;
                     if (!user) {
-                      navigate("/login");
+                      navigate("/profile?auth=signin");
                       return;
                     }
                     if (user.id === userId) {

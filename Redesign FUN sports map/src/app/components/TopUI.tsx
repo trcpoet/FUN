@@ -111,6 +111,14 @@ export type TopNavigationProps = {
   liveGamesCount?: number;
   /** Name of the searched place when map is anchored to a search result. */
   mapSearchLocationName?: string | null;
+  /** Warm the account screen's chunk on intent (pointer down / touch start). */
+  onProfilePrefetch?: () => void;
+  /**
+   * A guest reached for a members-only surface; show them the sign-up sheet.
+   * Not used for the profile button — that one opens Profile, which IS the
+   * sign-in screen when signed out.
+   */
+  onGuestGate?: (action: "feed" | "chat") => void;
   /** Clears the map search anchor and resets to user GPS. */
   onClearMapSearch?: () => void;
   /** Trip summary while a route is drawn on the map; non-null is the "route active" signal. */
@@ -178,25 +186,22 @@ export const TopNavigation = (props: TopNavigationProps) => {
     venueSportIntent = null,
     venueSportIntentReady = false,
     onVenueSportIntentChange,
+    onGuestGate,
+    onProfilePrefetch,
   } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const [feedToolbarHintOpen, setFeedToolbarHintOpen] = useState(false);
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { user } = useAuth();
+  /**
+   * Signed out. Controls that only describe an account — presence, alerts — are
+   * not shown at all; the ones that describe the product (Feed, Messages) stay
+   * visible and ask for an account when tapped, because hiding them would hide
+   * what signing up is for.
+   */
+  const guest = !user;
   const reduceMotion = useReducedMotion();
-
-  const FEED_TOOLBAR_HINT_KEY = "fun_map_feed_toolbar_hint_v1";
-  useEffect(() => {
-    try {
-      if (typeof window !== "undefined" && window.localStorage.getItem(FEED_TOOLBAR_HINT_KEY) !== "1") {
-        setFeedToolbarHintOpen(true);
-      }
-    } catch {
-      setFeedToolbarHintOpen(true);
-    }
-  }, []);
 
   // Shrink search when clicking outside (e.g. on the map)
   useEffect(() => {
@@ -218,25 +223,13 @@ export const TopNavigation = (props: TopNavigationProps) => {
       aria-label="Map controls"
       className="absolute top-0 left-0 right-0 z-50 pt-12 px-4 pb-4 bg-gradient-to-b from-[#0A0F1C]/90 via-[#0A0F1C]/50 to-transparent pointer-events-none"
     >
+      {/*
+        No auth controls here. Signing in lives in one place — the profile
+        button, bottom left — for guests and members alike. A map that greets a
+        first-time visitor with two buttons about accounts is asking for a
+        commitment before it has shown them anything worth committing to.
+      */}
       <div className="flex flex-col items-end gap-2">
-        {/* Guest auth controls — signed-in users use bottom-left avatar + settings Terminate Session */}
-        {!user && (
-          <div className="flex items-center gap-2 pointer-events-auto self-start">
-            <Link
-              to="/login"
-              className="inline-flex h-9 items-center rounded-full border border-white/20 bg-slate-900/80 px-3.5 text-sm font-medium text-slate-100 backdrop-blur-xl hover:border-emerald-400/45 hover:text-emerald-300"
-            >
-              Sign in
-            </Link>
-            <Link
-              to="/signup"
-              className="inline-flex h-9 items-center rounded-full bg-emerald-700 px-3.5 text-sm font-medium text-white hover:bg-emerald-600"
-            >
-              Sign up
-            </Link>
-          </div>
-        )}
-
         {/* Row: search, profile, filter — only this row goes full-width when search is open. */}
         <div
           ref={searchWrapRef}
@@ -492,36 +485,10 @@ export const TopNavigation = (props: TopNavigationProps) => {
         <div className="flex w-fit flex-col items-end gap-2 self-end pointer-events-auto">
           {/* Order: Feed (hero) → Live Now → Visibility (tertiary) */}
           <div className="relative flex flex-col items-end gap-2">
-            {feedToolbarHintOpen ? (
-              <div
-                className="absolute right-0 top-full z-[60] mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-primary/35 bg-[#0A0F1C]/95 px-3 py-2.5 text-left shadow-[var(--shadow-control)] backdrop-blur-xl pointer-events-auto"
-                role="status"
-              >
-                <p className="text-xs text-slate-200 leading-snug pr-6">
-                  <span className="font-semibold text-primary">Feed</span> is updates from players and games.{" "}
-                  <span className="text-slate-400">Live</span> highlights what’s on the map right now.
-                </p>
-                <button
-                  type="button"
-                  className="absolute right-2 top-2 rounded-md p-1 text-slate-500 hover:bg-white/10 hover:text-slate-200"
-                  aria-label="Dismiss"
-                  onClick={() => {
-                    try {
-                      window.localStorage.setItem(FEED_TOOLBAR_HINT_KEY, "1");
-                    } catch {
-                      /* ignore */
-                    }
-                    setFeedToolbarHintOpen(false);
-                  }}
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-            ) : null}
             <div className="inline-flex items-center p-1">
               <button
                 type="button"
-                onClick={() => navigate("/feed")}
+                onClick={() => (guest ? onGuestGate?.("feed") : navigate("/feed"))}
                 className={cn(
                   "inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold",
                   "bg-primary text-primary-foreground shadow-[0_12px_36px_rgba(34,211,238,0.28)]",
@@ -560,6 +527,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
               </div>
             </div>
 
+            {guest ? null : (
             <button
               type="button"
               onClick={() => {
@@ -594,11 +562,13 @@ export const TopNavigation = (props: TopNavigationProps) => {
                     : "Public"}
               </span>
             </button>
+            )}
           </div>
 
           {/* Map tools: grouped column — alerts / chats (labels clarify icon-only controls) */}
           <div className="flex flex-col items-end gap-1">
             <div className="flex flex-col items-center gap-1.5">
+              {guest ? null : (
               <div className="flex flex-col items-center gap-0.5">
                 <Popover>
                   <PopoverTrigger asChild>
@@ -660,6 +630,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   </PopoverContent>
                 </Popover>
               </div>
+              )}
               {onOpenMessages ? (
                 <div className="flex flex-col items-center gap-0.5">
                   <button
@@ -789,6 +760,8 @@ export const TopNavigation = (props: TopNavigationProps) => {
             whileTap={{ scale: 0.95 }}
             type="button"
             onClick={onOpenProfile}
+            onPointerEnter={onProfilePrefetch}
+            onTouchStart={onProfilePrefetch}
             className={cn(
               "relative size-20 rounded-full overflow-hidden transition-all duration-300",
               "border-2 border-white/30 bg-slate-900 shadow-[0_12px_36px_rgba(0,0,0,0.5)]",

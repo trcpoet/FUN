@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { useAuth } from "../contexts/AuthContext";
 import { uploadAvatarImage } from "../../lib/api";
@@ -7,6 +7,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { GENDER_OPTIONS, type Gender } from "../../lib/gamePreferenceOptions";
+import { safeReturnTo } from "../../lib/guestAccess";
 
 export default function Onboarding() {
   const { displayName, avatarUrl, gender: savedGender, updateProfile, refetch } = useMyProfile();
@@ -17,6 +18,13 @@ export default function Onboarding() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation() as { state?: { from?: string } };
+  /**
+   * Whatever sent them here — a game they tried to join, a note they tried to
+   * reply to. Onboarding used to end on the profile page, which is the one screen
+   * a brand-new account has nothing on.
+   */
+  const returnTo = safeReturnTo(location.state?.from);
 
   React.useEffect(() => {
     if (displayName != null) setName(displayName);
@@ -65,7 +73,7 @@ export default function Onboarding() {
     }
     await refetch();
     await refetchProfile();
-    navigate("/profile", { replace: true });
+    navigate(returnTo ?? "/", { replace: true });
   };
 
   return (
