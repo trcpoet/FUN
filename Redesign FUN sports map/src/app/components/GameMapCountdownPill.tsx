@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
+import { useSharedNow } from "../../hooks/useSharedNow";
 import type { GameRow } from "../../lib/supabase";
 import {
   formatUrgentCountdown,
@@ -48,11 +49,10 @@ export function GameMapCountdownPill({
   game: GameRow;
   corner?: "top-right" | "top-left";
 }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+  // Shared clock: one interval for every pill on the map instead of one each.
+  // These render into isolated React roots, so 72 pins meant 72 uncoordinated
+  // 1Hz timers each triggering its own render pass.
+  const now = useSharedNow(1000);
 
   const pos = corner === "top-left" ? posTopLeft : posTopRight;
 
@@ -80,11 +80,7 @@ export function ColocatedGameCountdownPill({
   games: GameRow[];
   countBadgeVisible: boolean;
 }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+  const now = useSharedNow(1000); // shared clock — see the note on the pill above
 
   if (games.every(isVenueGame)) return null;
 

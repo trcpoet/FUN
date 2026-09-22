@@ -12,9 +12,14 @@ const MapboxMap = React.lazy(() =>
 );
 import { TopNavigation } from "./components/TopUI";
 import { BottomCarousel } from "./components/BottomCarousel";
-import { GameMessengerSheet } from "./components/GameMessengerSheet";
+const GameMessengerSheet = React.lazy(() =>
+  import("./components/GameMessengerSheet").then((m) => ({ default: m.GameMessengerSheet }))
+);
 import type { MessengerThreadFocus, PlanRematchPayload } from "./components/GameMessengerSheet";
-import { CreateGameModal, type CreateGamePrefill } from "./components/CreateGameModal";
+import type { CreateGamePrefill } from "./components/CreateGameModal";
+const CreateGameModal = React.lazy(() =>
+  import("./components/CreateGameModal").then((m) => ({ default: m.CreateGameModal }))
+);
 import { toast } from "sonner";
 import { FiltersModal, type FiltersState, DEFAULT_FILTERS } from "./components/FiltersModal";
 import { useGeolocation, getLastKnownCoords } from "../hooks/useGeolocation";
@@ -24,7 +29,7 @@ import { useUnifiedSearch } from "../hooks/useUnifiedSearch";
 import { SEARCH_DEBOUNCE_MS } from "../lib/searchConstants";
 import type { ForwardGeocodeFeature } from "../lib/geocoding";
 import { gamesMatchingSport, closestGame } from "../lib/sportSearch";
-import type { DmInboxRow, GameInboxRow, ProfileSearchRow } from "../lib/supabase";
+import type { DmInboxRow, GameInboxRow, ProfileNearbyRow, ProfileSearchRow } from "../lib/supabase";
 import { useMyProfile } from "../hooks/useMyProfile";
 import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
@@ -33,7 +38,10 @@ import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById, fetchVenueById } from "../lib/api";
 import { isPermissionDenied, friendlyRpcError } from "../lib/rpcErrors";
 import { retryTransient } from "../lib/retryTransient";
-import { SignInGate, type SignInGateAction } from "./components/SignInGate";
+import type { SignInGateAction } from "./components/SignInGate";
+const SignInGate = React.lazy(() =>
+  import("./components/SignInGate").then((m) => ({ default: m.SignInGate }))
+);
 import {
   fetchDirections,
   formatDirectionsSummary,
@@ -60,8 +68,18 @@ import {
   type VenueSportIntent,
 } from "./lib/venueSportIntent";
 
-const DEFAULT_AVATAR_IMAGE =
-  "https://images.unsplash.com/photo-1624280184393-53ce60e214ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=100";
+const DEFAULT_AVATAR_IMAGE = "/default-avatar.svg";
+
+/**
+ * Stable identity for "no nearby profiles yet".
+ *
+ * `nearbyProfiles ?? []` allocated a fresh array on every App render, and that
+ * array is a dependency of MapboxMap's player-marker effect — so all 50 player
+ * markers were torn down and hand-rebuilt (~30 createElement calls each) every
+ * time anything in App re-rendered. Same pattern as EMPTY_GEOJSON in
+ * lib/sportsVenues.ts.
+ */
+const EMPTY_PROFILES: ProfileNearbyRow[] = [];
 
 const LOCATION_SEARCH_ZOOM = 12.5;
 const FAR_SPORT_ZOOM = 11.5;
@@ -336,6 +354,12 @@ export default function App() {
   const [messengerFocus, setMessengerFocus] = useState<MessengerThreadFocus | null>(null);
   const [mapNotes, setMapNotes] = useState<MapNoteRow[]>([]);
   const [activeMapNote, setActiveMapNote] = useState<MapNoteRow | null>(null);
+  /**
+   * Stable across renders because MapboxMap lists it in the dependency array of
+   * the note-marker effect: an inline arrow here rebuilt every note marker
+   * (each one re-parsing an inline SVG through innerHTML) on every App render.
+   */
+  const handleOpenNoteThread = useCallback((note: MapNoteRow) => setActiveMapNote(note), []);
   /** Idle prefetch so opening Messages isn't blocked by cold RPCs. */
   const [gameInboxBootstrap, setGameInboxBootstrap] = useState<GameInboxRow[] | null>(null);
   const [dmInboxBootstrap, setDmInboxBootstrap] = useState<DmInboxRow[] | null>(null);
@@ -854,7 +878,15 @@ export default function App() {
   const avatarGlbUrl = avatarIdToGlbUrl(avatarId);
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-[#0A0F1C] font-sans selection:bg-emerald-500/30">
+    // `main` + `h1` rather than a bare div: this route had no landmark and no
+    // heading at all, which failed Lighthouse's bypass audit and left screen
+    // readers with no way to orient. Every other route (Feed, PopularVenues,
+    // RecommendedGames, Profile) already does this; `/` was the outlier. The
+    // heading is visually hidden because the map itself is the page's title
+    // treatment, and it also gives BottomCarousel's per-card `h3` a level to
+    // descend from instead of starting the document at h3.
+    <main className="relative h-screen w-full overflow-hidden bg-[#0A0F1C] font-sans selection:bg-emerald-500/30">
+      <h1 className="sr-only">FUN — find and join pickup sports games near you</h1>
       {activeMapNote ? (
           <NoteThreadDialog
             open={true}
@@ -881,8 +913,8 @@ export default function App() {
           userCoords={effectiveUserCoords}
           games={mapGames}
           notes={mapNotes}
-          onOpenNoteThread={(note) => setActiveMapNote(note)}
-          nearbyProfiles={nearbyProfiles ?? []}
+          onOpenNoteThread={handleOpenNoteThread}
+          nearbyProfiles={nearbyProfiles ?? EMPTY_PROFILES}
           selectedGameId={selectedGame?.id ?? null}
           selectedVenue={selectedVenue}
           onSelectGame={setSelectedGame}
@@ -1095,6 +1127,15 @@ export default function App() {
         />
       </div>
 
+      {/*
+        These three never render on first paint, so they are code-split out of
+        the App chunk (they pull the Radix dialog/select cluster with them).
+        One boundary for the group; `null` because a spinner behind a closed
+        modal would be worse than nothing.
+        FiltersModal is deliberately NOT here: DEFAULT_FILTERS is read at module
+        scope by readPersistedFilters, so its module loads eagerly regardless.
+      */}
+      <Suspense fallback={null}>
       <GameMessengerSheet
         open={messagesOpen}
         onOpenChange={setMessagesOpen}
@@ -1209,6 +1250,7 @@ export default function App() {
       />
 
       <SignInGate action={signInGate} onClose={() => setSignInGate(null)} />
-    </div>
+      </Suspense>
+    </main>
   );
 }

@@ -63,7 +63,7 @@
   margin: 0;
   font-size: 0.875rem;
   font-weight: 500;
-  color: #64748b;
+  color: #94a3b8; /* 7.5:1 on #0a0f1c; #64748b was 3.88:1 and failed contrast */
 }
 
 @keyframes fun-orbit-spin {

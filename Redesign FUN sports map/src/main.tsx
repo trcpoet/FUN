@@ -49,7 +49,7 @@ class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBo
             </p>
             <button
               type="button"
-              className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+              className="mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600"
               onClick={() => window.location.reload()}
             >
               Reload
