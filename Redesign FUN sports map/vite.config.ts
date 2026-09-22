@@ -167,6 +167,17 @@ export default defineConfig(({ mode }) => {
           // tiny standalone chunk so mapbox-gl stays purely lazy (loaded only when
           // the map mounts). No-op if the id ever stops matching.
           if (id.includes("commonjsHelpers")) return "cjs-helpers";
+          // React itself, in its own chunk. Left unassigned, Rollup folded
+          // react-dom + scheduler into `radix`, react core into `icons` and the
+          // JSX runtime into `motion` — so every profile and Lighthouse report
+          // billed React's render time to a UI library that was not running.
+          // The trailing slashes matter: `react-router` must not match here.
+          if (
+            id.includes("node_modules/react/") ||
+            id.includes("node_modules/react-dom/") ||
+            id.includes("node_modules/scheduler/")
+          )
+            return "react";
           if (id.includes("node_modules/mapbox-gl")) return "mapbox";
           if (id.includes("node_modules/three")) return "three";
 

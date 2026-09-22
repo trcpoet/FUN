@@ -55,6 +55,7 @@ import { visibilityEnumToLabel } from "../lib/gamePreferenceOptions";
 import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow, MapNoteRow } from "../lib/supabase";
 import { filterGamesVisibleOnMap, isGameInLiveWindow } from "../lib/mapGameTimer";
+import { useStableItems } from "../lib/stableItems";
 import { gameMatchesFilters, countMatchingGames, deriveDefaultFiltersFromProfile, gameVisibleToViewer } from "./lib/gameFilters";
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
 import { readFollowedIds, writeFollowedIds } from "../lib/localFollows";
@@ -351,6 +352,20 @@ export default function App() {
   const [hostGameIds, setHostGameIds] = useState<Set<string>>(new Set());
   const [substituteGameIds, setSubstituteGameIds] = useState<Set<string>>(new Set());
   const [messagesOpen, setMessagesOpen] = useState(false);
+  /**
+   * Both sheets are code-split, but rendering them closed still downloads and
+   * mounts them (107KB together) while the map is fetching mapbox-gl and its
+   * tiles. Mount on first open instead, and keep them mounted afterwards so the
+   * close animation and their internal state survive.
+   */
+  const [messengerMounted, setMessengerMounted] = useState(false);
+  const [createGameMounted, setCreateGameMounted] = useState(false);
+  useEffect(() => {
+    if (messagesOpen) setMessengerMounted(true);
+  }, [messagesOpen]);
+  useEffect(() => {
+    if (createGameOpen) setCreateGameMounted(true);
+  }, [createGameOpen]);
   const [messengerFocus, setMessengerFocus] = useState<MessengerThreadFocus | null>(null);
   const [mapNotes, setMapNotes] = useState<MapNoteRow[]>([]);
   const [activeMapNote, setActiveMapNote] = useState<MapNoteRow | null>(null);
@@ -551,13 +566,16 @@ export default function App() {
 
   // Guests get a friendly "sign in to continue" sheet instead of a hard redirect.
   const [signInGate, setSignInGate] = useState<SignInGateAction | null>(null);
-  const ensureSession = async (action: SignInGateAction = "join"): Promise<boolean> => {
-    if (currentUserId) return true;
-    const { data: { session } } = await supabase!.auth.getSession();
-    if (session?.user) return true;
-    setSignInGate(action);
-    return false;
-  };
+  const ensureSession = useCallback(
+    async (action: SignInGateAction = "join"): Promise<boolean> => {
+      if (currentUserId) return true;
+      const { data: { session } } = await supabase!.auth.getSession();
+      if (session?.user) return true;
+      setSignInGate(action);
+      return false;
+    },
+    [currentUserId]
+  );
 
   const reloadJoinedGameIds = useCallback(async () => {
     if (!supabase || !currentUserId) return;
@@ -856,9 +874,15 @@ export default function App() {
     return displayGames.filter((g) => isGameInLiveWindow(g, now));
   }, [displayGames, mapMinuteEpoch]);
 
-  const mapGames = useMemo(
-    () => (liveNowOpen ? liveStripGames : displayGames),
-    [liveNowOpen, liveStripGames, displayGames]
+  // Stable identity while the contents are unchanged. Every list above is
+  // re-derived on the 60s tick, and this array is a dependency of MapboxMap's
+  // marker effects — so without this, a minute passing rebuilt every DOM marker
+  // and its React root to redraw exactly what was already on screen.
+  const mapGames = useStableItems(
+    useMemo(
+      () => (liveNowOpen ? liveStripGames : displayGames),
+      [liveNowOpen, liveStripGames, displayGames]
+    )
   );
 
   // Venue layer follows ONLY the dedicated venue sport menu — NOT the game sport
@@ -1136,6 +1160,7 @@ export default function App() {
         scope by readPersistedFilters, so its module loads eagerly regardless.
       */}
       <Suspense fallback={null}>
+      {messengerMounted ? (
       <GameMessengerSheet
         open={messagesOpen}
         onOpenChange={setMessagesOpen}
@@ -1191,6 +1216,7 @@ export default function App() {
         }}
 
       />
+      ) : null}
 
       <FiltersModal
         open={filtersOpen}
@@ -1218,6 +1244,7 @@ export default function App() {
         }}
       />
 
+      {createGameMounted ? (
       <CreateGameModal
         open={createGameOpen}
         onOpenChange={(next) => {
@@ -1248,6 +1275,7 @@ export default function App() {
           void reloadJoinedGameIds();
         }}
       />
+      ) : null}
 
       <SignInGate action={signInGate} onClose={() => setSignInGate(null)} />
       </Suspense>
