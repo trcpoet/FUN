@@ -193,12 +193,12 @@ export const BottomCarousel = ({
                   {game.title}
                 </h3>
                 {game.description?.trim() ? (
-                  <p className="text-[11px] text-slate-400 leading-snug mb-1 line-clamp-2 drop-shadow-md">
+                  <p className="text-[11px] text-slate-300 leading-snug mb-1 line-clamp-2 drop-shadow-md">
                     {game.description.trim()}
                   </p>
                 ) : null}
                 <p className="text-[13px] text-slate-300 font-medium mb-1 drop-shadow-md">{game.sport}</p>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400 mb-2">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-300 mb-2">
                   <span className="flex items-center gap-1">
                     <Clock className="w-2.5 h-2.5 shrink-0" />
                     {game.starts_at
@@ -229,7 +229,7 @@ export const BottomCarousel = ({
                       isJoined
                         ? isHost
                           ? "bg-amber-600/30 text-amber-200 border border-amber-500/40 cursor-pointer"
-                          : "bg-slate-600 text-slate-400 cursor-pointer"
+                          : "bg-slate-600 text-slate-200 cursor-pointer"
                         : "bg-orange-500 text-slate-950 shadow-orange-500/30"
                     )}
                   >

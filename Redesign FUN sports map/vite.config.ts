@@ -169,6 +169,22 @@ export default defineConfig(({ mode }) => {
           if (id.includes("commonjsHelpers")) return "cjs-helpers";
           if (id.includes("node_modules/mapbox-gl")) return "mapbox";
           if (id.includes("node_modules/three")) return "three";
+
+          // lucide-react ships one ES module per icon. Rollup promotes any
+          // module reachable from two or more async chunks into its own shared
+          // chunk — and since App plus ~11 lazy page chunks each pull
+          // overlapping icon sets, that produced roughly THIRTY sub-1.5KB
+          // requests on first navigation (chevron-down.js at 0.85KB,
+          // loader-circle.js at 0.86KB, lock.js at 0.92KB, and so on). 117
+          // distinct icons are imported across 77 sites, all via the barrel.
+          // One chunk for the icon set trades a few KB of over-fetch for ~30
+          // fewer round trips.
+          if (id.includes("node_modules/lucide-react")) return "icons";
+          // Same shape, smaller blast radius: the Radix primitives are pulled
+          // by both eager and lazy components.
+          if (id.includes("node_modules/@radix-ui")) return "radix";
+          if (id.includes("node_modules/motion") || id.includes("node_modules/framer-motion"))
+            return "motion";
         },
       },
     },

@@ -212,7 +212,12 @@ export const TopNavigation = (props: TopNavigationProps) => {
   }, [searchExpanded]);
 
   return (
-    <div className="absolute top-0 left-0 right-0 z-50 pt-12 px-4 pb-4 bg-gradient-to-b from-[#0A0F1C]/90 via-[#0A0F1C]/50 to-transparent pointer-events-none">
+    // `nav` rather than a div: the map route had no landmark regions at all,
+    // so this is one of the two that give screen readers something to jump to.
+    <nav
+      aria-label="Map controls"
+      className="absolute top-0 left-0 right-0 z-50 pt-12 px-4 pb-4 bg-gradient-to-b from-[#0A0F1C]/90 via-[#0A0F1C]/50 to-transparent pointer-events-none"
+    >
       <div className="flex flex-col items-end gap-2">
         {/* Guest auth controls — signed-in users use bottom-left avatar + settings Terminate Session */}
         {!user && (
@@ -225,7 +230,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
             </Link>
             <Link
               to="/signup"
-              className="inline-flex h-9 items-center rounded-full bg-emerald-600 px-3.5 text-sm font-medium text-white hover:bg-emerald-500"
+              className="inline-flex h-9 items-center rounded-full bg-emerald-700 px-3.5 text-sm font-medium text-white hover:bg-emerald-600"
             >
               Sign up
             </Link>
@@ -421,7 +426,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                                               <span className="block text-xs text-slate-500 mt-0.5 truncate">{sub}</span>
                                             ) : null}
                                             {dist ? (
-                                              <span className="block text-[11px] text-slate-600 mt-0.5">{dist} away</span>
+                                              <span className="block text-[11px] text-slate-400 mt-0.5">{dist} away</span>
                                             ) : null}
                                           </span>
                                         </button>
@@ -807,7 +812,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
           )}
         </div>
       </div>
-    </div>
+    </nav>
   );
 };
 

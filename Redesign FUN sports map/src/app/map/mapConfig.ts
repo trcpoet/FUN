@@ -285,6 +285,26 @@ export function getCinematicTier(_isMobile: boolean): CinematicTier {
   return "full";
 }
 
+/**
+ * Per-frame budget for the venue halo pulse, in ms between ticks.
+ *
+ * `Infinity` means "do not run the loop at all" — the caller writes the
+ * resting values once and stops. Reduced-motion users land there via
+ * `getCinematicTier`, which is also why this reuses that tier rather than
+ * introducing a second motion switch. `lite` exists so the pulse can be
+ * halved without being removed.
+ */
+export function getPulseTickMs(tier: CinematicTier): number {
+  if (tier === "full") return 50; // 20Hz
+  if (tier === "lite") return 100; // 10Hz
+  return Number.POSITIVE_INFINITY;
+}
+
+/** Whether the ambient game-icon wobble runs at all. Off below `full`. */
+export function getWobbleEnabled(tier: CinematicTier): boolean {
+  return tier === "full";
+}
+
 /** Intro camera tilt after first tiles paint (idle). */
 export function getCinematicIntroPitch(tier: CinematicTier): number {
   if (tier === "full") return 62;

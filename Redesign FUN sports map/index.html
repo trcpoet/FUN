@@ -3,10 +3,13 @@
   <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    />
+    <!--
+      Do not re-add `maximum-scale=1.0, user-scalable=no`. It blocks pinch-zoom
+      outright, which fails Lighthouse's accessibility audit and locks out
+      anyone who needs to magnify the map. `touch-action` on the specific
+      gesture surfaces is the right tool if a control ever needs to opt out.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -35,7 +38,7 @@
       .fun-orbit-loader__icon:nth-child(4){--angle:180deg}
       .fun-orbit-loader__icon:nth-child(5){--angle:240deg}
       .fun-orbit-loader__icon:nth-child(6){--angle:300deg}
-      .fun-orbit-loader__tagline{margin:0;font-size:.875rem;font-weight:500;color:#64748b}
+      .fun-orbit-loader__tagline{margin:0;font-size:.875rem;font-weight:500;color:#94a3b8}
       @keyframes fun-orbit-spin{to{transform:rotate(360deg)}}
       @media (prefers-reduced-motion:reduce){.fun-orbit-loader__orbit{animation:none}.fun-orbit-loader__icon{transform:rotate(var(--angle)) translateY(-3.5rem) rotate(calc(-1 * var(--angle)))}}
     </style>
