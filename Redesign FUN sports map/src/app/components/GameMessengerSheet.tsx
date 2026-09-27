@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Send, Share2, StickyNote, Users } from "lucide-react";
+import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Share2, StickyNote, Users } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
   Sheet,
@@ -41,7 +41,7 @@ import {
   unarchiveGameChat,
 } from "../../lib/gameChat";
 import { fetchDmMessages, fetchMyDmInbox, sendDmMessage, subscribeDmMessages } from "../../lib/dmChat";
-import { badgeText, clearUnread, getUnreadCount, incrementUnread, threadKey } from "../../lib/unreadCounts";
+import { clearUnread, getUnreadCount, incrementUnread, threadKey } from "../../lib/unreadCounts";
 import {
   formatUrgentCountdown,
   getCountdownRemainingMs,
@@ -57,7 +57,18 @@ import {
   subscribeNoteComments,
 } from "../../lib/api";
 import { InviteAdminPanel } from "./chat/InviteAdminPanel";
-import { useChatTrust, type ChatTrust, trustBadgeLabel } from "../../hooks/useChatTrust";
+import { Composer } from "./chat/Composer";
+import { InboxRow } from "./chat/InboxRow";
+import { MessageList } from "./chat/MessageList";
+import { NoteThreadHeaderCard } from "./chat/NoteThreadHeaderCard";
+import { TrustBadge } from "./chat/TrustBadge";
+import {
+  dmMessageToChat,
+  gameMessageToChat,
+  noteCommentToChat,
+  type ChatMessage,
+} from "./chat/messageTypes";
+import { useChatTrust, type ChatTrust } from "../../hooks/useChatTrust";
 import { NoteCommentLikeButton } from "./feed/NoteCommentLikeButton";
 import { GameActionBar } from "./game/GameActionBar";
 import { gameViewerRole } from "../lib/gameViewerRole";
@@ -236,37 +247,6 @@ function threadScheduleLines(
     return { timeLine, countdownLine: `${formatUrgentCountdown(rem)} left on map`, ended: false };
   }
   return { timeLine: "Set time", countdownLine: "", ended: false };
-}
-
-function TrustBadge({ trust }: { trust: ChatTrust | undefined }) {
-  const label = trustBadgeLabel(trust);
-  if (!label) return null;
-  if (trust === "self") return null;
-  const tone = (() => {
-    switch (trust) {
-      case "stranger":
-        return "border-slate-500/40 bg-slate-700/30 text-slate-300";
-      case "host":
-        return "border-amber-400/40 bg-amber-500/15 text-amber-200";
-      case "friend":
-      case "mutual":
-        return "border-emerald-400/40 bg-emerald-500/15 text-emerald-200";
-      default:
-        return "border-white/10 bg-white/5 text-slate-300";
-    }
-  })();
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide",
-        tone,
-      )}
-      aria-label={label}
-      title={label}
-    >
-      {label}
-    </span>
-  );
 }
 
 function SquadMemberRow({
@@ -1086,6 +1066,75 @@ export function GameMessengerSheet({
         : `${participantTotal} ${participantTotal === 1 ? "player" : "players"}${spotsLeft != null ? ` · ${spotsLeft} spots left` : ""}`
       : "";
 
+  /**
+   * The thread's messages, normalised.
+   *
+   * One list for all three kinds. Which table they came from stops mattering
+   * here; what differs downstream is who is named, who is veiled and what sits
+   * next to the timestamp, and those are the three functions below.
+   */
+  const chatMessages = useMemo<ChatMessage[]>(() => {
+    if (focusThread?.kind === "dm") return dmMessages.map(dmMessageToChat);
+    if (focusThread?.kind === "note") return noteComments.map(noteCommentToChat);
+    if (focusThread?.kind === "game") return messages.map(gameMessageToChat);
+    return [];
+  }, [focusThread, dmMessages, noteComments, messages]);
+
+  const chatLoading =
+    focusThread?.kind === "dm"
+      ? dmMessagesLoading
+      : focusThread?.kind === "note"
+        ? noteCommentsLoading
+        : messagesLoading;
+
+  const isNoteThread = focusThread?.kind === "note";
+
+  /** A group thread names its speakers; a 1:1 does not need to. */
+  const chatAuthorFor = useCallback(
+    (m: ChatMessage) => {
+      if (!m.authorId) return null;
+      return {
+        displayName: nameForUserId(m.authorId),
+        avatarUrl: avatarForUserId(m.authorId),
+        badge: <TrustBadge trust={trustByUserId.get(m.authorId)} />,
+      };
+    },
+    [nameForUserId, avatarForUserId, trustByUserId],
+  );
+
+  /** Strangers in a public game chat start behind one tap. */
+  const chatVeilFor = useCallback(
+    (m: ChatMessage) => {
+      if (!isPublicChat || !m.authorId) return null;
+      if (currentUserId != null && m.authorId === currentUserId) return null;
+      if (trustByUserId.get(m.authorId) !== "stranger") return null;
+      if (revealedMessageIds.has(m.id)) return null;
+      return {
+        label: "Stranger sent a message — tap to read",
+        onReveal: () => revealMessage(m.id),
+      };
+    },
+    [isPublicChat, currentUserId, trustByUserId, revealedMessageIds, revealMessage],
+  );
+
+  /** Only a note comment can be liked. */
+  const chatFooterSlotFor = useCallback(
+    (m: ChatMessage) => {
+      if (!m.noteComment) return null;
+      const mine = currentUserId != null && m.authorId === currentUserId;
+      return (
+        <NoteCommentLikeButton
+          comment={m.noteComment}
+          className={cn(
+            "px-1.5 py-0",
+            mine ? "text-violet-50/90 hover:text-rose-200" : "text-slate-400 hover:text-rose-300",
+          )}
+        />
+      );
+    },
+    [currentUserId],
+  );
+
   // Mark thread read when opened.
   useEffect(() => {
     if (!open || !focusThread) return;
@@ -1442,7 +1491,6 @@ export function GameMessengerSheet({
                   const renderRow = (row: GameInboxRow, ended: boolean) => {
                     void unreadTick;
                     const unread = getUnreadCount(threadKey("game", row.id));
-                    const badge = badgeText(unread);
                     const openThread = () => {
                       setThreadExpanded(inboxExpanded);
                       onFocusThreadChange({
@@ -1467,31 +1515,12 @@ export function GameMessengerSheet({
                     };
                     return (
                       <li key={row.id}>
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={openThread}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openThread();
-                            }
-                          }}
-                          className={cn(
-                            "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
-                            ended
-                              ? "border-white/[0.05] bg-white/[0.015] hover:bg-white/[0.04] opacity-90"
-                              : "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
-                            "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
-                            "hover:border-cyan-300/20",
-                            "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
-                          )}
+                        <InboxRow
+                          unread={unread}
+                          onOpen={openThread}
+                          ended={ended}
+                          label={`${row.title} — open chat`}
                         >
-                          {badge ? (
-                            <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums text-white shadow ring-2 ring-[#0b1020]">
-                              {badge}
-                            </span>
-                          ) : null}
                           <div className="flex justify-between gap-2 items-center">
                             <span className="flex items-center gap-1.5 min-w-0 flex-1">
                               <span className="font-semibold text-slate-100 text-sm truncate">
@@ -1557,7 +1586,7 @@ export function GameMessengerSheet({
                               {format(new Date(row.last_message_at), "MMM d, h:mm a")}
                             </p>
                           )}
-                        </div>
+                        </InboxRow>
                       </li>
                     );
                   };
@@ -1598,7 +1627,6 @@ export function GameMessengerSheet({
                 const renderNoteRow = (row: NoteInboxRow) => {
                     void unreadTick;
                     const unread = getUnreadCount(threadKey("note", row.id));
-                    const badge = badgeText(unread);
                     const visLabel =
                       row.visibility === "friends"
                         ? "Friends"
@@ -1626,29 +1654,11 @@ export function GameMessengerSheet({
                         : "Pinned to this location";
                     return (
                       <li key={row.id}>
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={openThread}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openThread();
-                            }
-                          }}
-                          className={cn(
-                            "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
-                            "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
-                            "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
-                            "hover:border-cyan-300/20",
-                            "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
-                          )}
+                        <InboxRow
+                          unread={unread}
+                          onOpen={openThread}
+                          label={`${row.is_author ? "Your note" : "Note"} — open thread`}
                         >
-                          {badge ? (
-                            <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums text-white shadow ring-2 ring-[#0b1020]">
-                              {badge}
-                            </span>
-                          ) : null}
                           <div className="flex items-start gap-3">
                             <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-300">
                               <StickyNote className="size-4" aria-hidden />
@@ -1688,7 +1698,7 @@ export function GameMessengerSheet({
                               </p>
                             </div>
                           </div>
-                        </div>
+                        </InboxRow>
                       </li>
                     );
                   };
@@ -1772,7 +1782,6 @@ export function GameMessengerSheet({
                 {dmInbox.map((row) => {
                   void unreadTick;
                   const unread = getUnreadCount(threadKey("dm", row.thread_id));
-                  const badge = badgeText(unread);
                   const label = row.display_name?.trim() || "Player";
                   const openThread = () => {
                     setThreadExpanded(false);
@@ -1786,29 +1795,11 @@ export function GameMessengerSheet({
                   };
                   return (
                     <li key={row.thread_id}>
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={openThread}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            openThread();
-                          }
-                        }}
-                        className={cn(
-                          "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
-                          "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
-                          "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
-                          "hover:border-cyan-300/20",
-                          "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
-                        )}
+                      <InboxRow
+                        unread={unread}
+                        onOpen={openThread}
+                        label={`${label} — open conversation`}
                       >
-                        {badge ? (
-                          <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums text-white shadow ring-2 ring-[#0b1020]">
-                            {badge}
-                          </span>
-                        ) : null}
                         <div className="flex items-start gap-3">
                           <Avatar className="size-10 shrink-0 border border-white/10">
                             {row.avatar_url?.trim() ? (
@@ -1832,7 +1823,7 @@ export function GameMessengerSheet({
                             </p>
                           </div>
                         </div>
-                      </div>
+                      </InboxRow>
                     </li>
                   );
                 })}
@@ -1863,245 +1854,65 @@ export function GameMessengerSheet({
                   className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_20%_0%,rgba(34,211,238,0.12),transparent_45%),radial-gradient(900px_circle_at_85%_35%,rgba(124,58,237,0.14),transparent_52%)]"
                 />
                 <div className="relative flex-1 overflow-y-auto px-3 py-2 space-y-2">
-                {focusThread?.kind === "dm" ? (
-                  dmMessagesLoading ? (
-                    <div className="flex justify-center py-12 text-slate-500">
-                      <Loader2 className="w-8 h-8 animate-spin opacity-60" />
-                    </div>
-                  ) : (
-                    dmMessages.map((m) => {
-                      const mine = currentUserId != null && m.user_id === currentUserId;
-                      return (
-                        <div key={m.id} className={cn("flex", mine ? "justify-end" : "justify-start")}>
-                          <div
-                            className={cn(
-                              "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
-                              mine
-                                ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
-                                : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
-                            )}
-                          >
-                            <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                            <p className={cn("text-[10px] mt-1 opacity-70", mine ? "text-violet-50/90" : "text-slate-400/80")}>
-                              {format(new Date(m.created_at), "h:mm a")}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )
-                ) : focusThread?.kind === "note" ? (
-                  <>
-                    {/* Pinned post bubble — the note body itself. */}
-                    {(activeNote?.body ?? focusThread.body)?.trim() ? (
-                      <div className="flex justify-start">
-                        <div className="max-w-[92%] rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.07] px-3 py-2 shadow-[0_10px_26px_rgba(0,0,0,0.25)]">
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-300/80 mb-1">
-                            Note
-                          </p>
-                          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-100">
-                            {activeNote?.body ?? focusThread.body}
-                          </p>
-                          <p className="text-[10px] mt-1 text-slate-500">
-                            {(activeNote?.created_at ?? focusThread.createdAt)
-                              ? format(
-                                  new Date(activeNote?.created_at ?? focusThread.createdAt!),
-                                  "MMM d · h:mm a",
-                                )
-                              : ""}
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-                    {noteCommentsLoading ? (
-                      <div className="flex justify-center py-8 text-slate-500">
-                        <Loader2 className="w-6 h-6 animate-spin opacity-60" />
-                      </div>
-                    ) : noteComments.length === 0 ? (
+                <MessageList
+                  messages={chatMessages}
+                  loading={chatLoading}
+                  currentUserId={currentUserId}
+                  header={
+                    isNoteThread && (activeNote?.body ?? focusThread.body)?.trim() ? (
+                      <NoteThreadHeaderCard
+                        body={(activeNote?.body ?? focusThread.body) as string}
+                        createdAt={activeNote?.created_at ?? focusThread.createdAt}
+                      />
+                    ) : null
+                  }
+                  empty={
+                    isNoteThread ? (
                       <p className="text-xs text-slate-500 text-center py-6">
                         Be the first to reply.
                       </p>
-                    ) : (
-                      noteComments.map((c) => {
-                        const mine = currentUserId != null && c.user_id === currentUserId;
-                        return (
-                          <div key={c.id} className={cn("flex", mine ? "justify-end" : "justify-start")}>
-                            <div
-                              className={cn(
-                                "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
-                                mine
-                                  ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
-                                  : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
-                              )}
-                            >
-                              <p className="whitespace-pre-wrap break-words">{c.body}</p>
-                              <div
-                                className={cn(
-                                  "mt-1 flex items-center justify-between gap-2 opacity-90",
-                                )}
-                              >
-                                <p
-                                  className={cn(
-                                    "text-[10px] opacity-80",
-                                    mine ? "text-violet-50/90" : "text-slate-400/80",
-                                  )}
-                                >
-                                  {format(new Date(c.created_at), "h:mm a")}
-                                </p>
-                                <NoteCommentLikeButton
-                                  comment={c}
-                                  className={cn(
-                                    "px-1.5 py-0",
-                                    mine
-                                      ? "text-violet-50/90 hover:text-rose-200"
-                                      : "text-slate-400 hover:text-rose-300",
-                                  )}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </>
-                ) : messagesLoading ? (
-                  <div className="flex justify-center py-12 text-slate-500">
-                    <Loader2 className="w-8 h-8 animate-spin opacity-60" />
-                  </div>
-                ) : (
-                  messages.map((m) => {
-                    const mine = currentUserId != null && m.user_id === currentUserId;
-                    const senderLabel = nameForUserId(m.user_id);
-                    const senderAvatarUrl = avatarForUserId(m.user_id);
-                    const senderTrust = trustByUserId.get(m.user_id);
-                    const isStranger = !mine && senderTrust === "stranger";
-                    const collapsedByDefault = isPublicChat && isStranger;
-                    const revealed = revealedMessageIds.has(m.id);
-                    const showCollapsed = collapsedByDefault && !revealed;
-                    return (
-                      <div
-                        key={m.id}
-                        className={cn("flex", mine ? "justify-end" : "justify-start")}
-                      >
-                        <div
-                          className={cn(
-                            "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
-                            mine
-                              ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
-                              : showCollapsed
-                                ? "bg-slate-800/40 text-slate-400 border-slate-700/60 rounded-bl-md"
-                                : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
-                          )}
-                        >
-                          {!mine && (
-                            <div className="mb-1 flex items-center gap-2">
-                              <Avatar className="size-6 shrink-0 overflow-hidden rounded-full border border-white/10">
-                                {senderAvatarUrl ? (
-                                  <AvatarImage src={senderAvatarUrl} alt="" className="object-cover" />
-                                ) : null}
-                                <AvatarFallback className="bg-slate-800 text-[10px] font-semibold text-slate-200">
-                                  {senderLabel.slice(0, 2).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              <button
-                                type="button"
-                                onClick={() => navigate(`/athlete/${m.user_id}`)}
-                                className="text-[10px] font-semibold text-cyan-300/90 hover:text-cyan-200 transition-colors"
-                                aria-label={`Open ${senderLabel}'s profile`}
-                                title="Open profile"
-                              >
-                                {senderLabel}
-                              </button>
-                              <TrustBadge trust={senderTrust} />
-                            </div>
-                          )}
-                          {showCollapsed ? (
-                            <button
-                              type="button"
-                              onClick={() => revealMessage(m.id)}
-                              className="text-left text-xs text-slate-300 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-                              aria-label="Reveal message from a stranger"
-                            >
-                              Stranger sent a message — tap to read
-                            </button>
-                          ) : (
-                            <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                          )}
-                          <p
-                            className={cn(
-                              "text-[10px] mt-1 opacity-70",
-                              mine ? "text-violet-50/90" : "text-slate-400/80",
-                            )}
-                          >
-                            {format(new Date(m.created_at), "h:mm a")}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                {/* The post-game loop, at the bottom of the thread where the
-                    conversation ends: did it happen, how were they, run it back.
-                    Renders nothing until the game is over, and nothing at all
-                    without 20260927160000_post_game_loop applied. */}
-                {focusThread?.kind === "game" && schedule.ended && currentUserId ? (
-                  <PostGamePanel
-                    gameId={focusThread.gameId}
-                    hostId={threadHostId}
-                    currentUserId={currentUserId}
-                    onPlanRematch={onPlanRematch ? handlePlanRematch : undefined}
-                    className="mt-2"
-                  />
-                ) : null}
-                <div ref={listEndRef} />
+                    ) : undefined
+                  }
+                  footer={
+                    /* The post-game loop, at the bottom of the thread where the
+                       conversation ends: did it happen, how were they, run it back.
+                       Renders nothing until the game is over, and nothing at all
+                       without 20260927160000_post_game_loop applied. */
+                    focusThread?.kind === "game" && schedule.ended && currentUserId ? (
+                      <PostGamePanel
+                        gameId={focusThread.gameId}
+                        hostId={threadHostId}
+                        currentUserId={currentUserId}
+                        onPlanRematch={onPlanRematch ? handlePlanRematch : undefined}
+                        className="mt-2"
+                      />
+                    ) : null
+                  }
+                  authorFor={focusThread?.kind === "game" ? chatAuthorFor : undefined}
+                  veilFor={focusThread?.kind === "game" ? chatVeilFor : undefined}
+                  footerSlotFor={isNoteThread ? chatFooterSlotFor : undefined}
+                  onOpenAuthor={(uid) => navigate(`/athlete/${uid}`)}
+                  spinnerClassName={isNoteThread ? "w-6 h-6" : "w-8 h-8"}
+                  spinnerPadClassName={isNoteThread ? "py-8" : "py-12"}
+                  endRef={listEndRef}
+                />
                 </div>
               </div>
 
-              <div className="border-t border-white/[0.08] p-3 shrink-0 bg-white/[0.02] backdrop-blur-2xl shadow-[0_-18px_40px_rgba(0,0,0,0.45)]">
-                {sendError && (
-                  <p className="text-xs text-amber-400 mb-2 px-1">{sendError}</p>
-                )}
-                <div className="flex gap-2 items-end">
-                  <textarea
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        if (!sending && draft.trim()) void handleSend();
-                      }
-                    }}
-                    placeholder={
-                      focusThread?.kind === "note"
-                        ? "Write a reply…"
-                        : focusThread?.kind === "dm"
-                          ? "Send a message…"
-                          : "Message the squad…"
-                    }
-                    rows={2}
-                    className="flex-1 resize-none rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-                  />
-                  <button
-                    type="button"
-                    disabled={sending || !draft.trim()}
-                    onClick={() => void handleSend()}
-                    className={cn(
-                      "shrink-0 h-11 w-11 rounded-xl text-white flex items-center justify-center transition-colors",
-                      "border border-white/10",
-                      "bg-gradient-to-b from-violet-500/95 to-fuchsia-600/85 hover:from-violet-400 hover:to-fuchsia-500",
-                      "shadow-[0_12px_30px_rgba(124,58,237,0.22)]",
-                      "disabled:opacity-40 disabled:pointer-events-none",
-                    )}
-                    aria-label="Send"
-                  >
-                    {sending ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Send className="w-5 h-5" />
-                    )}
-                  </button>
-                </div>
-              </div>
+              <Composer
+                value={draft}
+                onChange={setDraft}
+                onSend={() => void handleSend()}
+                sending={sending}
+                error={sendError}
+                placeholder={
+                  focusThread?.kind === "note"
+                    ? "Write a reply…"
+                    : focusThread?.kind === "dm"
+                      ? "Send a message…"
+                      : "Message the squad…"
+                }
+              />
             </div>
 
             {threadExpanded && (
