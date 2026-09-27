@@ -576,12 +576,15 @@ export default function App() {
    * the map is idle costs a few KB and removes the wait entirely.
    */
   const prefetchAccountScreen = useCallback(() => {
-    void (currentUserId ? import("./pages/Profile") : import("./pages/GuestProfile"));
+    return currentUserId ? import("./pages/Profile") : import("./pages/GuestProfile");
   }, [currentUserId]);
+  /** The feed is the other route reachable in one tap from the map. */
+  const prefetchFeed = useCallback(() => import("./pages/Feed"), []);
   useEffect(() => {
     if (!secondaryReady) return;
-    prefetchAccountScreen();
-  }, [secondaryReady, prefetchAccountScreen]);
+    void prefetchAccountScreen();
+    if (currentUserId) void prefetchFeed(); // guests get the sign-up sheet, not the route
+  }, [secondaryReady, prefetchAccountScreen, prefetchFeed, currentUserId]);
 
   // Guests get a friendly "sign in to continue" sheet instead of a hard redirect.
   const [signInGate, setSignInGate] = useState<SignInGateAction | null>(null);
@@ -1105,6 +1108,8 @@ export default function App() {
         onLocationVisibilityChange={applyVisibilityMode}
         onOpenProfile={() => navigate("/profile")}
         onProfilePrefetch={prefetchAccountScreen}
+        onAccountPrefetch={prefetchAccountScreen}
+        onFeedPrefetch={prefetchFeed}
         userAvatarUrl={avatarUrl ?? null}
         favoriteSport={favoriteSport}
         mapSearch={{

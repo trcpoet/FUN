@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { VenueSportMenu } from "./VenueSportMenu";
 import type { VenueSportIntent } from "../lib/venueSportIntent";
 import { useAuth } from "../contexts/AuthContext";
+import { useNavLoading } from "../../hooks/useNavLoading";
 
 /** Glass morphism for map toolbar round controls (search, filter). */
 /** Keyboard focus ring shared by the glass map buttons (invisible on hover/click). */
@@ -113,6 +114,10 @@ export type TopNavigationProps = {
   mapSearchLocationName?: string | null;
   /** Warm the account screen's chunk on intent (pointer down / touch start). */
   onProfilePrefetch?: () => void;
+  /** Same for the feed; awaited so the button can show the wait when there is one. */
+  onFeedPrefetch?: () => Promise<unknown>;
+  /** Awaited account-screen prefetch, for the same reason. */
+  onAccountPrefetch?: () => Promise<unknown>;
   /**
    * A guest reached for a members-only surface; show them the sign-up sheet.
    * Not used for the profile button — that one opens Profile, which IS the
@@ -188,6 +193,8 @@ export const TopNavigation = (props: TopNavigationProps) => {
     onVenueSportIntentChange,
     onGuestGate,
     onProfilePrefetch,
+    onFeedPrefetch,
+    onAccountPrefetch,
   } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
   const searchWrapRef = useRef<HTMLDivElement>(null);
@@ -201,6 +208,8 @@ export const TopNavigation = (props: TopNavigationProps) => {
    * what signing up is for.
    */
   const guest = !user;
+  /** Press → (chunk still loading?) → busy on the control itself → navigate. */
+  const nav = useNavLoading();
   const reduceMotion = useReducedMotion();
 
   // Shrink search when clicking outside (e.g. on the map)
@@ -488,7 +497,15 @@ export const TopNavigation = (props: TopNavigationProps) => {
             <div className="inline-flex items-center p-1">
               <button
                 type="button"
-                onClick={() => (guest ? onGuestGate?.("feed") : navigate("/feed"))}
+                onPointerEnter={() => void onFeedPrefetch?.()}
+                onClick={() => {
+                  if (guest) {
+                    onGuestGate?.("feed");
+                    return;
+                  }
+                  void nav.start("feed", onFeedPrefetch, () => navigate("/feed"));
+                }}
+                aria-busy={nav.pending === "feed"}
                 className={cn(
                   "inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold",
                   "bg-primary text-primary-foreground shadow-[0_12px_36px_rgba(34,211,238,0.28)]",
@@ -498,7 +515,10 @@ export const TopNavigation = (props: TopNavigationProps) => {
                 )}
                 aria-label="Open feed — updates from players and games"
               >
-                <Rss className="size-4 shrink-0" aria-hidden />
+                <Rss
+                  className={cn("size-4 shrink-0", nav.pending === "feed" && "fun-rss-broadcasting")}
+                  aria-hidden
+                />
                 Feed
               </button>
               <div className="mx-1 h-7 w-px shrink-0 bg-white/12" aria-hidden />
@@ -759,9 +779,13 @@ export const TopNavigation = (props: TopNavigationProps) => {
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             type="button"
-            onClick={onOpenProfile}
+            onClick={() => {
+              if (!onOpenProfile) return;
+              void nav.start("profile", onAccountPrefetch, onOpenProfile);
+            }}
             onPointerEnter={onProfilePrefetch}
             onTouchStart={onProfilePrefetch}
+            aria-busy={nav.pending === "profile"}
             className={cn(
               "relative size-20 rounded-full overflow-hidden transition-all duration-300",
               "border-2 border-white/30 bg-slate-900 shadow-[0_12px_36px_rgba(0,0,0,0.5)]",
@@ -774,12 +798,25 @@ export const TopNavigation = (props: TopNavigationProps) => {
             ) : (
               <UserRound className="size-10 text-slate-400" />
             )}
-            <div className="absolute inset-0 border border-primary/10 rounded-full pointer-events-none" />
+            {/* Already here for the avatar's inner edge — it doubles as the progress arc. */}
+            <div
+              className={cn(
+                "absolute inset-0 rounded-full pointer-events-none border",
+                nav.pending === "profile"
+                  ? "border-2 fun-avatar-ring-loading"
+                  : "border-primary/10",
+              )}
+            />
           </motion.button>
           
           {/* Favorite Sport Badge Overlay - no background, just the emoji */}
           {favoriteSport && (
-            <div className="absolute -top-1 -right-1 flex items-center justify-center text-3xl drop-shadow-xl z-10 pointer-events-none">
+            <div
+              className={cn(
+                "absolute -top-1 -right-1 flex items-center justify-center text-3xl drop-shadow-xl z-10 pointer-events-none",
+                nav.pending === "profile" && "fun-sport-badge-spinning",
+              )}
+            >
               {sportEmojiFor(favoriteSport)}
             </div>
           )}

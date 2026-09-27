@@ -196,3 +196,60 @@ button.header-map-btn:active {
     animation: none;
   }
 }
+
+/* —— Navigation busy states ————————————————————————————————————————————
+ *
+ * Feedback on the control that was pressed, for the moment between the tap and
+ * a lazy route's chunk arriving. Both are driven by `useNavLoading`, which does
+ * not show them at all unless the wait is real (>110ms).
+ */
+
+/* Feed: the Rss arcs broadcast outward from their dot, like a signal going out.
+   Lucide's Rss is two <path> arcs plus the <circle> dot, so the dot holds still
+   and only the arcs move. */
+@keyframes fun-rss-wave {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.88);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.fun-rss-broadcasting path {
+  transform-origin: 5px 19px; /* the dot, in the icon's 24×24 viewBox */
+  animation: fun-rss-wave 880ms var(--ease-in-out, ease-in-out) infinite;
+}
+.fun-rss-broadcasting path:nth-of-type(2) {
+  animation-delay: 150ms;
+}
+
+/* Profile: the favourite-sport badge spins, and the ring already inside the
+   avatar becomes the progress arc rather than adding a second spinner on top. */
+@keyframes fun-sport-badge-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.fun-sport-badge-spinning {
+  animation: fun-sport-badge-spin 900ms linear infinite;
+}
+.fun-avatar-ring-loading {
+  border-color: rgba(34, 211, 238, 0.18);
+  border-top-color: var(--primary, #22d3ee);
+  animation: fun-sport-badge-spin 900ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fun-rss-broadcasting path,
+  .fun-sport-badge-spinning,
+  .fun-avatar-ring-loading {
+    animation: none;
+  }
+  /* Still say "working" without moving: hold the lit state. */
+  .fun-rss-broadcasting path {
+    opacity: 0.6;
+  }
+}
