@@ -2,6 +2,7 @@ import React, { Component, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router";
 import { AuthProvider, useAuth } from "./app/contexts/AuthContext";
+import { UnreadProvider } from "./app/contexts/UnreadContext";
 import { RequireAuth } from "./app/components/RequireAuth";
 import { RequireOnboarding } from "./app/components/RequireOnboarding";
 import { RequireMember } from "./app/components/RequireMember";
@@ -94,6 +95,12 @@ class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBo
 
 createRoot(document.getElementById("root")!).render(
   <AuthProvider>
+    {/*
+      Above the router, so unread state survives navigation and its three
+      realtime channels are opened once per session rather than once per mount
+      of whatever surface happens to be showing a badge.
+    */}
+    <UnreadProvider>
     <BrowserRouter>
       <RouteErrorBoundary>
         <Suspense fallback={<RouteFallback />}>
@@ -174,5 +181,6 @@ createRoot(document.getElementById("root")!).render(
     <Toaster theme="dark" richColors position="top-center" />
     <Analytics />
     <SpeedInsights />
+    </UnreadProvider>
   </AuthProvider>
 );

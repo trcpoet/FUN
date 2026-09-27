@@ -42,7 +42,7 @@ import {
 } from "../../lib/gameChat";
 import { fetchDmMessages, fetchMyDmInbox, sendDmMessage, subscribeDmMessages } from "../../lib/dmChat";
 import { useNearBottom } from "../../hooks/useNearBottom";
-import { clearUnread, getUnreadCount, incrementUnread, threadKey } from "../../lib/unreadCounts";
+import { useUnread } from "../contexts/UnreadContext";
 import {
   formatUrgentCountdown,
   getCountdownRemainingMs,
@@ -397,6 +397,7 @@ export function GameMessengerSheet({
   onPlanRematch,
 }: GameMessengerSheetProps) {
   const navigate = useNavigate();
+  const unread = useUnread();
   const [mode, setMode] = useState<"groups" | "direct" | "notes">("groups");
   const [inbox, setInbox] = useState<GameInboxRow[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
@@ -455,7 +456,6 @@ export function GameMessengerSheet({
   const [openingLocation, setOpeningLocation] = useState(false);
   const [shareBusyGameId, setShareBusyGameId] = useState<string | null>(null);
   const listEndRef = useRef<HTMLDivElement>(null);
-  const [unreadTick, setUnreadTick] = useState(0);
   /** There is history older than what is loaded. */
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -464,8 +464,6 @@ export function GameMessengerSheet({
   const { ref: scrollerRef, atBottom, scrollToBottom } = useNearBottom();
   /** The newest message we have already reacted to, so we react once. */
   const lastSeenMessageId = useRef<string | null>(null);
-
-  const bumpUnreadTick = useCallback(() => setUnreadTick((n) => n + 1), []);
 
   const handleOpenThreadLocation = useCallback(async () => {
     if (!focusThread) return;
@@ -791,58 +789,6 @@ export function GameMessengerSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, focusThread]);
 
-  // While the sheet is open, listen for new messages in other threads to keep unread badges live.
-  useEffect(() => {
-    if (!open) return;
-
-    const unsubs: Array<() => void> = [];
-
-    // Groups: subscribe to joined game threads shown in inbox (cap to keep channels reasonable).
-    const gameIds = inbox.slice(0, 25).map((r) => r.id);
-    for (const gid of gameIds) {
-      const unsub = subscribeGameMessages(gid, (row) => {
-        const isActive = focusThread?.kind === "game" && focusThread.gameId === gid;
-        if (isActive) return;
-        incrementUnread(threadKey("game", gid), 1);
-        bumpUnreadTick();
-      });
-      unsubs.push(unsub);
-    }
-
-    // DMs: subscribe to visible DM threads (cap). Skip the focused DM — the effect above already subscribes
-    // with the same channel topic (`dm_messages:${tid}`); a second subscribe throws in Supabase Realtime.
-    const dmThreadIds = dmInbox.slice(0, 25).map((r) => r.thread_id);
-    for (const tid of dmThreadIds) {
-      if (focusThread?.kind === "dm" && focusThread.threadId === tid) continue;
-      const { unsubscribe } = subscribeDmMessages({
-        threadId: tid,
-        onInsert: () => {
-          const isActive = focusThread?.kind === "dm" && focusThread.threadId === tid;
-          if (isActive) return;
-          incrementUnread(threadKey("dm", tid), 1);
-          bumpUnreadTick();
-        },
-      });
-      unsubs.push(unsubscribe);
-    }
-
-    // Notes: subscribe to inbox rows so unread bumps when someone replies.
-    const noteIds = noteInbox.slice(0, 25).map((r) => r.id);
-    for (const nid of noteIds) {
-      if (focusThread?.kind === "note" && focusThread.noteId === nid) continue;
-      const unsub = subscribeNoteComments(nid, () => {
-        const isActive = focusThread?.kind === "note" && focusThread.noteId === nid;
-        if (isActive) return;
-        incrementUnread(threadKey("note", nid), 1);
-        bumpUnreadTick();
-      });
-      unsubs.push(unsub);
-    }
-
-    return () => {
-      unsubs.forEach((u) => u());
-    };
-  }, [open, inbox, dmInbox, noteInbox, focusThread, bumpUnreadTick]);
 
   /** A new thread starts at the newest message with nothing outstanding. */
   useEffect(() => {
@@ -1229,20 +1175,19 @@ export function GameMessengerSheet({
     }
   }, [chatMessages, open, focusThread, currentUserId, atBottom, scrollToBottom]);
 
-  // Mark thread read when opened.
+  /**
+   * Opening a thread reads it, and so does every message that arrives while you
+   * are looking at it — but only while the tab is actually in front of someone.
+   * `markRead` debounces and the server refuses to move a watermark backwards,
+   * so calling it on every new message is cheap.
+   */
+  const markRead = unread.markRead;
   useEffect(() => {
     if (!open || !focusThread) return;
-    if (focusThread.kind === "game") {
-      clearUnread(threadKey("game", focusThread.gameId));
-      bumpUnreadTick();
-    } else if (focusThread.kind === "note") {
-      clearUnread(threadKey("note", focusThread.noteId));
-      bumpUnreadTick();
-    } else {
-      clearUnread(threadKey("dm", focusThread.threadId));
-      bumpUnreadTick();
-    }
-  }, [open, focusThread, bumpUnreadTick]);
+    if (focusThread.kind === "game") markRead("game", focusThread.gameId);
+    else if (focusThread.kind === "note") markRead("note", focusThread.noteId);
+    else markRead("dm", focusThread.threadId);
+  }, [open, focusThread, markRead, chatMessages.length]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -1583,8 +1528,7 @@ export function GameMessengerSheet({
                 (() => {
                   const partitions = partitionInboxByLifecycle(inbox, headerNow);
                   const renderRow = (row: GameInboxRow, ended: boolean) => {
-                    void unreadTick;
-                    const unread = getUnreadCount(threadKey("game", row.id));
+                    const unreadCount = unread.countFor("game", row.id);
                     const openThread = () => {
                       setThreadExpanded(inboxExpanded);
                       onFocusThreadChange({
@@ -1610,7 +1554,7 @@ export function GameMessengerSheet({
                     return (
                       <li key={row.id}>
                         <InboxRow
-                          unread={unread}
+                          unread={unreadCount}
                           onOpen={openThread}
                           ended={ended}
                           label={`${row.title} — open chat`}
@@ -1719,8 +1663,7 @@ export function GameMessengerSheet({
                 const commentedNotes = noteInbox.filter((r) => !r.is_author);
                 const filtered = notesView === "mine" ? myNotes : commentedNotes;
                 const renderNoteRow = (row: NoteInboxRow) => {
-                    void unreadTick;
-                    const unread = getUnreadCount(threadKey("note", row.id));
+                    const unreadCount = unread.countFor("note", row.id);
                     const visLabel =
                       row.visibility === "friends"
                         ? "Friends"
@@ -1749,7 +1692,7 @@ export function GameMessengerSheet({
                     return (
                       <li key={row.id}>
                         <InboxRow
-                          unread={unread}
+                          unread={unreadCount}
                           onOpen={openThread}
                           label={`${row.is_author ? "Your note" : "Note"} — open thread`}
                         >
@@ -1874,8 +1817,7 @@ export function GameMessengerSheet({
             ) : (
               <ul className="space-y-1.5">
                 {dmInbox.map((row) => {
-                  void unreadTick;
-                  const unread = getUnreadCount(threadKey("dm", row.thread_id));
+                  const unreadCount = unread.countFor("dm", row.thread_id);
                   const label = row.display_name?.trim() || "Player";
                   const openThread = () => {
                     setThreadExpanded(false);
@@ -1890,7 +1832,7 @@ export function GameMessengerSheet({
                   return (
                     <li key={row.thread_id}>
                       <InboxRow
-                        unread={unread}
+                        unread={unreadCount}
                         onOpen={openThread}
                         label={`${label} — open conversation`}
                       >
