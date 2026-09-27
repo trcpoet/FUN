@@ -1558,6 +1558,28 @@ export function MapboxMap(props: MapboxMapProps) {
     lastGlVisibilitySigRef.current = "";
   }, [basemapStyleEpoch, venueLayerEpoch]);
 
+  /**
+   * The open game card follows the live list.
+   *
+   * `eventPopup.game` is a snapshot taken when the pin was tapped and was never
+   * re-read, so after the host pressed End the card kept offering "End game"
+   * over a pin that had already gone — and a card opened before a join still
+   * showed the old spots count. Re-point it at the row the map is drawing, and
+   * close it when that row is no longer on the map at all (ended, cancelled,
+   * filtered out, or panned past the cap).
+   */
+  useEffect(() => {
+    if (!eventPopup) return;
+    const fresh = games.find((g) => g.id === eventPopup.game.id);
+    if (!fresh) {
+      setEventPopup(null);
+      return;
+    }
+    if (fresh !== eventPopup.game) {
+      setEventPopup((prev) => (prev ? { ...prev, game: fresh } : prev));
+    }
+  }, [games, eventPopup]);
+
   /** Zoom-based scaling for DOM markers (HTML pins + avatar + nearby players). */
   // GL icons scale via Mapbox, but our HTML markers don't — so we manually scale them
   // up as you zoom in and down as you zoom out to match the rest of the map.

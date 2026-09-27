@@ -72,7 +72,7 @@ async function fetchMyGameInboxFromTables(): Promise<{
   let e2: { message?: string; code?: string } | null = null;
   {
     const richSelect =
-      "id, title, sport, starts_at, spots_needed, created_at, ends_at, duration_minutes, visibility, created_by, status, location_label, lat, lng";
+      "id, title, sport, starts_at, spots_needed, created_at, ends_at, ended_at, live_started_at, duration_minutes, visibility, created_by, status, location_label, lat, lng";
     const res = await supabase.from("games").select(richSelect).in("id", gameIds);
     if (res.error) {
       // Probe legacy schemas (missing duration_minutes / visibility / lat / lng / etc.).
@@ -153,6 +153,8 @@ async function fetchMyGameInboxFromTables(): Promise<{
       spots_needed: number;
       created_at: string;
       ends_at?: string | null;
+      ended_at?: string | null;
+      live_started_at?: string | null;
       duration_minutes?: number | null;
       visibility?: "public" | "friends_only" | "invite_only" | null;
       created_by?: string | null;
@@ -170,6 +172,8 @@ async function fetchMyGameInboxFromTables(): Promise<{
       sport: g.sport,
       starts_at: g.starts_at,
       ends_at: g.ends_at ?? null,
+      ended_at: g.ended_at ?? null,
+      live_started_at: g.live_started_at ?? null,
       duration_minutes: g.duration_minutes ?? null,
       visibility: g.visibility ?? null,
       created_by: g.created_by ?? null,

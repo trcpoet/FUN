@@ -126,6 +126,24 @@ where proname = '<name>' and pronargs = <n> and pronamespace = 'public'::regname
   no `invite_token`, and friends-only / invite-only games still reach the people
   who follow the host or hold an approved invite.
 
+- **`20260926120000_venues_in_bbox_slim.sql` — deploy the client FIRST.**
+  Drop + create: the map projection narrows from 20 columns to the nine the map
+  actually draws. A client that still reads `opening_hours` or `hero_image_url` off
+  a map row is not broken by it — the venue card refetches the full row on open —
+  it simply shows hours and hero a few hundred milliseconds later. Deploying first
+  removes even that.
+
+- **`20260927120000_game_lifecycle_fixes.sql` — safe in either order.**
+  Two function bodies get strictly more correct against the shipped client
+  (`games_set_ends_at` stops clobbering `start_game`'s `ends_at`; `end_game` closes
+  `ends_at` as well as `status`), and `get_my_game_inbox` only gains columns
+  (`ended_at`, `live_started_at`) — it is a drop + create because the return type
+  changes, so re-run `notify pgrst, 'reload schema';` after. The client build that
+  reads the two new columns ships alongside. Schedules
+  `mark_ended_games_completed` under pg_cron when the extension is present; when it
+  is not, the migration raises a notice instead of failing, and the sweep stays
+  unscheduled (no read path depends on it).
+
 ## Known gaps
 
 - The SQL Editor snippets in the Supabase dashboard are **historical scratch**, not a

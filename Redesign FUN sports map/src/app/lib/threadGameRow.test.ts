@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { GameInboxRow } from "../../lib/supabase";
 import { isGameEnded, isGameLive, getCountdownRemainingMs } from "../../lib/mapGameTimer";
 import { gameViewerRole } from "./gameViewerRole";
-import { threadGameRow, type ThreadGameSource } from "./threadGameRow";
+import { inboxGameRow, threadGameRow, type ThreadGameSource } from "./threadGameRow";
 
 const NOW = new Date("2026-08-11T12:00:00Z").getTime();
 const MIN = 60_000;
@@ -137,5 +137,88 @@ describe("the row a host acts on", () => {
     expect(role.canArchive).toBe(true);
     expect(role.canLeave).toBe(false);
     expect(role.canStart).toBe(false);
+  });
+});
+
+describe("a game the host ended early", () => {
+  // The bug this covers: the host ends a 90-minute game 20 minutes in, and every
+  // surface that only knows `starts_at + duration` keeps saying "Live · 70:00 left".
+  const endedEarly = {
+    startsAt: iso(-20 * MIN),
+    durationMinutes: 90,
+    endsAt: iso(70 * MIN),
+  } as const;
+
+  it("reads as live while it is still only scheduled to end later", () => {
+    const row = threadGameRow(focus(endedEarly));
+    expect(isGameLive(row, NOW)).toBe(true);
+    expect(isGameEnded(row, NOW)).toBe(false);
+  });
+
+  it("reads as ended the moment ended_at is carried through", () => {
+    const row = threadGameRow(focus({ ...endedEarly, endedAt: iso(-1 * MIN) }));
+    expect(isGameEnded(row, NOW)).toBe(true);
+    expect(isGameLive(row, NOW)).toBe(false);
+  });
+
+  it("takes ended_at off the inbox row when the focus is silent", () => {
+    const row = threadGameRow(
+      focus({ startsAt: endedEarly.startsAt, durationMinutes: 90 }),
+      inbox({ ends_at: endedEarly.endsAt, ended_at: iso(-1 * MIN) }),
+    );
+    expect(row.ended_at).toBe(iso(-1 * MIN));
+    expect(isGameEnded(row, NOW)).toBe(true);
+  });
+
+  it("carries status from the focus, so the opener can be ahead of the inbox", () => {
+    const row = threadGameRow(focus({ status: "completed" }), inbox({ status: "live" }));
+    expect(row.status).toBe("completed");
+    expect(isGameEnded(row, NOW)).toBe(true);
+  });
+});
+
+describe("an untimed game the host started", () => {
+  it("ends a duration after the press, not never", () => {
+    // No starts_at to add a duration to: live_started_at is the only anchor.
+    const row = threadGameRow(focus({ liveStartedAt: iso(-2 * HOUR), durationMinutes: 90 }));
+    expect(row.starts_at).toBeNull();
+    expect(isGameEnded(row, NOW)).toBe(true);
+  });
+
+  it("is still running inside that window", () => {
+    const row = threadGameRow(focus({ liveStartedAt: iso(-30 * MIN), durationMinutes: 90 }));
+    expect(isGameEnded(row, NOW)).toBe(false);
+  });
+});
+
+describe("inboxGameRow", () => {
+  // The inbox list and the thread header must agree about the same game, which is
+  // only true while both ask the same predicate the same question.
+  it("agrees with the thread row that an early-ended game is over", () => {
+    const row = inbox({ starts_at: iso(-20 * MIN), duration_minutes: 90, ends_at: iso(70 * MIN), ended_at: iso(-MIN) });
+    expect(isGameEnded(inboxGameRow(row), NOW)).toBe(true);
+    expect(isGameEnded(threadGameRow(focus(), row), NOW)).toBe(true);
+  });
+
+  it("does not call a running game over", () => {
+    const row = inbox({ starts_at: iso(-20 * MIN), duration_minutes: 90, ends_at: iso(70 * MIN) });
+    expect(isGameEnded(inboxGameRow(row), NOW)).toBe(false);
+    expect(isGameLive(inboxGameRow(row), NOW)).toBe(true);
+  });
+
+  it("reads a cancelled game as over whatever its window says", () => {
+    const row = inbox({ starts_at: iso(HOUR), ends_at: iso(2 * HOUR), status: "cancelled" });
+    expect(isGameEnded(inboxGameRow(row), NOW)).toBe(true);
+  });
+
+  it("does not date a scheduleless row to 1970", () => {
+    const row = inboxGameRow(inbox());
+    expect(row.created_at).toBe("");
+    expect(isGameEnded(row, NOW)).toBe(false);
+  });
+
+  it("rebuilds spots_needed from the two halves", () => {
+    const row = inboxGameRow(inbox({ participant_count: 2, spots_remaining: 6 }));
+    expect(row.spots_needed).toBe(8);
   });
 });

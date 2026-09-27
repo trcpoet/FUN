@@ -380,6 +380,15 @@ export default function App() {
   const handleOpenNoteThread = useCallback((note: MapNoteRow) => setActiveMapNote(note), []);
   /** Idle prefetch so opening Messages isn't blocked by cold RPCs. */
   const [gameInboxBootstrap, setGameInboxBootstrap] = useState<GameInboxRow[] | null>(null);
+  /**
+   * Bumped whenever a game's lifecycle changes under us (started, ended).
+   *
+   * The messenger only reloads its inbox when the sheet opens on the list, so a
+   * host who ended a game from inside its own thread kept reading a cached row
+   * that still said `live`. The inbox row is what the thread header reasons with,
+   * so invalidating it is the whole fix.
+   */
+  const [gameLifecycleEpoch, setGameLifecycleEpoch] = useState(0);
   const [dmInboxBootstrap, setDmInboxBootstrap] = useState<DmInboxRow[] | null>(null);
   const [satelliteOn, setSatelliteOn] = useState(false);
   const [liveNowOpen, setLiveNowOpen] = useState(false);
@@ -726,9 +735,14 @@ export default function App() {
     if (!ok) return;
     const err = await startGame(game.id);
     if (err) {
+      // Silence here was the bug: the button stopped spinning, the game never
+      // went live, and nothing said why — including when the RPC is simply not
+      // deployed, which is a message the host can act on.
+      toast.error("Couldn't start the game", { description: err.message });
       return;
     }
     refetchGames();
+    setGameLifecycleEpoch((n) => n + 1);
   };
 
   const handleEndHostedGame = async (game: GameRow) => {
@@ -736,13 +750,20 @@ export default function App() {
     if (!ok) return;
     const err = await endGame(game.id);
     if (err) {
+      // Same hole as Start, and worse: a swallowed failure here leaves a game
+      // that everyone still sees as live, with no sign anything went wrong.
+      toast.error("Couldn't end the game", { description: err.message });
       return;
     }
     await reloadJoinedGameIds();
     refetchGames();
+    setGameLifecycleEpoch((n) => n + 1);
     if (selectedGame?.id === game.id) setSelectedGame(null);
-    if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
-      setMessagesOpen(false);
+    // Ending your own game used to shut the whole messenger, which is the one place
+    // the game still has anything to say: this is where the squad agrees it happened
+    // and where a rematch gets organised. Return to the inbox, the way leaving and
+    // deleting already do, and let the refreshed row move the thread to Past games.
+    if (messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
       setMessengerFocus(null);
     }
   };
@@ -1032,6 +1053,11 @@ export default function App() {
               title: game.title,
               sport: game.sport,
               startsAt: game.starts_at,
+              endsAt: game.ends_at ?? null,
+              endedAt: game.ended_at ?? null,
+              liveStartedAt: game.live_started_at ?? null,
+              status: game.status,
+              durationMinutes: game.duration_minutes ?? null,
               createdAt: game.created_at,
               participantCount: game.participant_count,
               spotsRemaining: game.spots_remaining,
@@ -1188,6 +1214,7 @@ export default function App() {
         onEndHostedGame={handleEndHostedGame}
         onDeleteHostedGame={handleDeleteHostedGame}
         inboxBootstrap={gameInboxBootstrap}
+        inboxRefreshKey={gameLifecycleEpoch}
         dmInboxBootstrap={dmInboxBootstrap}
         onPlanRematch={(payload: PlanRematchPayload) => {
           if (payload.lat == null || payload.lng == null) {

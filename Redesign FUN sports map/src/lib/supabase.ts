@@ -74,6 +74,17 @@ export type GameInboxRow = {
   starts_at: string | null;
   /** Scheduled end of the game window (`starts_at + duration_minutes`). */
   ends_at?: string | null;
+  /**
+   * When the host actually pressed End. Beats every scheduled window.
+   *
+   * The inbox is the one surface that lists games regardless of date, so it
+   * cannot infer "over" from a row's absence — without this a game ended
+   * 20 minutes into a 90-minute window reads "Live · 70:00 left" in its own
+   * chat header.
+   */
+  ended_at?: string | null;
+  /** When the host pressed Start. The only end anchor an untimed game has. */
+  live_started_at?: string | null;
   duration_minutes?: number | null;
   visibility?: GameVisibility | null;
   /** Game host id — needed to render host-only controls in the chat header. */

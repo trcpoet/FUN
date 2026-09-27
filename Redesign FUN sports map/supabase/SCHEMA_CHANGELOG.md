@@ -1,5 +1,47 @@
 # Schema changelog
 
+## 2026-09-27 — An ended game ends
+
+`20260927120000_game_lifecycle_fixes.sql`.
+
+Before: `status`, `ends_at` and `ended_at` could all disagree about the same game,
+and every consumer keyed off a different one. `start_game` set
+`ends_at = now() + duration` and its own `BEFORE UPDATE OF starts_at` trigger
+immediately overwrote that with `starts_at + duration`, so a 7 pm game started at
+8:30 was born already over. `end_game` set `status` and `ended_at` but left
+`ends_at` an hour in the future, which is what `mark_ended_games_completed`'s own
+WHERE clause reads. And `get_my_game_inbox` — the one surface that lists games
+regardless of date, so it cannot infer "over" from a row's absence — returned
+`ends_at` without `ended_at`, so a game the host ended 20 minutes in read
+"Live · 70:00 left" in its own chat header.
+
+After: the trigger respects an `ends_at` the statement set deliberately and never
+re-times a completed or cancelled game; `end_game` closes `status`, `ended_at` and
+`ends_at` together; the inbox returns the whole lifecycle (`status`, `ends_at`,
+`ended_at`, `live_started_at`) and lets the client decide. `mark_ended_games_completed`
+is scheduled under pg_cron where the extension exists, and says so in a notice where
+it does not — it stays revoked from `authenticated`, because it writes other people's
+rows.
+
+`get_unified_feed`'s missing untimed-TTL predicate is deliberately not here:
+`unified_feed_games_v2` replaces that function for feed game cards and fixes it there.
+
+
+## 2026-09-26 — The map read stops carrying the venue card's data
+
+`20260926120000_venues_in_bbox_slim.sql`.
+
+Before: `get_venues_in_bbox` returned 20 columns for up to 1,000 venues — 416 KB per
+map load, of which 303 KB was `wikidata_description`, `photo_attributions`,
+`hero_image_url`, `enrichment_source`, `wikidata_label`, `opening_hours`, `website`,
+`operator`, `surface` and `lit`: data the map never draws, downloaded, parsed and
+held as a GeoJSON property on every pin so that the venue card could re-read the same
+row through `fetchVenueById` the moment it opened.
+
+After: nine columns — position and identity, what to draw, and whether to draw it at
+all. 113 KB. Filters, ordering and the cap are unchanged. The venue card still reads
+the full row on open, which it already did.
+
 ## 2026-09-22 — Guests browse; the database is what says so
 
 `20260922130000_guest_browse_read_paths.sql`, then (after the client ships)
