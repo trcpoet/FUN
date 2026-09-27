@@ -5,12 +5,15 @@ import {
   MapPin,
   Navigation,
   Share2,
+  Bookmark,
+  StickyNote,
   Globe,
   ExternalLink,
   KeyRound,
   Lock,
 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "./ui/utils";
 import type { VenueSelection } from "./mapboxMapTypes";
 import type { GameRow, MapNoteRow } from "../../lib/supabase";
 import { formatVenueGameTimerSummary, isGameLive } from "../../lib/mapGameTimer";
@@ -19,7 +22,13 @@ import { getSportIconEmoji } from "../map/gameSportIcons";
 import { venueSportEmoji } from "../lib/venueSportIcon";
 import { venueAccessTier } from "../lib/venueAccess";
 import { noteCreatedLabel, noteVisibilityLabel } from "../lib/noteVisibility";
-import { fetchVenueById, fetchVenueEnrichment, getGamesAtVenue } from "../../lib/api";
+import {
+  fetchSavedVenueIds,
+  fetchVenueById,
+  fetchVenueEnrichment,
+  getGamesAtVenue,
+  toggleSavedVenue,
+} from "../../lib/api";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
 import type { NavigateToOptions } from "../../lib/directions";
 import { useModalA11y } from "../../hooks/useModalA11y";
@@ -88,6 +97,8 @@ type VenueInfoPopupProps = {
   joinedGameIds?: Set<string>;
   onClose: () => void;
   onCreateGame?: (venue: VenueSelection) => void;
+  /** Leave a note at this venue. Same shape as onCreateGame; App opens the same sheet. */
+  onCreateNote?: (venue: VenueSelection) => void;
   /** Join a specific game at this venue (unlock chat). */
   onJoinGame?: (game: GameRow) => void;
   /** Leave a game listed here. */
@@ -261,6 +272,7 @@ export function VenueInfoPopup({
   joinedGameIds = new Set(),
   onClose,
   onCreateGame,
+  onCreateNote,
   onJoinGame,
   onLeaveGame,
   onOpenChat,
@@ -302,6 +314,9 @@ export function VenueInfoPopup({
     avg: null,
     count: 0,
   });
+  /** null until we know; avoids a bookmark that flickers filled on open. */
+  const [saved, setSaved] = useState<boolean | null>(null);
+  const [savingVenue, setSavingVenue] = useState(false);
 
   // Reset per-venue state if the selected venue changes while the modal stays mounted.
   useEffect(() => {
@@ -325,6 +340,7 @@ export function VenueInfoPopup({
     setPlayedHere([]);
     setPlayedHereLoading(true);
     setFunReviews({ avg: null, count: 0 });
+    setSaved(null);
   }, [venue.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tick for live game countdowns.
@@ -428,6 +444,34 @@ export function VenueInfoPopup({
       cancelled = true;
     };
   }, [open, venue.id, venue.center.lat, venue.center.lng]);
+
+  useEffect(() => {
+    if (!open || !currentUserId) return;
+    let cancelled = false;
+    void fetchSavedVenueIds([venue.id]).then((ids) => {
+      if (!cancelled) setSaved(ids.has(venue.id));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, venue.id, currentUserId]);
+
+  const handleToggleSave = async () => {
+    if (savingVenue) return;
+    if (ensureSession && !(await ensureSession())) return;
+    setSavingVenue(true);
+    // Optimistic: the bookmark is the feedback, so it must not wait on a round-trip.
+    const next = !(saved ?? false);
+    setSaved(next);
+    const { saved: confirmed, error } = await toggleSavedVenue(venue.id);
+    setSavingVenue(false);
+    if (error) {
+      setSaved(!next);
+      toast.error("Couldn't save that", { description: error.message });
+      return;
+    }
+    setSaved(confirmed);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -738,6 +782,22 @@ export function VenueInfoPopup({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                void handleToggleSave();
+              }}
+              className={HERO_ICON_BTN}
+              aria-label={saved ? "Remove from saved" : "Save venue"}
+              aria-pressed={saved ?? false}
+              title={saved ? "Saved" : "Save"}
+            >
+              <Bookmark
+                className={cn("w-5 h-5", saved ? "fill-primary text-primary" : "")}
+                aria-hidden
+              />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
                 void handleShare();
               }}
               className={HERO_ICON_BTN}
@@ -879,6 +939,20 @@ export function VenueInfoPopup({
               >
                 Start game
               </motion.button>
+            ) : null}
+            {onCreateNote ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onCreateNote(details);
+                  onClose();
+                }}
+                className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-surface-2 text-slate-300 transition-colors hover:bg-surface-3 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                aria-label="Leave a note at this venue"
+                title="Leave a note"
+              >
+                <StickyNote className="size-4" aria-hidden />
+              </button>
             ) : null}
           </div>
         </div>

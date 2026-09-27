@@ -348,6 +348,8 @@ export default function App() {
   const [gamePopupRequest, setGamePopupRequest] = useState<{ nonce: number; gameId: string } | null>(null);
   const openGamePopupNonceRef = useRef(0);
   const [createGameOpen, setCreateGameOpen] = useState(false);
+  /** Which half the create sheet opens on — the venue card can ask for "note". */
+  const [createGameKind, setCreateGameKind] = useState<"game" | "note">("game");
   const [createGameCoords, setCreateGameCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [createGameAnchorPoint, setCreateGameAnchorPoint] = useState<{ x: number; y: number } | null>(null);
   const [createGameLocationLabel, setCreateGameLocationLabel] = useState<string | null>(null);
@@ -668,6 +670,7 @@ export default function App() {
       setCreateGameCoords({ lat: here.lat, lng: here.lng });
       setCreateGameAnchorPoint(null);
       setCreateGameLocationLabel(null);
+      setCreateGameKind("game");
       setCreateGameOpen(true);
       strip();
     })();
@@ -1063,6 +1066,7 @@ export default function App() {
             setCreateGameCoords({ lat, lng });
             setCreateGameAnchorPoint(viewportPoint ?? null);
             setCreateGameLocationLabel(null);
+            setCreateGameKind("game");
             setCreateGameOpen(true);
           }}
           onMapDoubleTap={(lat, lng) => {
@@ -1094,6 +1098,15 @@ export default function App() {
               venue.opening_hours?.trim() || null,
             ].filter(Boolean);
             setCreateGameLocationLabel(locationParts.join(" · "));
+            setCreateGameKind("game");
+            setCreateGameOpen(true);
+          }}
+          onCreateNoteAtVenue={async (venue, viewportPoint) => {
+            if (!(await ensureSession("create"))) return;
+            setCreateGameCoords({ lat: venue.center.lat, lng: venue.center.lng });
+            setCreateGameAnchorPoint(viewportPoint ?? null);
+            setCreateGameLocationLabel(venue.name?.trim() || null);
+            setCreateGameKind("note");
             setCreateGameOpen(true);
           }}
           centerOnUserTrigger={centerOnUserTrigger}
@@ -1302,6 +1315,7 @@ export default function App() {
           setCreateGameCoords({ lat: payload.lat, lng: payload.lng });
           setCreateGameAnchorPoint(null);
           setCreateGameLocationLabel(payload.locationLabel ?? null);
+          setCreateGameKind("game");
           setCreateGamePrefill({
             sport: payload.sport,
             title: `Rematch — ${payload.fromTitle}`,
@@ -1374,6 +1388,7 @@ export default function App() {
         locationLabel={createGameLocationLabel}
         anchorPoint={createGameAnchorPoint}
         prefill={createGamePrefill}
+        initialKind={createGameKind}
         onSuccess={async (gameId) => {
           setCreateGameOpen(false);
           // Auto-post a "Rematch from <title>" system message in the new game's chat.

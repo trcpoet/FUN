@@ -305,6 +305,8 @@ type MapboxMapProps = {
   mapSearchEpoch?: number;
   /** Open Create Game from selected venue popup. */
   onCreateGameAtVenue?: (venue: VenueSelection, viewportPoint?: { x: number; y: number }) => void;
+  /** Same, for the venue card's Note action. */
+  onCreateNoteAtVenue?: (venue: VenueSelection, viewportPoint?: { x: number; y: number }) => void;
   /** When this value changes, map flies to user location. */
   centerOnUserTrigger?: number;
   /** True while OpenStreetMap (Overpass) venue fetch is in progress. */
@@ -355,6 +357,7 @@ export function MapboxMap(props: MapboxMapProps) {
     onMapDoubleTap,
     mapSearchEpoch = 0,
     onCreateGameAtVenue,
+    onCreateNoteAtVenue,
     centerOnUserTrigger,
     onVenuesFetchLoadingChange,
     mapMinuteEpoch = 0,
@@ -3724,6 +3727,15 @@ export function MapboxMap(props: MapboxMapProps) {
             onSelectVenue(null);
             setVenuePopupPoint(null);
           }}
+          onCreateNote={
+            onCreateNoteAtVenue
+              ? (venue) => {
+                  onCreateNoteAtVenue(venue, venuePopupPoint ?? undefined);
+                  onSelectVenue(null);
+                  setVenuePopupPoint(null);
+                }
+              : undefined
+          }
         />
       )}
 

@@ -1,5 +1,24 @@
 # Schema changelog
 
+## 2026-09-28 — The map read carries the host; venues can be saved
+
+`20260928100000_game_host_summary.sql`, `20260928110000_saved_venues.sql`.
+
+`games.created_by` is a bare uuid and there is no batch profile lookup anywhere
+in the client — every use of it is an identity comparison to decide host-ness,
+never a name fetch. So a card that names the host had two options: two
+round-trips per pin tap, or denormalise onto the row already being read. On a map
+where tapping around is the main gesture, the first is the wrong answer.
+`get_guest_games_nearby` nulls all three columns, exactly as it already nulled
+`created_by`, so the client renders no host row because there is no host name —
+not because the JSX checked who was looking.
+
+`saved_venues` gives the venue card a Save that survives changing phone.
+`venue_id` is text (OSM ids look like `way/642660826`) and deliberately carries
+no foreign key: the OSM importer deletes and reinserts rows on a re-import, and a
+cascade there would silently wipe every save. An orphan is harmless — the read
+inner-joins and drops it.
+
 ## 2026-09-27 — The loop that closes after the game
 
 `20260927160000_post_game_loop.sql`.

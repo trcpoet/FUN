@@ -300,6 +300,19 @@ is done.
   Ordered after the lifecycle fixes because the prompt keys off an honest
   "this game is over", which is what those give it.
 
+- **`20260928100000_game_host_summary.sql` — ✅ APPLIED 2026-09-28.** Additive:
+  `get_games_nearby`, `get_guest_games_nearby` and `get_suggested_games` gain
+  `host_name` / `host_avatar_url` / `host_sportsmanship`. Drop + create, ACLs
+  re-granted. The guest wrapper projects all three as NULL, so "a guest never
+  learns who hosts" stays a schema property. Verified: member sees the name and
+  4.6, anon sees null, null, null.
+
+- **`20260928110000_saved_venues.sql` — ✅ APPLIED 2026-09-28.** Additive:
+  `saved_venues` (text `venue_id`, no FK — the OSM importer replaces rows and a
+  cascade would erase people's saves), own-row RLS, `toggle_saved_venue`,
+  `get_my_saved_venues`, `get_saved_venue_ids`. Verified: toggle on/off/on,
+  another member reads zero of mine, anon refused.
+
 ## Open security finding — anonymous sign-ins are enabled
 
 Not a migration, and not introduced by this work, but it interacts badly with it.
