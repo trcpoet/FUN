@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { formatOpeningHours } from "../../lib/openingHours";
 import type { ReactNode } from "react";
 import {
   Accessibility,
@@ -27,7 +28,6 @@ import {
   formatCoords,
   formatCount,
   formatLit,
-  formatOpeningHours,
   formatSurface,
   prettyLabel,
   telHref,
@@ -107,7 +107,14 @@ export function VenueFactGrid({ venue, google }: Props) {
 
   // OSM hours are terse ("Mo-Fr 08:00-22:00"); Google's weekday lines read
   // better, so prefer them when the venue matched a real place.
-  const osmHours = useMemo(() => formatOpeningHours(venue.opening_hours), [venue.opening_hours]);
+  // The real parser groups days ("Mon–Fri 8am–8pm") and returns null on
+  // anything exotic; fall back to the raw OSM string so information is never
+  // lost, just unformatted.
+  const osmHours = useMemo(() => {
+    const spec = venue.opening_hours?.trim();
+    if (!spec) return [];
+    return [formatOpeningHours(spec) ?? spec];
+  }, [venue.opening_hours]);
   const googleHours = google?.openingHours?.length ? google.openingHours : null;
   const hours = googleHours ?? osmHours;
 

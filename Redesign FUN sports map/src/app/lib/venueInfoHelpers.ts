@@ -196,32 +196,12 @@ export function nextEnrichKey(
   return currentKey === venueId ? currentKey : venueId;
 }
 
-const DAY_NAMES: Record<string, string> = {
-  mo: "Mon",
-  tu: "Tue",
-  we: "Wed",
-  th: "Thu",
-  fr: "Fri",
-  sa: "Sat",
-  su: "Sun",
-};
 
 /**
- * Best-effort humanize of an OSM `opening_hours` value into display lines.
- * Raw form is like "Mo-Fr 08:00-22:00; Sa-Su 09:00-18:00". We split on ";" and
- * expand the two-letter day codes; times are left intact. Returns [] when empty
- * (caller shows "Hours not listed"). No external parser to keep the bundle lean.
+ * `formatOpeningHours` used to live here as a `;`-splitter that expanded day
+ * codes and left the times untouched — so it could never say open or closed.
+ * The real reader is `src/app/lib/openingHours.ts`, which parses the week,
+ * answers `isOpenNow` and `nextTransition`, and returns null rather than
+ * guessing. Two functions with the same name doing different jobs is how the
+ * venue card ended up on the weaker one.
  */
-export function formatOpeningHours(raw: string | undefined | null): string[] {
-  const v = raw?.trim();
-  if (!v) return [];
-  if (/^24\s*\/\s*7$/.test(v)) return ["Open 24/7"];
-  return v
-    .split(";")
-    .map((seg) =>
-      seg
-        .trim()
-        .replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su)\b/g, (m) => DAY_NAMES[m.toLowerCase()] ?? m)
-    )
-    .filter(Boolean);
-}

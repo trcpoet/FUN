@@ -315,6 +315,18 @@ export type OsmSportsVenueRow = {
   google_photo_name: string | null;
   photo_attributions: string[] | null;
   enrichment_source: string | null;
+  /**
+   * The cached Google Places payload.
+   *
+   * `OSM_VENUE_DETAIL_SELECT` has always asked for this column and the row type
+   * has never had a field for it, so every venue card threw it away and then
+   * paid `/api/venue-enrich` — a billed Places call — to fetch the same thing
+   * again, and only once the old Details view was opened. Shaped like
+   * `VenueGoogleDetails` in api.ts; typed loosely here because supabase.ts is
+   * the leaf module and must not import from the API layer.
+   */
+  google_details: Record<string, unknown> | null;
+  enrichment_version: number | null;
   /** Long-tail OSM tags (amenities, capacity, contact, address). Absent key = unknown. */
   tags: VenueTagBag | null;
 };

@@ -1,4 +1,4 @@
-import type { VenueSelection } from "../components/mapboxMapTypes";
+import type { VenueGoogleDetailsLike, VenueSelection } from "../components/mapboxMapTypes";
 import type { SportsVenueProperties } from "./sportsVenueTypes";
 import type { OsmSportsVenueRow, VenueTagBag } from "../../lib/supabase";
 
@@ -35,6 +35,8 @@ export function venueSelectionFromProperties(
      * single-row DB read (venueSelectionFromDbRow).
      */
     tags?: VenueTagBag;
+    /** Same reason as `tags`: jsonb, single-row read only. */
+    google_details?: VenueGoogleDetailsLike;
   },
   center: { lat: number; lng: number }
 ): VenueSelection {
@@ -59,7 +61,40 @@ export function venueSelectionFromProperties(
     photo_attributions: props.photo_attributions,
     enrichment_source: props.enrichment_source,
     tags: props.tags,
+    google_details: props.google_details,
   };
+}
+
+/**
+ * The cached Google payload, narrowed from the row's untyped jsonb.
+ *
+ * `google_details` is `Record<string, unknown>` on OsmSportsVenueRow because
+ * supabase.ts is a leaf and cannot import the API layer's types. Nothing
+ * validates what the enrichment route wrote, so read each field defensively
+ * rather than casting the whole object.
+ */
+function narrowGoogleDetails(raw: unknown): VenueGoogleDetailsLike | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
+  const bool = (v: unknown) => (typeof v === "boolean" ? v : null);
+  const out: VenueGoogleDetailsLike = {
+    rating: num(o.rating),
+    userRatingCount: num(o.userRatingCount),
+    openNow: bool(o.openNow),
+    openingHours: Array.isArray(o.openingHours)
+      ? o.openingHours.filter((v): v is string => typeof v === "string")
+      : null,
+    formattedAddress: str(o.formattedAddress),
+    phone: str(o.phone),
+    editorialSummary: str(o.editorialSummary),
+    googleMapsUri: str(o.googleMapsUri),
+  };
+  // An object of all-nulls is the same as not having one.
+  return Object.values(out).some((v) => v != null && !(Array.isArray(v) && v.length === 0))
+    ? out
+    : undefined;
 }
 
 export function venueSelectionFromDbRow(row: OsmSportsVenueRow): VenueSelection {
@@ -86,6 +121,7 @@ export function venueSelectionFromDbRow(row: OsmSportsVenueRow): VenueSelection 
         : undefined,
       enrichment_source: optionalField(row.enrichment_source),
       tags: row.tags ?? undefined,
+      google_details: narrowGoogleDetails(row.google_details),
     },
     { lat: row.lat, lng: row.lng }
   );

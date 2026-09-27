@@ -144,6 +144,79 @@ export function isOpenNow(spec: string | null | undefined, at: Date): boolean | 
   return effectiveWeek(week)[day].some(([start, end]) => minutes >= start && minutes < end);
 }
 
+/**
+ * When the venue next opens or closes, relative to `at`.
+ *
+ * "Open now" alone is half an answer — the Google-Maps-grade version is "Open ·
+ * closes 9pm", because what a person actually wants to know is whether they can
+ * still get a game in.
+ *
+ * Works on a flattened timeline rather than per-day intervals, for two reasons
+ * the day-by-day view gets wrong:
+ *
+ *  - `effectiveWeek` splits a 22:00–02:00 window into `[1320,1440]` today and
+ *    `[0,120]` tomorrow. Read per-day, that venue "closes at midnight". Merged
+ *    across the boundary, it closes at 2am, which is the truth.
+ *  - Two adjacent rules (`08:00-12:00,12:00-17:00`) are one continuous opening,
+ *    not a close at noon.
+ *
+ * Returns `null` on any spec `parseWeek` cannot read, and on a venue that is
+ * always open or never open — neither has a next transition.
+ */
+export type OpeningTransition = { kind: "closes" | "opens"; at: Date };
+
+export function nextTransition(
+  spec: string | null | undefined,
+  at: Date,
+): OpeningTransition | null {
+  const week = parseWeek(spec);
+  if (!week) return null;
+
+  const effective = effectiveWeek(week);
+  const today = jsDayToOsmIndex(at.getDay());
+  const nowMinutes = at.getHours() * 60 + at.getMinutes();
+
+  // Absolute minutes from midnight today, across the next eight days so a
+  // window that only recurs weekly is still found from any starting point.
+  const spans: Interval[] = [];
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const day = (today + offset) % 7;
+    for (const [start, end] of effective[day]) {
+      spans.push([offset * MINUTES_PER_DAY + start, offset * MINUTES_PER_DAY + end]);
+    }
+  }
+  if (spans.length === 0) return null;
+
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged: Interval[] = [spans[0]];
+  for (const [start, end] of spans.slice(1)) {
+    const last = merged[merged.length - 1];
+    // `start <= last[1]` merges touching spans, which is what makes midnight
+    // and back-to-back rules invisible rather than a false close.
+    if (start <= last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+
+  const startOfToday = new Date(at);
+  startOfToday.setHours(0, 0, 0, 0);
+  const toDate = (minutes: number) => new Date(startOfToday.getTime() + minutes * 60_000);
+
+  const open = merged.find(([start, end]) => nowMinutes >= start && nowMinutes < end);
+  if (open) {
+    // Open continuously to the end of the searched window: effectively 24/7.
+    if (open[1] >= 8 * MINUTES_PER_DAY) return null;
+    return { kind: "closes", at: toDate(open[1]) };
+  }
+
+  const upcoming = merged.find(([start]) => start > nowMinutes);
+  return upcoming ? { kind: "opens", at: toDate(upcoming[0]) } : null;
+}
+
+/** "9pm" / "9:30pm", for the chip. Exported so callers format transitions consistently. */
+export function formatClockTime(at: Date): string {
+  return formatTime(at.getHours() * 60 + at.getMinutes());
+}
+
 function formatTime(minutes: number): string {
   const hours = Math.floor(minutes / 60) % 24;
   const mins = minutes % 60;
