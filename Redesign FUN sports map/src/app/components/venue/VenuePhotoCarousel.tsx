@@ -20,6 +20,8 @@ type Props = {
   onAddPhoto?: () => void;
   onDeletePhoto?: (photoId: string) => void;
   onReportPhoto?: (photoId: string) => void;
+  /** Full-bleed strip for the merged venue card, rather than an inset feature image. */
+  compact?: boolean;
 };
 
 /**
@@ -42,6 +44,7 @@ export function VenuePhotoCarousel({
   onAddPhoto,
   onDeletePhoto,
   onReportPhoto,
+  compact = false,
 }: Props) {
   const [api, setApi] = useState<CarouselApi>();
   const [active, setActive] = useState(0);
@@ -72,12 +75,16 @@ export function VenuePhotoCarousel({
       return next;
     });
 
-  const frame =
-    "relative aspect-[16/9] overflow-hidden rounded-xl bg-gradient-to-br from-emerald-900/40 via-slate-900 to-violet-900/30";
+  const frame: string =
+    compact
+      // Full-bleed and shorter: on the merged card this is a strip at the very
+      // top, not a feature image, and the card has five other things to fit.
+      ? "relative aspect-[16/6] overflow-hidden bg-gradient-to-br from-emerald-900/40 via-slate-900 to-violet-900/30"
+      : "relative aspect-[16/9] overflow-hidden rounded-xl bg-gradient-to-br from-emerald-900/40 via-slate-900 to-violet-900/30";
 
   if (visible.length === 0) {
     return (
-      <div className="mx-4">
+      <div className={compact ? "" : "mx-4"}>
         <div className={frame}>
           {loading ? (
             <div className="absolute inset-0 animate-pulse bg-white/5" />
@@ -105,7 +112,7 @@ export function VenuePhotoCarousel({
   const current = visible[Math.min(active, visible.length - 1)];
 
   return (
-    <div className="mx-4">
+    <div className={compact ? "" : "mx-4"}>
       <Carousel setApi={setApi} opts={{ loop: visible.length > 1 }} className="w-full">
         <CarouselContent className="-ml-0">
           {visible.map((photo, i) => (

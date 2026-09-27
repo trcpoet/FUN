@@ -191,6 +191,10 @@ export type {
   RematchPoll,
 } from "./postGame";
 
+// Saved venues live in `./savedVenues.ts`.
+export { toggleSavedVenue, fetchMySavedVenues, fetchSavedVenueIds } from "./savedVenues";
+export type { SavedVenueRow } from "./savedVenues";
+
 // Statuses live in `./status.ts`. Re-exported so components reach them through
 // the centralized layer, per the rule in CLAUDE.md. (Profile and PublicProfile
 // still import that module directly — worth moving when they are next touched.)

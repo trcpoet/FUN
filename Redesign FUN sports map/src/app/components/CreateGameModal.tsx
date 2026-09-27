@@ -90,6 +90,12 @@ export type CreateGameModalProps = {
   ensureSession?: () => Promise<boolean>;
   /** Pre-fill the form (used by the "Plan rematch" CTA). */
   prefill?: CreateGamePrefill | null;
+  /**
+   * Which half the sheet opens on. The venue card's Note action needs "note";
+   * everything else wants the default. Only read when the sheet opens, so the
+   * in-sheet toggle still works normally afterwards.
+   */
+  initialKind?: "game" | "note";
 };
 
 const ALL_SPORTS = getSportsForPicker();
@@ -174,6 +180,7 @@ export function CreateGameModal({
   onSuccess,
   ensureSession,
   prefill = null,
+  initialKind = "game",
 }: CreateGameModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeModal = useCallback(() => onOpenChange(false), [onOpenChange]);
@@ -217,7 +224,7 @@ export function CreateGameModal({
 
   useEffect(() => {
     if (open) {
-      setCreateKind("game");
+      setCreateKind(initialKind);
       const initialSport = prefill?.sport?.trim() || (ALL_SPORTS[0]?.id ?? "Basketball");
       setTitle(prefill?.title ?? "");
       setDescription("");

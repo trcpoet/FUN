@@ -28,6 +28,7 @@ import {
 } from "../components/athlete-profile";
 import { mergeAthleteProfile } from "../../lib/athleteProfile";
 import { cn } from "../components/ui/utils";
+import { SavedVenuesSection } from "../components/venue/SavedVenuesSection";
 import { useAuth } from "../contexts/AuthContext";
 import { getAthleteReputation } from "../../lib/endorsements";
 import { getLatestStatus, upsertMyStatus } from "../../lib/status";
@@ -514,6 +515,8 @@ export default function Profile() {
                 className="border-0 rounded-none bg-transparent px-0"
               />
             </section>
+
+            <SavedVenuesSection currentUserId={user?.id ?? null} />
 
             <section className="pt-4">
               <ProfileBadgesSection badges={badges} className="border-0 rounded-none bg-transparent px-0" />

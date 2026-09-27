@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isOpenNow, formatOpeningHours } from "./openingHours";
+import { isOpenNow, formatOpeningHours, nextTransition, formatClockTime } from "./openingHours";
 
 /** Local-time date helper. 2026-08-03 is a Monday. */
 function at(day: "Mo" | "Tu" | "We" | "Th" | "Fr" | "Sa" | "Su", hhmm: string): Date {
@@ -135,5 +135,82 @@ describe("formatOpeningHours", () => {
   it("returns null for anything it cannot parse", () => {
     expect(formatOpeningHours("Mo-Fr sunrise-sunset")).toBeNull();
     expect(formatOpeningHours(null)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nextTransition — the "closes 9pm" half of the chip
+// ---------------------------------------------------------------------------
+
+describe("nextTransition", () => {
+  it("says when an open venue closes", () => {
+    const t = nextTransition("Mo-Fr 08:00-20:00", at("Mo", "14:30"));
+    expect(t?.kind).toBe("closes");
+    expect(formatClockTime(t!.at)).toBe("8pm");
+  });
+
+  it("says when a closed venue opens", () => {
+    const t = nextTransition("Mo-Fr 08:00-20:00", at("Mo", "06:00"));
+    expect(t?.kind).toBe("opens");
+    expect(formatClockTime(t!.at)).toBe("8am");
+  });
+
+  it("rolls to the next open day once today is over", () => {
+    const t = nextTransition("Mo-Fr 08:00-20:00", at("Mo", "21:00"));
+    expect(t?.kind).toBe("opens");
+    expect(t!.at.getDate()).toBe(at("Tu", "08:00").getDate());
+  });
+
+  it("skips closed days entirely", () => {
+    // Friday night, shut all weekend.
+    const t = nextTransition("Mo-Fr 08:00-20:00", at("Fr", "21:00"));
+    expect(t?.kind).toBe("opens");
+    expect(t!.at.getDate()).toBe(at("Mo", "08:00").getDate() + 7);
+  });
+
+  it("does not pretend a past-midnight window closes at midnight", () => {
+    // effectiveWeek splits 22:00-02:00 into [1320,1440] today and [0,120]
+    // tomorrow. Read per-day this venue "closes at 12am"; the truth is 2am.
+    const t = nextTransition("Mo-Su 22:00-02:00", at("Mo", "23:30"));
+    expect(t?.kind).toBe("closes");
+    expect(formatClockTime(t!.at)).toBe("2am");
+    expect(t!.at.getDate()).toBe(at("Tu", "02:00").getDate());
+  });
+
+  it("treats back-to-back rules as one opening, not a close at the seam", () => {
+    const t = nextTransition("Mo 08:00-12:00,12:00-17:00", at("Mo", "11:00"));
+    expect(t?.kind).toBe("closes");
+    expect(formatClockTime(t!.at)).toBe("5pm");
+  });
+
+  it("reports a real midday break as a close", () => {
+    const t = nextTransition("Mo 08:00-12:00,13:00-17:00", at("Mo", "11:00"));
+    expect(t?.kind).toBe("closes");
+    expect(formatClockTime(t!.at)).toBe("12pm");
+  });
+
+  it("has no transition for a 24/7 venue", () => {
+    expect(nextTransition("24/7", at("We", "03:00"))).toBeNull();
+  });
+
+  it("returns null for anything it cannot parse, rather than guessing", () => {
+    expect(nextTransition("sunrise-sunset", at("Mo", "10:00"))).toBeNull();
+    expect(nextTransition('"by appointment only"', at("Mo", "10:00"))).toBeNull();
+    expect(nextTransition("Mo-Fr 08:00-20:00; PH off", at("Mo", "10:00"))).toBeNull();
+    expect(nextTransition(null, at("Mo", "10:00"))).toBeNull();
+  });
+
+  it("never disagrees with isOpenNow", () => {
+    const spec = "Mo-Fr 08:00-20:00; Sa 09:00-17:00";
+    const probes = [
+      ["Mo", "07:59"], ["Mo", "08:00"], ["Mo", "19:59"], ["Mo", "20:00"],
+      ["Sa", "12:00"], ["Su", "12:00"],
+    ] as const;
+    for (const [day, time] of probes) {
+      const when = at(day, time);
+      const open = isOpenNow(spec, when);
+      const t = nextTransition(spec, when);
+      if (t) expect(t.kind).toBe(open ? "closes" : "opens");
+    }
   });
 });
