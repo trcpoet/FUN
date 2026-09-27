@@ -31,6 +31,8 @@ export type MessageListProps = {
   /** Called with every id in a veiled run — one tap opens the whole turn. */
   onReveal?: (ids: string[]) => void;
   footerSlotFor?: (message: ChatMessage) => ReactNode;
+  /** Rendered directly below one bubble — the "Seen by" faces. */
+  renderAfter?: (message: ChatMessage) => ReactNode;
   onOpenAuthor?: (userId: string) => void;
   /** There is older history to fetch. */
   canLoadOlder?: boolean;
@@ -61,6 +63,7 @@ export function MessageList({
   revealedIds,
   onReveal,
   footerSlotFor,
+  renderAfter,
   onOpenAuthor,
   canLoadOlder,
   loadingOlder,
@@ -131,8 +134,9 @@ export function MessageList({
                 />
               );
             }
-            case "message":
-              return (
+            case "message": {
+              const after = renderAfter?.(item.message);
+              const bubble = (
                 <MessageBubble
                   key={item.key}
                   message={item.message}
@@ -147,6 +151,14 @@ export function MessageList({
                   }
                 />
               );
+              if (!after) return bubble;
+              return (
+                <div key={item.key}>
+                  {bubble}
+                  {after}
+                </div>
+              );
+            }
           }
         })
       )}

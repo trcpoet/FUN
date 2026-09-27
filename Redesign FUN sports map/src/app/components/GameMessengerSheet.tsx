@@ -44,6 +44,12 @@ import { fetchDmMessages, fetchMyDmInbox, sendDmMessage, subscribeDmMessages } f
 import { useNearBottom } from "../../hooks/useNearBottom";
 import { useUnread } from "../contexts/UnreadContext";
 import {
+  fetchThreadReadReceipts,
+  subscribeThreadReads,
+  type ReadReceiptRow,
+} from "../../lib/chatReads";
+import { ReadReceipts } from "./chat/ReadReceipts";
+import {
   formatUrgentCountdown,
   getCountdownRemainingMs,
   getGameEndsAtMs,
@@ -464,6 +470,8 @@ export function GameMessengerSheet({
   const { ref: scrollerRef, atBottom, scrollToBottom } = useNearBottom();
   /** The newest message we have already reacted to, so we react once. */
   const lastSeenMessageId = useRef<string | null>(null);
+  /** Everyone else's read watermark in the open thread. */
+  const [receipts, setReceipts] = useState<ReadReceiptRow[]>([]);
 
   const handleOpenThreadLocation = useCallback(async () => {
     if (!focusThread) return;
@@ -838,6 +846,39 @@ export function GameMessengerSheet({
     };
   }, [open, focusThread]);
 
+  /**
+   * Who has read the open thread.
+   *
+   * One RPC on open and one realtime channel while it is open — not one per
+   * thread in the inbox. `subscribeThreadReads` listens for `*` rather than
+   * INSERT because the first time someone reads a thread is an insert and every
+   * time after that is an update; listening for one of the two means "Seen"
+   * either never appears or never moves.
+   *
+   * Map notes are skipped entirely. They have no audience, the RPC returns
+   * nothing for them, and `chat_reads` has no peer-read policy for note rows.
+   */
+  useEffect(() => {
+    if (!open || !focusThread || focusThread.kind === "note") {
+      setReceipts([]);
+      return;
+    }
+    const kind = focusThread.kind;
+    const threadId = kind === "game" ? focusThread.gameId : focusThread.threadId;
+    let cancelled = false;
+    const load = () => {
+      void fetchThreadReadReceipts(kind, threadId).then((rows) => {
+        if (!cancelled) setReceipts(rows);
+      });
+    };
+    load();
+    const unsub = subscribeThreadReads(threadId, load);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [open, focusThread]);
+
   const handleSend = async () => {
     if (!focusThread || !draft.trim()) return;
     setSendError(null);
@@ -1147,6 +1188,25 @@ export function GameMessengerSheet({
     },
     [currentUserId],
   );
+
+  /**
+   * "Seen" hangs under the last thing *you* said, not under the last thing in the
+   * thread — which is what you actually want to know has landed.
+   */
+  const myLastMessageId = useMemo(() => {
+    if (!currentUserId) return null;
+    for (let i = chatMessages.length - 1; i >= 0; i -= 1) {
+      if (chatMessages[i].authorId === currentUserId) return chatMessages[i].id;
+    }
+    return null;
+  }, [chatMessages, currentUserId]);
+
+  const seenByAfterMine = useMemo(() => {
+    if (!myLastMessageId) return [];
+    const mine = chatMessages.find((m) => m.id === myLastMessageId);
+    if (!mine) return [];
+    return receipts.filter((r) => Date.parse(r.last_read_at) >= mine.createdAtMs);
+  }, [receipts, myLastMessageId, chatMessages]);
 
   /**
    * Follow the conversation only if the reader is already following it.
@@ -1932,6 +1992,11 @@ export function GameMessengerSheet({
                   revealedIds={revealedMessageIds}
                   onReveal={revealMessages}
                   footerSlotFor={isNoteThread ? chatFooterSlotFor : undefined}
+                  renderAfter={(m) =>
+                    m.id === myLastMessageId && seenByAfterMine.length > 0 ? (
+                      <ReadReceipts readers={seenByAfterMine} />
+                    ) : null
+                  }
                   onOpenAuthor={(uid) => navigate(`/athlete/${uid}`)}
                   canLoadOlder={hasOlder && !chatLoading}
                   loadingOlder={loadingOlder}
