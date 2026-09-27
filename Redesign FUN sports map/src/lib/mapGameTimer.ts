@@ -216,6 +216,56 @@ export function getLiveStripBadgeTone(game: GameRow, nowMs: number): LiveStripBa
 }
 
 /**
+ * What state a game is in, as one word a person can act on.
+ *
+ * Six surfaces hand-roll a binary Live pill today — the map popup, the venue card,
+ * the feed card, the suggestion shelf, the colocated chooser and the map badge —
+ * and none of them can say anything else. "Recruiting" and "Filling up" appear
+ * nowhere in the app, so a game two players short looks exactly like one that is
+ * full.
+ *
+ * Deliberately NOT part of `gameViewerRole`: that answers "what may *I* do with
+ * this game", which is about identity. This answers "what state is the game in",
+ * which is about the game and is the same for everyone looking at it.
+ *
+ * Order matters. Ended beats live beats capacity — a full game that finished is
+ * "Ended", not "Full".
+ */
+export type GameStatusTone = "ended" | "live" | "filling" | "full" | "waitlist" | "open";
+
+export type GameStatusChipState = {
+  label: string;
+  tone: GameStatusTone;
+};
+
+/** A game is "filling up" inside this fraction of its roster, floor one spot. */
+const FILLING_FRACTION = 0.25;
+
+export function gameStatus(game: GameRow, nowMs: number): GameStatusChipState {
+  if (isGameEnded(game, nowMs)) return { label: "Ended", tone: "ended" };
+  if (isGameLive(game, nowMs)) return { label: "Live", tone: "live" };
+
+  const needed = game.spots_needed ?? 0;
+  const remaining = game.spots_remaining;
+
+  // A game whose capacity we do not know is still recruiting — saying "Full"
+  // because a column was absent would turn people away from an open game.
+  if (remaining == null || needed <= 0) return { label: "Recruiting", tone: "open" };
+
+  if (remaining <= 0) {
+    return (game.substitute_count ?? 0) > 0
+      ? { label: "Waitlist", tone: "waitlist" }
+      : { label: "Full", tone: "full" };
+  }
+
+  // Ceil, so a 4-player game is "filling up" at one spot left rather than never.
+  const threshold = Math.max(1, Math.ceil(needed * FILLING_FRACTION));
+  if (remaining <= threshold) return { label: "Filling up", tone: "filling" };
+
+  return { label: "Recruiting", tone: "open" };
+}
+
+/**
  * Primary line for Live strip cards, e.g. "Starts in 42 min · 2 spots" or "Live · 25m left · 1 spot".
  */
 export function formatLiveStripCardSummary(game: GameRow, nowMs: number): string {

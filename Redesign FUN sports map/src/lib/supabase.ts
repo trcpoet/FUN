@@ -54,6 +54,23 @@ export type GameRow = {
   description?: string | null;
   /** Host preferences from create-game (skill, age, etc.). */
   requirements?: Record<string, unknown> | null;
+
+  /**
+   * The host, denormalised onto the row by `get_games_nearby`.
+   *
+   * `created_by` is a bare uuid and there is no batch profile lookup anywhere in
+   * the app, so without these a card showing "hosted by" would cost two
+   * round-trips per pin tap — on a map where tapping around is the main gesture.
+   *
+   * All three are null for a guest, because `get_guest_games_nearby` projects
+   * them as null exactly as it does `created_by`. That is what keeps "guests
+   * never learn who hosts" a property of the schema rather than of the JSX.
+   */
+  host_name?: string | null;
+  host_avatar_url?: string | null;
+  /** 1–5 sportsmanship average, or null when nobody has rated them yet. */
+  host_sportsmanship?: number | null;
+
   distance_km: number;
   lat: number;
   lng: number;

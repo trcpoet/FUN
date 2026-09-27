@@ -36,8 +36,10 @@ import {
 } from "../../../lib/api";
 import type { FeedMediaPostRow, GameRow, MapNoteCommentRow, StatusCommentRow } from "../../../lib/supabase";
 import { GameActionBar } from "../game/GameActionBar";
+import { GameHeadline } from "../game/GameHeadline";
+import { GameStatusChip } from "../game/GameStatusChip";
+import { SpotsBar } from "../game/SpotsBar";
 import { gameViewerRole } from "../../lib/gameViewerRole";
-import { isGameEnded, isGameLive, formatUrgentCountdown } from "../../../lib/mapGameTimer";
 import { sportEmojiFor } from "../../../lib/sportDisplay";
 import { useSharedNow } from "../../../hooks/useSharedNow";
 import { glassMessengerPanel } from "../../styles/glass";
@@ -274,69 +276,6 @@ export function NoteFeedCard(props: {
   );
 }
 
-/** Sport + start time + spots, all from the one row the feed already returned. */
-function GameHeadline({ row, nowMs }: { row: GameRow; nowMs: number }) {
-  const ended = isGameEnded(row, nowMs);
-  const live = isGameLive(row, nowMs);
-  const startMs = row.starts_at ? Date.parse(row.starts_at) : Number.NaN;
-
-  // The loudest thing on the card is when it starts, because that is the one
-  // fact that decides whether you can go.
-  let when: string;
-  if (ended) when = "Ended";
-  else if (live) when = "Playing now";
-  else if (!Number.isNaN(startMs)) {
-    when = startMs > nowMs ? `Starts in ${formatUrgentCountdown(startMs - nowMs)}` : "Starting now";
-  } else when = "Any time";
-
-  return (
-    <p
-      className={cn(
-        "text-[15px] font-bold tabular-nums",
-        ended ? "text-slate-500" : live ? "text-alert" : "text-white",
-      )}
-    >
-      {when}
-    </p>
-  );
-}
-
-/**
- * How full a game is, as a bar rather than as the words "1 of 4 in".
- *
- * Substitutes are drawn past the end of the roster, so "full, with three people
- * waiting" reads differently from "full".
- */
-function SpotsBar({ row }: { row: GameRow }) {
-  const total = Math.max(1, row.spots_needed ?? 1);
-  const taken = Math.min(row.participant_count ?? 0, total);
-  const subs = row.substitute_count ?? 0;
-  const remaining = Math.max(0, total - taken);
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-          {remaining > 0
-            ? `${remaining} ${remaining === 1 ? "spot" : "spots"} left`
-            : subs > 0
-            ? `Full · ${subs} waiting`
-            : "Full"}
-        </span>
-        <span className="text-[11px] tabular-nums text-slate-500">
-          {taken}/{total}
-        </span>
-      </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-1">
-        <div
-          className={cn("h-full rounded-full", remaining > 0 ? "bg-primary" : "bg-slate-500")}
-          style={{ width: `${(taken / total) * 100}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
 /**
  * A game, as a post you can read, ask about and join.
  *
@@ -470,13 +409,9 @@ export function GameFeedCard(props: {
               <Badge className="border-white/10 bg-black/40 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider backdrop-blur-md">
                 {item.sport?.trim() || "Sport"}
               </Badge>
-              {role.isLive ? (
-                <span className="rounded-full bg-alert px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-alert-foreground">
-                  Live
-                </span>
-              ) : null}
+              <GameStatusChip game={row} nowMs={nowMs} size="xs" />
             </div>
-            <GameHeadline row={row} nowMs={nowMs} />
+            <GameHeadline game={row} nowMs={nowMs} />
             <p className="truncate text-sm font-semibold text-slate-200">
               {item.title?.trim() || "Pickup game"}
             </p>
@@ -508,7 +443,7 @@ export function GameFeedCard(props: {
           <p className="line-clamp-3 text-sm leading-relaxed text-slate-300">{item.body.trim()}</p>
         ) : null}
 
-        <SpotsBar row={row} />
+        <SpotsBar game={row} />
 
         <GameActionBar
           game={row}

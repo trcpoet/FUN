@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useNavigate } from "react-router";
 import type { GameRow } from "../../lib/supabase";
 import { cn } from "./ui/utils";
 import { format } from "date-fns";
-import { ArrowLeft, Clock, Info, Navigation, Share2, X, Users } from "lucide-react";
+import { ArrowLeft, Clock, Info, Navigation, Share2, X } from "lucide-react";
 import { sportEmojiFor } from "../../lib/sportDisplay";
 import { glassMessengerPanel } from "../styles/glass";
 import { useRouteDirections } from "../../hooks/useRouteDirections";
@@ -12,7 +13,13 @@ import { directionsHref } from "../lib/venueInfoHelpers";
 import { GoogleMapsLinkButton } from "./GoogleMapsLinkButton";
 import { GameActionBar } from "./game/GameActionBar";
 import { GameDetailsView } from "./game/GameDetailsView";
+import { GameHeadline } from "./game/GameHeadline";
+import { GameStatusChip } from "./game/GameStatusChip";
+import { HostRow } from "./game/HostRow";
+import { SpotsBar } from "./game/SpotsBar";
 import { gameViewerRole } from "../lib/gameViewerRole";
+import { GAME_POPUP_ANCHOR_TRANSFORM } from "../map/mapConfig";
+import { useSharedNow } from "../../hooks/useSharedNow";
 
 const SPORT_GRADIENT: Record<string, string> = {
   soccer:     'from-emerald-600 to-green-800',
@@ -87,7 +94,16 @@ export function GameEventPopup({
   // (and the same reason) as the venue modal's ℹ️.
   const [view, setView] = useState<"actions" | "details">("actions");
   const reduceMotion = useReducedMotion();
+  const navigate = useNavigate();
   const hasCoords = typeof game.lat === "number" && typeof game.lng === "number";
+  /**
+   * The clock was frozen: two inline `Date.now()` calls that were only ever
+   * re-read when something else re-rendered the card, so a countdown never
+   * counted. One shared second-tick drives the headline, the status chip and
+   * the role gates together, and `useSharedNow` keeps it to one interval for
+   * the whole app rather than one per popup.
+   */
+  const nowMs = useSharedNow(1000);
 
   // Membership belongs to the caller — it reads `game_participants` — so feed those props
   // straight in rather than letting the role helper fall back to `created_by`.
@@ -98,9 +114,9 @@ export function GameEventPopup({
         joinedGameIds: joined ? new Set([game.id]) : new Set<string>(),
         hostGameIds: isHost ? new Set([game.id]) : new Set<string>(),
         substituteGameIds: isSubstitute ? new Set([game.id]) : new Set<string>(),
-        nowMs: Date.now(),
+        nowMs,
       }),
-    [game, joined, isHost, isSubstitute],
+    [game, joined, isHost, isSubstitute, nowMs],
   );
   const liveNow = role.isLive || optimisticLive;
 
@@ -158,9 +174,6 @@ export function GameEventPopup({
     }
   };
 
-  const participantCount = game.participant_count ?? 0;
-  const shownAvatars = Math.min(participantCount, 4);
-  const overflowCount = participantCount - shownAvatars;
   const gradient = sportGradient(game.sport);
 
   return (
@@ -168,7 +181,7 @@ export function GameEventPopup({
       className={glassMessengerPanel(
         "absolute z-[1000] w-[min(20rem,calc(100vw-2rem))] max-w-[20rem] rounded-2xl overflow-hidden"
       )}
-      style={{ transform: "translate(-50%, calc(-100% - 14px))" }}
+      style={{ transform: GAME_POPUP_ANCHOR_TRANSFORM }}
     >
       {/* Gradient header */}
       <div className={cn("relative bg-gradient-to-br px-4 pt-4 pb-3", gradient)}>
@@ -270,7 +283,7 @@ export function GameEventPopup({
           >
             <GameDetailsView
               game={game}
-              nowMs={Date.now()}
+              nowMs={nowMs}
               isGuest={isGuest}
               onRequestSignIn={onRequestSignIn}
             />
@@ -284,49 +297,29 @@ export function GameEventPopup({
             transition={{ duration: 0.16 }}
             className="px-4 py-3 space-y-3"
           >
-            {/* Time + spots row */}
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 shrink-0" />
-                {game.starts_at ? format(new Date(game.starts_at), "MMM d, h:mm a") : "—"}
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 shrink-0" />
-                {game.spots_remaining != null
-                  ? game.spots_remaining === 0
-                    ? `Full${game.substitute_count ? ` +${game.substitute_count}` : ""}`
-                    : `${participantCount} / ${game.spots_needed}`
-                  : `${game.spots_needed} max`}
-              </span>
+            {/*
+              When it starts is the one fact that decides whether you can go, so
+              it leads and it is the loudest thing here. It used to be an
+              absolute date ("Oct 4, 7:00 PM") in the same `text-xs text-slate-400`
+              as everything else, next to spots rendered as the string "1 / 4".
+            */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <GameHeadline game={game} nowMs={nowMs} />
+                {game.starts_at ? (
+                  <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <Clock className="size-3 shrink-0" aria-hidden />
+                    {format(new Date(game.starts_at), "EEE, MMM d · h:mm a")}
+                  </p>
+                ) : null}
+              </div>
+              <GameStatusChip game={game} nowMs={nowMs} className="mt-0.5" />
             </div>
 
-            {/* Avatar stack */}
-            {participantCount > 0 && (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center">
-                  {Array.from({ length: shownAvatars }).map((_, i) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        "w-7 h-7 rounded-full border-2 border-slate-900 bg-gradient-to-br flex items-center justify-center",
-                        i > 0 && "-ml-2",
-                        ["from-emerald-500 to-teal-700","from-sky-500 to-blue-700","from-violet-500 to-purple-700","from-orange-500 to-amber-700"][i % 4]
-                      )}
-                    >
-                      <Users className="w-3 h-3 text-white/80" />
-                    </div>
-                  ))}
-                  {overflowCount > 0 && (
-                    <div className="-ml-2 w-7 h-7 rounded-full border-2 border-slate-900 bg-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300">
-                      +{overflowCount}
-                    </div>
-                  )}
-                </div>
-                <span className="text-xs text-slate-500">
-                  {participantCount === 1 ? "1 player in" : `${participantCount} players in`}
-                </span>
-              </div>
-            )}
+            <SpotsBar game={game} />
+
+            {/* Null for a guest, because the guest wrapper nulls the column. */}
+            <HostRow game={game} onOpenProfile={(id) => navigate(`/athlete/${id}`)} />
 
             {/* Description */}
             {game.description?.trim() ? (

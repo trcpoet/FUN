@@ -447,3 +447,12 @@ export const STUDIO_ATMOSPHERE_HINT = {
   "horizon-blend": 0.08,
   "star-intensity": 0.15,
 } as const;
+
+/**
+ * How the game card sits above the pin it belongs to.
+ *
+ * Lived inline in GameEventPopup as a magic string while every other map
+ * measurement was here. The 14px is the gap between the card's bottom edge and
+ * the top of the pin glyph.
+ */
+export const GAME_POPUP_ANCHOR_TRANSFORM = "translate(-50%, calc(-100% - 14px))";

@@ -6,6 +6,7 @@ import { groupGamesBySport, haversineDistanceMeters } from "../lib/gamesAtVenue"
 import { getSportIconEmoji } from "../map/gameSportIcons";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { GameActionBar } from "./game/GameActionBar";
+import { GameStatusChip } from "./game/GameStatusChip";
 import { gameViewerRole } from "../lib/gameViewerRole";
 import { isGameEnded } from "../../lib/mapGameTimer";
 
@@ -204,7 +205,8 @@ export function ColocatedGamesModal({
                                   <span className="ml-1.5 text-[10px] text-amber-400 font-semibold">HOST</span>
                                 )}
                               </p>
-                              <p className="text-[11px] text-slate-500">
+                              <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+                                <GameStatusChip game={g} nowMs={now} size="xs" />
                                 {g.starts_at ? format(new Date(g.starts_at), "MMM d · h:mm a") : "—"}
                               </p>
                             </div>

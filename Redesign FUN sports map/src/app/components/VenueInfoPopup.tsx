@@ -52,6 +52,7 @@ import { VenueReviewsSection } from "./venue/VenueReviewsSection";
 import { VenueCommentsSection } from "./venue/VenueCommentsSection";
 import { GoogleMapsLinkButton } from "./GoogleMapsLinkButton";
 import { GameActionBar } from "./game/GameActionBar";
+import { GameStatusChip } from "./game/GameStatusChip";
 import { gameViewerRole } from "../lib/gameViewerRole";
 
 type View = "actions" | "details";
@@ -211,12 +212,7 @@ function GameListRow({
           <span className="truncate text-sm font-medium text-slate-100">
             {game.title || "Pickup"}
           </span>
-          {live ? (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-emerald-400">
-              <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
-              Live
-            </span>
-          ) : null}
+          <GameStatusChip game={game} nowMs={now} size="xs" />
         </p>
         <p className="mt-0.5 truncate text-[11px] text-slate-500">
           {formatVenueGameTimerSummary(game, now)}
