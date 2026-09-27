@@ -3592,7 +3592,7 @@ export function MapboxMap(props: MapboxMapProps) {
   // Error/empty state: no token or the map failed to load.
   if (!MAPBOX_TOKEN || mapError) {
     return (
-      <div className="absolute inset-0 bg-[#0A0F1C] flex flex-col items-center justify-center gap-2 px-4 text-slate-400 text-sm text-center">
+      <div className="absolute inset-0 bg-background flex flex-col items-center justify-center gap-2 px-4 text-slate-400 text-sm text-center">
         {!MAPBOX_TOKEN ? (
           <>Add VITE_MAPBOX_ACCESS_TOKEN to .env (or Vercel env vars) to show the map.</>
         ) : (

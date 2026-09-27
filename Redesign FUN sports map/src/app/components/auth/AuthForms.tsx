@@ -40,9 +40,9 @@ export function SignInForm({ onSignedIn }: { onSignedIn: () => void }) {
   return (
     <form onSubmit={handleSubmit} className="flex w-full flex-col gap-4">
       <label className="flex flex-col gap-1.5">
-        <span className="arena-label text-[10px] text-cyan-300/90">Email</span>
+        <span className="arena-label text-[10px] text-primary">Email</span>
         <span className="relative block">
-          <Mail className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-cyan-400/80" aria-hidden />
+          <Mail className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-primary/80" aria-hidden />
           <input
             type="email"
             name="email"
@@ -57,9 +57,9 @@ export function SignInForm({ onSignedIn }: { onSignedIn: () => void }) {
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="arena-label text-[10px] text-cyan-300/90">Password</span>
+        <span className="arena-label text-[10px] text-primary">Password</span>
         <span className="relative block">
-          <Lock className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-cyan-400/80" aria-hidden />
+          <Lock className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-primary/80" aria-hidden />
           <input
             type="password"
             name="password"
@@ -76,21 +76,21 @@ export function SignInForm({ onSignedIn }: { onSignedIn: () => void }) {
       <div className="-mt-1 text-right">
         <Link
           to="/forgot-password"
-          className="rounded text-xs font-medium text-cyan-300/90 underline-offset-4 transition hover:text-cyan-200 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+          className="rounded text-xs font-medium text-primary underline-offset-4 transition hover:text-primary-tint hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
         >
           Forgot password?
         </Link>
       </div>
 
       {error ? (
-        <p className="rounded-xl border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
+        <p className="rounded-xl bg-rose-500/12 px-3 py-2 text-sm text-rose-200" role="alert">
           {error}
         </p>
       ) : null}
 
       <div className="arena-cta-frame mt-2">
         <button type="submit" disabled={submitting} className="arena-cta px-4 text-sm">
-          {submitting ? "Logging in…" : "Back in the game"}
+          {submitting ? "Signing in…" : "Sign in"}
         </button>
       </div>
     </form>
@@ -150,9 +150,9 @@ export function SignUpForm({
   return (
     <form onSubmit={handleSubmit} className="flex w-full flex-col gap-4">
       <label className="flex flex-col gap-1.5">
-        <span className="arena-label text-[10px] text-cyan-300/90">Email</span>
+        <span className="arena-label text-[10px] text-primary">Email</span>
         <span className="relative block">
-          <Mail className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-cyan-400/80" aria-hidden />
+          <Mail className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-primary/80" aria-hidden />
           <input
             type="email"
             name="email"
@@ -167,9 +167,9 @@ export function SignUpForm({
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="arena-label text-[10px] text-cyan-300/90">Password</span>
+        <span className="arena-label text-[10px] text-primary">Password</span>
         <span className="relative block">
-          <Lock className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-cyan-400/80" aria-hidden />
+          <Lock className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-primary/80" aria-hidden />
           <input
             type="password"
             name="password"
@@ -184,9 +184,9 @@ export function SignUpForm({
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="arena-label text-[10px] text-cyan-300/90">Confirm password</span>
+        <span className="arena-label text-[10px] text-primary">Confirm password</span>
         <span className="relative block">
-          <ShieldCheck className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-cyan-400/80" aria-hidden />
+          <ShieldCheck className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-primary/80" aria-hidden />
           <input
             type="password"
             name="confirm"
@@ -201,24 +201,24 @@ export function SignUpForm({
       </label>
 
       {error ? (
-        <p className="rounded-xl border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
+        <p className="rounded-xl bg-rose-500/12 px-3 py-2 text-sm text-rose-200" role="alert">
           {error}
         </p>
       ) : null}
       {info ? (
-        <p className="rounded-xl border border-cyan-400/25 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100" role="status">
+        <p className="rounded-xl bg-primary/10 px-3 py-2 text-sm text-primary-tint" role="status">
           {info}
         </p>
       ) : null}
 
       <div className="arena-cta-frame mt-2">
         <button type="submit" disabled={submitting} className="arena-cta px-4 text-sm">
-          {submitting ? "Claiming your tag…" : "Claim your tag"}
+          {submitting ? "Creating your account…" : "Create account"}
         </button>
       </div>
 
-      <p className="text-center text-[11px] leading-relaxed text-slate-500">
-        You're joining a local sports network — matchmaking, games, venues, gear, and the feed.
+      <p className="text-center text-[11px] leading-relaxed text-slate-400">
+        Free, and you can keep browsing the map either way.
       </p>
     </form>
   );

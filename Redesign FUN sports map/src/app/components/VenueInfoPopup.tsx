@@ -644,7 +644,7 @@ export function VenueInfoPopup({
                   )}
                   {/* Scrim so the title stays legible over any photo. */}
                   <div
-                    className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/55 to-transparent"
+                    className="absolute inset-0 bg-gradient-to-t from-background via-background/55 to-transparent"
                     aria-hidden
                   />
                 </div>

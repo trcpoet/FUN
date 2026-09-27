@@ -1,31 +1,79 @@
 @custom-variant dark (&:is(.dark *));
 
+/**
+ * Neon Nocturne, as the app's tokens.
+ *
+ * The design system lives in stitch_glassy_immersive_drawers_prd/DESIGN.md. Three of
+ * its four rules are adopted here wholesale: Neon Teal for every action path, Blaze
+ * Orange reserved for live and alerts, and boundaries defined by tonal layering and
+ * glow rather than by 1px lines.
+ *
+ * One deliberate deviation: DESIGN.md's Midnight is a neutral #0B0C10, and this app
+ * stays on its navy-black #0A0F1C. That black is where the "sporty videogame" read
+ * comes from, it is what the dark basemap's water sits against, and swapping it would
+ * re-grade every screen at once. What was wrong was having three of them —
+ * #0a0f1c in the theme, #020617 inside the card/popover alphas, and a hard-coded
+ * #0A0F1C in two more files. One value now, with tonal tiers above it.
+ */
 :root {
   --font-size: 16px;
   /* App is dark-first. Keep primitives consistent with map UI. */
   --background: #0a0f1c;
   --foreground: #e2e8f0;
-  --card: rgba(2, 6, 23, 0.78);
+
+  /* ---- Tonal layering. Use these instead of a border to separate surfaces. ----
+   * Each tier is a clear step in the same hue: a card on a panel on the void reads
+   * as three depths without a single line being drawn. Pair with --glow-* below.
+   */
+  --surface-1: #101728; /* panels sitting on the background */
+  --surface-2: #161f33; /* secondary panels inside those */
+  --surface-3: #1d2841; /* interactive cards, inputs, pressed states */
+
+  /* ---- Glass. One blur for every floating drawer, per the system. ---- */
+  --glass-blur: 24px;
+  --glass-surface: rgba(10, 15, 28, 0.72);
+
+  /* ---- Glow, not shadow. Tinted with the brand, never black at high opacity. ----
+   * A drop shadow that reads as a shadow is too dark; these read as light spill.
+   */
+  --primary-tint: #96f8ff;
+  --glow-sm: 0 8px 24px rgba(150, 248, 255, 0.06);
+  --glow-md: 0 16px 40px rgba(150, 248, 255, 0.08);
+  --glow-lg: 0 24px 48px rgba(150, 248, 255, 0.1);
+
+  /* The accessibility escape hatch for a boundary that genuinely needs a line.
+   * 15% and no more — a 100% opaque rule is never the answer. */
+  --outline-ghost: rgba(150, 248, 255, 0.15);
+
+  --card: rgba(10, 15, 28, 0.78);
   --card-foreground: #e2e8f0;
-  --popover: rgba(2, 6, 23, 0.92);
+  --popover: rgba(10, 15, 28, 0.92);
   --popover-foreground: #e2e8f0;
-  --primary: #22d3ee; /* cyan-400 */
+  /* Neon Teal. Matches the wordmark, which was already this colour while --primary
+   * was a slightly different cyan — the two now agree. */
+  --primary: #00f2fe;
+  /* The darker end of the primary CTA gradient. A flat fill has no light in it. */
+  --primary-container: #00c8d4;
   --primary-foreground: #020617; /* slate-950 */
+  /* Blaze Orange. LIVE indicators, alerts and ad-hoc pins only — nothing else.
+   * Overusing it is what would cost it its meaning. */
+  --alert: #ff6a00;
+  --alert-foreground: #1a0a00;
   --secondary: rgba(148, 163, 184, 0.14); /* slate-400 @ 14% */
   --secondary-foreground: #e2e8f0;
   --muted: rgba(148, 163, 184, 0.12);
   --muted-foreground: rgba(226, 232, 240, 0.72);
-  --accent: rgba(34, 211, 238, 0.12);
+  --accent: rgba(0, 242, 254, 0.12);
   --accent-foreground: #e2e8f0;
   --destructive: #fb7185; /* rose-400 */
   --destructive-foreground: #020617;
   --border: rgba(148, 163, 184, 0.18);
   --input: transparent;
-  --input-background: rgba(2, 6, 23, 0.58);
+  --input-background: rgba(10, 15, 28, 0.58);
   --switch-background: rgba(148, 163, 184, 0.28);
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: rgba(34, 211, 238, 0.55);
+  --ring: rgba(0, 242, 254, 0.55);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -33,6 +81,14 @@
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.9rem;
   --radius-pill: 999px;
+
+  /* ---- Typography ----
+   * Space Grotesk carries headings and labels; Outfit carries everything you read.
+   * Faces are declared in fonts.css. The stacks end in system-ui so a blocked
+   * gstatic request degrades rather than breaks.
+   */
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-body: "Outfit", ui-sans-serif, system-ui, -apple-system, sans-serif;
 
   /* Typography scale */
   --text-xs: 0.75rem;
@@ -47,8 +103,13 @@
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --dur-hover: 180ms;
   --dur-panel: 380ms;
+  /* A press is acknowledged faster than the eye reads it as animation. */
+  --dur-press: 120ms;
+  /* And a loading state appears slowly enough not to flash on a warm cache. */
+  --dur-load: 240ms;
 
-  /* Elevation (use via shadow tokens in utilities) */
+  /* Elevation (use via shadow tokens in utilities).
+   * Kept for the surfaces that still use them; new work reaches for --glow-*. */
   --shadow-panel: 0 24px 80px rgba(0, 0, 0, 0.55);
   --shadow-control: 0 10px 36px rgba(0, 0, 0, 0.35);
 
@@ -66,23 +127,29 @@
   /* Keep parity if a `.dark` class is used elsewhere. */
   --background: #0a0f1c;
   --foreground: #e2e8f0;
-  --card: rgba(2, 6, 23, 0.78);
+  --surface-1: #101728;
+  --surface-2: #161f33;
+  --surface-3: #1d2841;
+  --card: rgba(10, 15, 28, 0.78);
   --card-foreground: #e2e8f0;
-  --popover: rgba(2, 6, 23, 0.92);
+  --popover: rgba(10, 15, 28, 0.92);
   --popover-foreground: #e2e8f0;
-  --primary: #22d3ee;
+  --primary: #00f2fe;
+  --primary-container: #00c8d4;
   --primary-foreground: #020617;
+  --alert: #ff6a00;
+  --alert-foreground: #1a0a00;
   --secondary: rgba(148, 163, 184, 0.14);
   --secondary-foreground: #e2e8f0;
   --muted: rgba(148, 163, 184, 0.12);
   --muted-foreground: rgba(226, 232, 240, 0.72);
-  --accent: rgba(34, 211, 238, 0.12);
+  --accent: rgba(0, 242, 254, 0.12);
   --accent-foreground: #e2e8f0;
   --destructive: #fb7185;
   --destructive-foreground: #020617;
   --border: rgba(148, 163, 184, 0.18);
   --input: transparent;
-  --ring: rgba(34, 211, 238, 0.55);
+  --ring: rgba(0, 242, 254, 0.55);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -106,7 +173,14 @@
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
+  --color-primary-container: var(--primary-container);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-tint: var(--primary-tint);
+  --color-alert: var(--alert);
+  --color-alert-foreground: var(--alert-foreground);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -137,6 +211,14 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* Generates font-display / font-body / font-sans utilities. */
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-sans: var(--font-body);
+  /* Generates shadow-glow-sm / -md / -lg. */
+  --shadow-glow-sm: var(--glow-sm);
+  --shadow-glow-md: var(--glow-md);
+  --shadow-glow-lg: var(--glow-lg);
 }
 
 @layer base {
@@ -146,6 +228,18 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+
+  /* Headings and buttons take the display face; body copy stays on Outfit. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  button {
+    font-family: var(--font-display);
   }
 
   /**

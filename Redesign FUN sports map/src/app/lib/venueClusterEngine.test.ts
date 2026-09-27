@@ -441,13 +441,27 @@ describe("nearestFilteredPitchIconId", () => {
     expect(nearestFilteredPitchIconId(index, 0, 0)).toBe("fun-game-sport-basketball");
   });
 
-  it("stays linear enough to run on the frame that draws the map", () => {
-    // Before the index this was O(parks x points) with a tag lookup per comparison:
-    // 446 ms median for this exact input, ~1 s at p95. The ceiling is deliberately
-    // loose — it is there to catch a return to quadratic, not to time a machine.
+  it("does not cost meaningfully more than enriching without a filter", () => {
+    // The guard is a ratio, not a clock: an absolute ceiling either fails on a
+    // loaded CI box or is too loose to catch anything. Filtering adds the park
+    // scan and nothing else, so the two paths walk the same points once each.
+    // Quadratic, this ratio was ~170x at 3000 venues (446 ms against 2.6 ms);
+    // indexed it is ~2x. Ten leaves room for a slow machine and still fails
+    // loudly the moment the scan goes back to comparing every pair.
     const gj = synthViewport(3000, 32.7);
-    const t0 = performance.now();
-    enrichVenueGeoJSON(gj, ["Basketball", "Soccer", "Tennis"]);
-    expect(performance.now() - t0).toBeLessThan(150);
+    const median = (fn: () => void) => {
+      fn();
+      const ts: number[] = [];
+      for (let i = 0; i < 7; i++) {
+        const t0 = performance.now();
+        fn();
+        ts.push(performance.now() - t0);
+      }
+      return ts.sort((a, b) => a - b)[3]!;
+    };
+    const unfiltered = median(() => void enrichVenueGeoJSON(gj, []));
+    const filtered = median(() => void enrichVenueGeoJSON(gj, ["Basketball", "Soccer", "Tennis"]));
+    // Guard against a sub-millisecond denominator turning noise into a ratio.
+    expect(filtered / Math.max(unfiltered, 0.5)).toBeLessThan(10);
   });
 });

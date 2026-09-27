@@ -17,7 +17,7 @@ export function ExperienceCard({ item, isLast, className }: Props) {
         />
       )}
       <div
-        className="absolute left-0 top-2 size-3.5 rounded-full border-2 border-emerald-500/40 bg-[#0A0F1C] shadow-[0_0_10px_rgba(52,211,153,0.2)]"
+        className="absolute left-0 top-2 size-3.5 rounded-full border-2 border-emerald-500/40 bg-background shadow-[0_0_10px_rgba(52,211,153,0.2)]"
         aria-hidden
       />
       <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">

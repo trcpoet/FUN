@@ -15,21 +15,57 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <meta name="theme-color" content="#0B0C10" />
+    <meta name="theme-color" content="#0A0F1C" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="FUN" />
     <meta name="application-name" content="FUN" />
+    <!-- The share card. %OG_ORIGIN% is substituted at build (vite.config.ts):
+         these have to be absolute or crawlers drop them. og-card.png is
+         rendered from scripts/og-card.html by `node scripts/render-og-card.mjs`,
+         so it cannot drift from the brand tokens. -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="FUN – Sports Map" />
-    <meta property="og:description" content="Find and join pickup sports games near you." />
-    <meta property="og:image" content="/android-chrome-512x512.png" />
+    <meta property="og:site_name" content="FUN" />
+    <meta property="og:url" content="%OG_ORIGIN%/" />
+    <meta property="og:title" content="FUN — find a game tonight" />
+    <meta
+      property="og:description"
+      content="Every pickup game near you on one map: who is in, when it starts, and how many spots are left."
+    />
+    <meta property="og:image" content="%OG_ORIGIN%/og-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The FUN wordmark over a night map with basketball, soccer and tennis game pins." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="FUN — find a game tonight" />
+    <meta
+      name="twitter:description"
+      content="Every pickup game near you on one map: who is in, when it starts, and how many spots are left."
+    />
+    <meta name="twitter:image" content="%OG_ORIGIN%/og-card.png" />
     <link rel="preconnect" href="https://api.mapbox.com" crossorigin />
     <link rel="dns-prefetch" href="https://api.mapbox.com" />
+    <!-- The brand faces are served from gstatic; without this the TLS handshake
+         does not start until the CSS that references them has parsed. -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      crossorigin
+      href="https://fonts.gstatic.com/s/spacegrotesk/v22/V8mDoQDjQSkFtoMM3T6r8E7mPbF4C_k3HqU.woff2"
+    />
+    <link
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      crossorigin
+      href="https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtqUYLknw.woff2"
+    />
     <title>FUN – Sports Map</title>
     <style>
-      .fun-orbit-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.25rem;width:100%;height:100%;min-height:100vh;min-height:100dvh;background:#0a0f1c;color:#94a3b8;font-family:system-ui,-apple-system,sans-serif}
+      .fun-orbit-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.25rem;width:100%;height:100%;min-height:100vh;min-height:100dvh;background:#0A0F1C;color:#94a3b8;font-family:"Space Grotesk",system-ui,-apple-system,sans-serif}
       .fun-orbit-loader__stage{position:relative;width:9rem;height:9rem}
-      .fun-orbit-loader__core{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.75rem;font-weight:800;letter-spacing:.2em;color:#10b981;text-shadow:0 0 24px rgba(16,185,129,.45)}
+      .fun-orbit-loader__core{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.75rem;font-weight:800;letter-spacing:.2em;color:#00F2FE;text-shadow:0 0 24px rgba(0,242,254,.45)}
       .fun-orbit-loader__orbit{position:absolute;inset:0;animation:fun-orbit-spin 3.2s linear infinite}
       .fun-orbit-loader__icon{position:absolute;top:50%;left:50%;width:1.75rem;height:1.75rem;margin:-.875rem;display:flex;align-items:center;justify-content:center;font-size:1.25rem;transform:rotate(var(--angle)) translateY(-4.25rem) rotate(calc(-1 * var(--angle)))}
       .fun-orbit-loader__icon:nth-child(1){--angle:0deg}

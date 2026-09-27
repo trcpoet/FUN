@@ -20,7 +20,7 @@ import { useNavLoading } from "../../hooks/useNavLoading";
 /** Keyboard focus ring shared by the glass map buttons (invisible on hover/click). */
 const MAP_GLASS_FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 " +
-  "focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C] ";
+  "focus-visible:ring-offset-2 focus-visible:ring-offset-background ";
 
 const MAP_GLASS_ICON_BTN =
   "w-12 h-12 rounded-full shrink-0 flex items-center justify-center transition-all duration-200 " +
@@ -230,7 +230,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
     // so this is one of the two that give screen readers something to jump to.
     <nav
       aria-label="Map controls"
-      className="absolute top-0 left-0 right-0 z-50 pt-12 px-4 pb-4 bg-gradient-to-b from-[#0A0F1C]/90 via-[#0A0F1C]/50 to-transparent pointer-events-none"
+      className="absolute top-0 left-0 right-0 z-50 pt-12 px-4 pb-4 bg-gradient-to-b from-background/90 via-background/50 to-transparent pointer-events-none"
     >
       {/*
         No auth controls here. Signing in lives in one place — the profile
@@ -511,7 +511,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   "bg-primary text-primary-foreground shadow-[0_12px_36px_rgba(34,211,238,0.28)]",
                   "transition-[transform,box-shadow,filter] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
                   "hover:brightness-110 hover:-translate-y-[0.5px] active:scale-[0.99]",
-                  "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                  "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 )}
                 aria-label="Open feed — updates from players and games"
               >
@@ -528,7 +528,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   onClick={onLiveNowToggle}
                   className={cn(
                     "inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold border transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
-                    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                     liveNowOpen
                       ? "border-orange-400/55 bg-orange-500/15 text-orange-200 shadow-[inset_0_0_0_1px_rgba(251,146,60,0.25)] hover:bg-orange-500/20"
                       : "border-orange-500/35 bg-transparent text-orange-300/95 hover:border-orange-400/50 hover:bg-orange-500/10",
@@ -600,7 +600,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                     >
                       <Bell className="w-5 h-5" />
                       {notificationsUnreadCount > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-background shadow-sm">
                           {notificationsUnreadCount > 9 ? "9+" : notificationsUnreadCount}
                         </span>
                       )}
@@ -662,7 +662,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   >
                     <MessageCircle className="w-5 h-5" />
                     {messagesUnreadCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
+                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-background shadow-sm">
                         {messagesUnreadCount > 9 ? "9+" : messagesUnreadCount}
                       </span>
                     )}

@@ -955,7 +955,7 @@ export default function App() {
     // heading is visually hidden because the map itself is the page's title
     // treatment, and it also gives BottomCarousel's per-card `h3` a level to
     // descend from instead of starting the document at h3.
-    <main className="relative h-screen w-full overflow-hidden bg-[#0A0F1C] font-sans selection:bg-emerald-500/30">
+    <main className="relative h-screen w-full overflow-hidden bg-background font-sans selection:bg-primary/30">
       <h1 className="sr-only">FUN — find and join pickup sports games near you</h1>
       {activeMapNote ? (
           <NoteThreadDialog
@@ -1086,13 +1086,13 @@ export default function App() {
           aria-busy="true"
           aria-label="Map updating"
         >
-          <Loader2 className="size-5 shrink-0 animate-spin text-emerald-400" aria-hidden />
+          <Loader2 className="size-5 shrink-0 animate-spin text-primary" aria-hidden />
         </div>
       )}
 
       {satelliteOn && (
         <div
-          className="pointer-events-none absolute left-1/2 top-[72px] z-40 -translate-x-1/2 rounded-full border border-white/12 bg-[#0A0F1C]/85 px-3 py-1 text-[11px] font-medium text-slate-200 shadow-[var(--shadow-control)] backdrop-blur-md"
+          className="pointer-events-none absolute left-1/2 top-[72px] z-40 -translate-x-1/2 rounded-full border border-white/12 bg-background/85 px-3 py-1 text-[11px] font-medium text-slate-200 shadow-[var(--shadow-control)] backdrop-blur-md"
           role="status"
           aria-live="polite"
         >

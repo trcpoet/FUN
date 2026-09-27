@@ -61,7 +61,7 @@ export default function RedeemInvite() {
   }, [auth.loading, auth.user, navigate, token]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0A0F1C] px-6 text-slate-100">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 text-slate-100">
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900/70 p-6 text-center shadow-xl shadow-violet-950/20 backdrop-blur-xl">
         {phase === "error" ? (
           <>

@@ -29,7 +29,7 @@ export function RequireMember({
   if (user) return <>{children}</>;
 
   return (
-    <main className="flex min-h-screen min-h-dvh flex-col items-center justify-center bg-[#0A0F1C] px-6 text-center">
+    <main className="flex min-h-screen min-h-dvh flex-col items-center justify-center bg-background px-6 text-center">
       <span className="flex size-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-slate-300">
         <Lock className="size-6" aria-hidden />
       </span>
@@ -38,7 +38,7 @@ export function RequireMember({
       <Link
         to={profileAuthPath("signup")}
         state={{ from: location }}
-        className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-500 px-5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+        className="mt-6 inline-flex min-h-11 items-center justify-center rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-[var(--glow-md)] transition hover:bg-primary-container focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
       >
         Create account
       </Link>

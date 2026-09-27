@@ -71,7 +71,7 @@ class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBo
   render() {
     if (this.state.error) {
       return (
-        <div className="flex h-screen w-full items-center justify-center bg-[#0A0F1C] px-6">
+        <div className="flex h-screen w-full items-center justify-center bg-background px-6">
           <div className="max-w-md text-center">
             <p className="text-lg font-semibold text-slate-100">Something went wrong</p>
             <p className="mt-2 text-sm text-slate-400">
@@ -79,7 +79,7 @@ class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBo
             </p>
             <button
               type="button"
-              className="mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600"
+              className="mt-4 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary-container focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
               onClick={() => window.location.reload()}
             >
               Reload

@@ -56,7 +56,7 @@ class ProfileSettingsErrorBoundary extends React.Component<
     if (!this.state.hasError) return this.props.children;
     return (
       <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 px-4 text-white">
-        <div className="w-full max-w-md rounded-[32px] border border-white/10 bg-[#0A0F1C] p-8 shadow-2xl text-center">
+        <div className="w-full max-w-md rounded-[32px] border border-white/10 bg-background p-8 shadow-2xl text-center">
           <div className="size-16 rounded-full bg-rose-500/10 flex items-center justify-center mx-auto mb-6">
             <span className="text-2xl">⚠️</span>
           </div>

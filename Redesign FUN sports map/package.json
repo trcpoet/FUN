@@ -10,7 +10,8 @@
     "import-osm": "node scripts/import-osm-venues.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "og:card": "node scripts/render-og-card.mjs"
   },
   "dependencies": {
     "@clerk/react": "^6.12.2",

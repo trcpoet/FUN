@@ -86,7 +86,7 @@ export function VenuePhotoCarousel({
               {fallbackEmoji}
             </div>
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-transparent to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
         </div>
         {onAddPhoto && !loading ? (
           <button
@@ -124,7 +124,7 @@ export function VenuePhotoCarousel({
                 ) : (
                   <div className="absolute inset-0 bg-white/[0.03]" />
                 )}
-                <div className="absolute inset-0 bg-gradient-to-t from-[#0A0F1C] via-transparent to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
               </div>
             </CarouselItem>
           ))}
