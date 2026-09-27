@@ -313,6 +313,52 @@ is done.
   `get_my_saved_venues`, `get_saved_venue_ids`. Verified: toggle on/off/on,
   another member reads zero of mine, anon refused.
 
+- **`20260928120000_chat_reads.sql` — ✅ APPLIED 2026-09-28.** Additive: `chat_reads`
+  (`thread_kind` + `thread_id` + `user_id`, no FK on `thread_id` because it points at
+  three tables), five RLS policies, `viewer_is_dm_thread_member`, `mark_thread_read`,
+  `get_thread_read_receipts`, `get_my_unread_counts`, three sender triggers, a backfill
+  seeding everyone at `now()`, and the table added to `supabase_realtime`.
+
+  Read state got its own table rather than a `last_read_at` column on the membership
+  tables for two reasons found while designing it: `game_participants` SELECT is
+  `to public using (true)`, so a column there would publish "when was this person last
+  on their phone" to anon; and `dm_thread_members` SELECT is self-only, so while a
+  definer RPC could read a peer's watermark, **Realtime cannot** — it evaluates RLS with
+  the subscriber's own JWT and cannot route through a definer function, so "Seen" could
+  never have updated live from there.
+
+  Verified in a rolled-back transaction before applying: a backward mark and an equal
+  mark both leave the row's `ctid` at `(0,1)` — no write, therefore no WAL, therefore no
+  realtime fan-out — while a forward mark moves it to `(0,2)`. Also verified: a future
+  timestamp is clamped to `now()`, a non-participant is refused, an unknown thread kind
+  is refused, a member sees a peer's row in a shared game, nobody sees a peer's *note*
+  row (notes have no audience, so they are own-row only), and `anon` is refused on both
+  the table and the function. Backfill wrote 45 game rows and 6 dm rows; `map_notes` is
+  empty so the note backfill correctly wrote none. Row counts unchanged.
+
+  One correction applied on top (`chat_reads_tighten_grants`): Supabase's schema-wide
+  default hands `authenticated` DELETE, TRUNCATE, REFERENCES and TRIGGER on every public
+  table — `games` has them too, so this is not new — but nothing ever deletes a read
+  watermark, so they are revoked here.
+
+- **`20260928130000_chat_message_client_id.sql` — ✅ APPLIED 2026-09-28.** Additive:
+  nullable `client_id` / `edited_at` / `deleted_at` on `game_messages`, `dm_messages`
+  and `map_note_comments`, plus three partial unique indexes on `(user_id, client_id)`.
+  The index is what makes retry safe: a resend raises `23505`, which the client treats
+  as success instead of posting the message twice.
+
+- **`20260928140000_chat_realtime_publication.sql` — ✅ APPLIED 2026-09-28.** One line:
+  `notifications` added to `supabase_realtime`. **The bell has never worked.** The
+  publication has held exactly `dm_messages` and `game_messages` since it was created
+  and no migration ever added to it, so `subscribeToNotifications` has never fired an
+  event in production or anywhere. Safe unfiltered, because the table's only SELECT
+  policy is `auth.uid() = user_id` and Realtime evaluates it with the subscriber's JWT.
+  Publication now: `chat_reads, dm_messages, game_messages, notifications`.
+
+  Advisors after all three: the only flagged objects are `st_estimatedextent` and
+  `spatial_ref_sys` (PostGIS) and `push_notifications_sent` (RLS on, no policy, so it
+  denies everyone — service-role only). Nothing added here is flagged.
+
 ## Open security finding — anonymous sign-ins are enabled
 
 Not a migration, and not introduced by this work, but it interacts badly with it.
