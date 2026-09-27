@@ -152,17 +152,59 @@ Two live consequences of Step 1, both intended:
   going to remove it anyway). Verified safe: the only caller is `Feed.tsx`, behind
   `RequireMember`.
 
-**Step 2 — merge `perf/map-raf-write-budget` into main and let Vercel deploy.**
-Confirm the new build is live before going on.
+**Step 2 — merge and deploy. ✅ DONE 2026-09-27 15:10 UTC.** Merged as `5f49a11`;
+Vercel served the new build on `fun-trcpoet.vercel.app` 50 seconds later. Confirmed
+by fingerprint rather than by assumption — `theme-color` `#0B0C10`→`#0A0F1C`, the
+cold-boot loader core `#10b981`→`#00F2FE`, and `/og-card.png` 404→200 — then by
+driving the deployed page: map canvas rendered, Outfit loaded, `--primary` resolving
+to `#00f2fe`, and **zero JS errors**.
 
-**Step 3 — after the deploy is confirmed.** These break the old client, which is
-why they wait until it is gone.
+Note PR #31 had already merged only the *first* commit of the branch six days
+earlier; the merge brought the remaining 15.
+
+**Step 3 — after the deploy. ✅ APPLIED 2026-09-27.** These break the *old* client,
+which is why they waited until it was gone.
 
 ```
-20260926120000_venues_in_bbox_slim.sql                      (old client loses hero/hours on map pins)
-20260922120000_game_read_visibility_and_invite_tokens.sql   (BREAKS old client's chat inbox)
-20260922140000_guest_browse_lock_anon_tables.sql            (BREAKS old client's guest reads)
+20260926120000_venues_in_bbox_slim.sql                      ✅ applied + verified
+20260922120000_game_read_visibility_and_invite_tokens.sql   ✅ applied + verified
+20260922140000_guest_browse_lock_anon_tables.sql            ✅ applied + verified
 ```
+
+The precondition for the last one was checked against the live site before applying
+it, not assumed: a full network capture of the deployed guest session showed
+**zero direct table reads** — every call went through `get_guest_games_nearby`,
+`get_guest_notes_nearby` and `get_venues_in_bbox`. That is exactly what the lockdown
+requires, so it could not break what nothing was calling.
+
+What Step 3 verification exercised:
+
+- `get_venues_in_bbox` still returns 1000 rows for the same bbox, now 9 columns and
+  **96 bytes per row** instead of 20 columns, and `anon` can still execute it;
+- `games.invite_token` unreadable by `anon` and `authenticated` while every other
+  column stays readable; a direct `select invite_token` refused with permission
+  denied; `get_game_invite_token` returning the uuid to the host and `null` to an
+  outsider — no error, no oracle;
+- after the lockdown, a guest reading `profiles`, `map_notes`, `user_follows`,
+  `venue_reviews` and `games` directly gets **0 rows from each**, while
+  `get_venues_in_bbox` still returns venues. The table-level SELECT grant is
+  deliberately retained (so the SECURITY INVOKER feed RPCs return an empty list
+  rather than raising) — it is the *policies* that no longer name `anon`;
+- the live site re-checked afterwards: same three RPCs at 200, still zero direct
+  table reads, still zero JS errors.
+
+The two guest RPCs return 0 rows in production right now. That is the data, not a
+regression: there are **0 map notes in the database**, and all 45 games are
+`completed` (the newest expired the day before, and the new pg_cron sweep tidied
+their status).
+
+### Follow-up
+
+`schema.sql` has not been regenerated for these nine. `scripts/dump-schema.mjs`
+shells out to the `supabase` binary, which is not installed on this machine
+(`spawnSync supabase ENOENT`). Install the CLI and run `node scripts/dump-schema.mjs
+> supabase/schema.sql` so the baseline stops drifting — it is currently nine
+migrations behind production.
 
 Run each file on its own, in a single transaction, and stop on the first error —
 three of them drop and recreate a function, and without a transaction there is a
