@@ -72,8 +72,11 @@ import { TrustBadge } from "./chat/TrustBadge";
 import {
   dmMessageToChat,
   gameMessageToChat,
+  newClientId,
   noteCommentToChat,
+  pendingToChat,
   type ChatMessage,
+  type PendingMessage,
 } from "./chat/messageTypes";
 import { useChatTrust, type ChatTrust } from "../../hooks/useChatTrust";
 import { NoteCommentLikeButton } from "./feed/NoteCommentLikeButton";
@@ -472,6 +475,10 @@ export function GameMessengerSheet({
   const lastSeenMessageId = useRef<string | null>(null);
   /** Everyone else's read watermark in the open thread. */
   const [receipts, setReceipts] = useState<ReadReceiptRow[]>([]);
+  /** Messages drawn before the server confirmed them. */
+  const [pending, setPending] = useState<PendingMessage[]>([]);
+  /** Bumped to force the open thread to re-hydrate. */
+  const [reloadKey, setReloadKey] = useState(0);
 
   const handleOpenThreadLocation = useCallback(async () => {
     if (!focusThread) return;
@@ -677,7 +684,7 @@ export function GameMessengerSheet({
       cancelled = true;
       unsub();
     };
-  }, [open, focusThread]);
+  }, [open, focusThread, reloadKey]);
 
   useEffect(() => {
     if (!open || !focusThread || focusThread.kind !== "dm") {
@@ -714,7 +721,7 @@ export function GameMessengerSheet({
       cancelled = true;
       unsubscribe();
     };
-  }, [open, focusThread]);
+  }, [open, focusThread, reloadKey]);
 
   // Note threads: hydrate the post + comments + realtime fan-out for new comments.
   useEffect(() => {
@@ -802,6 +809,7 @@ export function GameMessengerSheet({
   useEffect(() => {
     lastSeenMessageId.current = null;
     setUnseenCount(0);
+    setPending([]);
   }, [focusThread]);
 
   useEffect(() => {
@@ -879,6 +887,93 @@ export function GameMessengerSheet({
     };
   }, [open, focusThread]);
 
+  /**
+   * Put the message on screen, then try to send it.
+   *
+   * The bubble appears before the round trip and stays there, dimmed, until the
+   * row comes back. A failure turns it amber with "tap to retry" rather than
+   * dropping the text on the floor, which is what a lost send used to do beyond
+   * an error line above the composer.
+   *
+   * Retry is safe because of the `(user_id, client_id)` unique index: if the
+   * first attempt actually landed and only the response was lost, the second
+   * raises 23505, which `sendGameMessage` reports as `duplicate` and this treats
+   * as success. Re-hydrating afterwards guarantees the confirmed row is on
+   * screen even if its realtime event was the thing that went missing.
+   *
+   * Note comments are sent the old way: `add_note_comment` is an RPC that takes
+   * no client id, so there is nothing to reconcile a pending bubble against, and
+   * matching on body would mis-merge two identical replies.
+   */
+  const deliver = useCallback(
+    async (body: string, clientId: string) => {
+      if (!focusThread) return;
+
+      setPending((prev) => {
+        const without = prev.filter((p) => p.clientId !== clientId);
+        return [
+          ...without,
+          { clientId, body, createdAtMs: Date.now(), status: "sending" as const },
+        ];
+      });
+      setSendError(null);
+
+      const fail = (message: string) => {
+        setPending((prev) =>
+          prev.map((p) => (p.clientId === clientId ? { ...p, status: "failed" as const } : p)),
+        );
+        setSendError(message);
+      };
+      const settle = () => setPending((prev) => prev.filter((p) => p.clientId !== clientId));
+
+      if (focusThread.kind === "game") {
+        const { data: sent, error, duplicate } = await sendGameMessage(
+          focusThread.gameId,
+          body,
+          clientId,
+        );
+        if (error) return fail(error.message);
+        settle();
+        if (sent) {
+          setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
+        } else if (duplicate) {
+          setReloadKey((n) => n + 1);
+        }
+        loadInbox();
+        return;
+      }
+
+      if (focusThread.kind === "dm") {
+        const { data: sent, error, duplicate } = await sendDmMessage(
+          focusThread.threadId,
+          body,
+          clientId,
+        );
+        if (error) return fail(error.message);
+        settle();
+        if (sent) {
+          setDmMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
+        } else if (duplicate) {
+          setReloadKey((n) => n + 1);
+        }
+        loadDmInbox();
+        return;
+      }
+
+      const { data: sent, error } = await addNoteComment({
+        noteId: focusThread.noteId,
+        body,
+      });
+      if (error) return fail(error.message);
+      settle();
+      if (sent) {
+        setNoteComments((prev) => (prev.some((c) => c.id === sent.id) ? prev : [...prev, sent]));
+      }
+      loadNoteInbox();
+    },
+    [focusThread, loadInbox, loadDmInbox, loadNoteInbox],
+  );
+
   const handleSend = async () => {
     if (!focusThread || !draft.trim()) return;
     setSendError(null);
@@ -886,46 +981,25 @@ export function GameMessengerSheet({
       setSendError("Sign in to send messages.");
       return;
     }
-
+    const body = draft.trim();
+    // Clear the composer first. Holding the text hostage until the server
+    // answers is what makes a slow connection feel broken.
+    setDraft("");
     setSending(true);
-    if (focusThread.kind === "game") {
-      const { data: sent, error } = await sendGameMessage(focusThread.gameId, draft);
+    try {
+      await deliver(body, newClientId());
+    } finally {
       setSending(false);
-      if (error) {
-        setSendError(error.message);
-        return;
-      }
-      setDraft("");
-      if (sent) {
-        setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
-      }
-      loadInbox();
-    } else if (focusThread.kind === "note") {
-      const { data: sent, error } = await addNoteComment({ noteId: focusThread.noteId, body: draft });
-      setSending(false);
-      if (error) {
-        setSendError(error.message);
-        return;
-      }
-      setDraft("");
-      if (sent) {
-        setNoteComments((prev) => (prev.some((c) => c.id === sent.id) ? prev : [...prev, sent]));
-      }
-      loadNoteInbox();
-    } else {
-      const { data: sent, error } = await sendDmMessage(focusThread.threadId, draft);
-      setSending(false);
-      if (error) {
-        setSendError(error.message);
-        return;
-      }
-      setDraft("");
-      if (sent) {
-        setDmMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
-      }
-      loadDmInbox();
     }
   };
+
+  const handleRetry = useCallback(
+    (message: ChatMessage) => {
+      if (!message.clientId) return;
+      void deliver(message.body, message.clientId);
+    },
+    [deliver],
+  );
 
   const handleLeaveChat = async () => {
     if (!focusThread || focusThread.kind !== "game" || !onLeaveThread || leavingThread) return;
@@ -1075,11 +1149,20 @@ export function GameMessengerSheet({
    * next to the timestamp, and those are the three functions below.
    */
   const chatMessages = useMemo<ChatMessage[]>(() => {
-    if (focusThread?.kind === "dm") return dmMessages.map(dmMessageToChat);
-    if (focusThread?.kind === "note") return noteComments.map(noteCommentToChat);
-    if (focusThread?.kind === "game") return messages.map(gameMessageToChat);
-    return [];
-  }, [focusThread, dmMessages, noteComments, messages]);
+    const kind = focusThread?.kind;
+    const base =
+      kind === "dm"
+        ? dmMessages.map(dmMessageToChat)
+        : kind === "note"
+          ? noteComments.map(noteCommentToChat)
+          : kind === "game"
+            ? messages.map(gameMessageToChat)
+            : [];
+    if (!kind || pending.length === 0) return base;
+    // Pending bubbles always sit at the end: they are the most recent thing you
+    // did, whatever the server's clock later says about them.
+    return [...base, ...pending.map((p) => pendingToChat(p, currentUserId, kind))];
+  }, [focusThread, dmMessages, noteComments, messages, pending, currentUserId]);
 
   const chatLoading =
     focusThread?.kind === "dm"
@@ -1998,6 +2081,7 @@ export function GameMessengerSheet({
                     ) : null
                   }
                   onOpenAuthor={(uid) => navigate(`/athlete/${uid}`)}
+                  onRetry={handleRetry}
                   canLoadOlder={hasOlder && !chatLoading}
                   loadingOlder={loadingOlder}
                   onLoadOlder={() => void handleLoadOlder()}

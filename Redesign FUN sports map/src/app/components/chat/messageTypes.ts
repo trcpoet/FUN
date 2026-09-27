@@ -27,7 +27,47 @@ export type ChatMessage = {
    * may reach for this — it is the seam, not an escape hatch.
    */
   noteComment?: MapNoteCommentRow;
+  /**
+   * Set only on a bubble drawn before the server confirmed it. Absent means the
+   * message is real, which is what every message from the server is.
+   */
+  status?: "sending" | "failed";
+  /** The id this client chose, used to match the pending bubble to its row. */
+  clientId?: string;
 };
+
+/** A message drawn before the server has confirmed it. */
+export type PendingMessage = {
+  clientId: string;
+  body: string;
+  createdAtMs: number;
+  status: "sending" | "failed";
+};
+
+export function pendingToChat(p: PendingMessage, authorId: string | null, kind: ChatThreadKind): ChatMessage {
+  return {
+    id: `pending:${p.clientId}`,
+    threadKind: kind,
+    authorId,
+    body: p.body,
+    createdAt: new Date(p.createdAtMs).toISOString(),
+    createdAtMs: p.createdAtMs,
+    status: p.status,
+    clientId: p.clientId,
+  };
+}
+
+/** A fresh client id. `randomUUID` is absent on old iOS Safari over http. */
+export function newClientId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch {
+    /* fall through */
+  }
+  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export function gameMessageToChat(row: GameMessageRow): ChatMessage {
   return {

@@ -37,6 +37,8 @@ export type MessageBubbleProps = {
   /** Sits opposite the timestamp. Today: the note-comment Like button. */
   footerSlot?: ReactNode;
   onOpenAuthor?: () => void;
+  /** Offered when the send failed. */
+  onRetry?: () => void;
   className?: string;
 };
 
@@ -53,11 +55,14 @@ export function MessageBubble({
   veil,
   footerSlot,
   onOpenAuthor,
+  onRetry,
   className,
 }: MessageBubbleProps) {
   const veiled = veil != null;
   const named = !mine && author != null;
   const time = format(new Date(message.createdAt), "h:mm a");
+  const sending = message.status === "sending";
+  const failed = message.status === "failed";
 
   return (
     <div
@@ -87,6 +92,10 @@ export function MessageBubble({
       <div
         className={cn(
           "max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
+          // A message in flight is dimmed rather than removed: it is there, it
+          // just is not certain yet.
+          sending && "opacity-60",
+          failed && "ring-1 ring-amber-400/40",
           mine
             ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white"
             : veiled
@@ -125,7 +134,17 @@ export function MessageBubble({
           <p className="whitespace-pre-wrap break-words">{message.body}</p>
         )}
 
-        {run.end ? (
+        {failed ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-1 text-[10px] font-semibold text-amber-200 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/50"
+          >
+            Failed — tap to retry
+          </button>
+        ) : sending ? (
+          <p className="mt-1 text-[10px] text-violet-50/70">Sending…</p>
+        ) : run.end ? (
           footerSlot ? (
             <div className="mt-1 flex items-center justify-between gap-2 opacity-90">
               <p className={cn("text-[10px] opacity-80", mine ? "text-violet-50/90" : "text-slate-400/80")}>

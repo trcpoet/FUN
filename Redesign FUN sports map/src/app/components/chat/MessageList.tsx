@@ -34,6 +34,8 @@ export type MessageListProps = {
   /** Rendered directly below one bubble — the "Seen by" faces. */
   renderAfter?: (message: ChatMessage) => ReactNode;
   onOpenAuthor?: (userId: string) => void;
+  /** Re-send a message whose send failed. */
+  onRetry?: (message: ChatMessage) => void;
   /** There is older history to fetch. */
   canLoadOlder?: boolean;
   loadingOlder?: boolean;
@@ -65,6 +67,7 @@ export function MessageList({
   footerSlotFor,
   renderAfter,
   onOpenAuthor,
+  onRetry,
   canLoadOlder,
   loadingOlder,
   onLoadOlder,
@@ -149,6 +152,7 @@ export function MessageList({
                       ? () => onOpenAuthor(item.message.authorId!)
                       : undefined
                   }
+                  onRetry={onRetry ? () => onRetry(item.message) : undefined}
                 />
               );
               if (!after) return bubble;
