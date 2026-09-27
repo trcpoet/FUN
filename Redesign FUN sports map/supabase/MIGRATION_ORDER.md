@@ -359,6 +359,34 @@ is done.
   `spatial_ref_sys` (PostGIS) and `push_notifications_sent` (RLS on, no policy, so it
   denies everyone — service-role only). Nothing added here is flagged.
 
+- **`20260928150000_note_comment_write_visibility.sql` — ✅ APPLIED 2026-09-28.** Adds
+  `map_note_visible_to(note, viewer)` and makes `add_note_comment` call it.
+
+  **This corrects a finding that was wrong.** The plan for the chat work recorded that
+  `map_note_comments: read if can see note` "ignores `map_notes.visibility`, so every note
+  comment is readable by anon". Tested against production, it is not: the policy delegates
+  to `exists (select 1 from map_notes n where n.id = note_id)`, and Postgres applies
+  `map_notes`' own RLS to that subquery, so an invisible note makes the EXISTS false. The
+  visibility check is inherited, not missing. A member who cannot see a private note reads
+  **zero** of its comments; so does anon, which is additionally excluded because the policy
+  is `to authenticated`. The positive control passed in the same transaction — the same
+  member reads a public note's comment fine — so the zeroes mean what they say.
+
+  **The real bug was the opposite: a write hole, not a read leak.** `add_note_comment` is
+  SECURITY DEFINER, so it runs as the table owner and does not inherit that check, and it
+  validated nothing. A member who could neither read A's private note nor insert into it
+  directly could call the RPC and land a comment in A's private thread.
+
+  Verified after applying, six cases: non-owner into a private note refused; non-follower
+  into a friends-only note refused; nonexistent note refused with the *same* error, so the
+  RPC cannot be used to probe which ids exist; owner into their own private note allowed;
+  mutual follower into a friends-only note allowed; anyone into a public note allowed.
+
+  Note: one intermediate run appeared to show a non-follower posting to a friends-only
+  note. That was a bad fixture, not a bug — the two test accounts follow each other in
+  production, so the "stranger" was a friend. Re-run with a genuine non-follower, it is
+  refused.
+
 ## Open security finding — anonymous sign-ins are enabled
 
 Not a migration, and not introduced by this work, but it interacts badly with it.

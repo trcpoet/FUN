@@ -167,11 +167,17 @@ export function subscribeAllMessages(args: {
  * My own notifications.
  *
  * Note activity comes this way rather than through an unfiltered
- * `map_note_comments` subscription, because that table's SELECT policy
- * ("read if can see note") never checks `map_notes.visibility` — an unfiltered
- * subscription would therefore deliver every note comment in the database to
- * every user. That policy is a pre-existing bug worth fixing on its own; this
- * route sidesteps it rather than depending on it.
+ * `map_note_comments` subscription, for the plain reason that the table is not
+ * in the `supabase_realtime` publication — such a subscription would deliver
+ * nothing at all.
+ *
+ * An earlier version of this comment claimed the table's SELECT policy leaked
+ * every note comment because it "never checks map_notes.visibility". That was
+ * wrong, and worth recording so nobody re-derives it: the policy delegates to
+ * `exists (select 1 from map_notes n where n.id = note_id)`, and Postgres
+ * applies `map_notes`' own RLS to that subquery, so an invisible note makes the
+ * EXISTS false. The visibility check is inherited, not missing. Verified against
+ * production: a member who cannot see a private note reads zero of its comments.
  */
 export function subscribeMyNotifications(
   userId: string,
