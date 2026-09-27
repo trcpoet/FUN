@@ -144,6 +144,22 @@ where proname = '<name>' and pronargs = <n> and pronamespace = 'public'::regname
   is not, the migration raises a notice instead of failing, and the sweep stays
   unscheduled (no read path depends on it).
 
+- **`20260927130000_game_social.sql` — apply before the client that reads it.**
+  Additive: three new tables (`game_comments`, `game_comment_likes`, `game_likes`),
+  their RLS, and the RPCs the feed card calls. Every policy delegates to the games
+  read policy, so nothing here decides visibility on its own. `anon` holds no table
+  privilege at all — a guest reads comments only through `get_guest_game_comments`,
+  which projects no `user_id`. The client tolerates its absence (a game simply shows
+  no conversation), so the order is a preference, not a requirement.
+
+- **`20260927140000_unified_feed_games_v2.sql` — apply WITH or after the client.**
+  Drop + create: `get_unified_feed` gains a `game` jsonb column and real social
+  counts for games. The shipped client ignores the extra column, so applying it
+  early is safe; applying it late means feed game cards render without a schedule
+  or spots until it lands (`feedItemToGameRow` handles a null `game`). Depends on
+  `game_social` for the two tables it counts. Re-run
+  `notify pgrst, 'reload schema';` after.
+
 ## Known gaps
 
 - The SQL Editor snippets in the Supabase dashboard are **historical scratch**, not a

@@ -1,5 +1,28 @@
 # Schema changelog
 
+## 2026-09-27 — Games become things you can talk about in public
+
+`20260927130000_game_social.sql`, then `20260927140000_unified_feed_games_v2.sql`.
+
+Before: a game had exactly one conversation, `game_messages` — the private thread
+for people who had already joined. There was nowhere to ask the question you ask
+*before* joining ("beginners welcome?", "is there parking?"), and the feed threw
+games away entirely, because `get_unified_feed` returned them with
+`comment_count = 0, like_count = 0, liked_by_me = false` hard-coded and no start
+time, status, spots or venue. There was nothing to put on a card you could act on.
+
+After: `game_comments`, `game_comment_likes` and `game_likes` give a game the same
+three tables notes already had, with the same RPC surface, so the feed renders both
+through the same components. Every policy delegates to the games read policy — a
+comment on an invite-only game is invisible to someone who cannot see the game,
+without this migration knowing anything about visibility — and `anon` holds no
+privilege on the tables at all, reading only through `get_guest_game_comments`,
+which projects no author. `get_unified_feed` returns a `game` jsonb column with
+everything a joinable card needs, including whether the viewer is already in, and
+real counts. It also gains the untimed-TTL predicate it never had: a pickup game
+with no start time used to sit in the feed forever, while the map retired it after
+three days.
+
 ## 2026-09-27 — An ended game ends
 
 `20260927120000_game_lifecycle_fixes.sql`.

@@ -173,6 +173,24 @@ export async function addNoteComment(params: {
   return { data: (data as MapNoteCommentRow) ?? null, error: error ? new Error(error.message) : null };
 }
 
+// Statuses live in `./status.ts`. Re-exported so components reach them through
+// the centralized layer, per the rule in CLAUDE.md. (Profile and PublicProfile
+// still import that module directly — worth moving when they are next touched.)
+export { upsertMyStatus, getRecentStatuses, getLatestStatus } from "./status";
+export type { StatusRow } from "./status";
+
+// The public conversation on a game lives in `./gameSocial.ts` — same reason as
+// the re-exports below: components import data helpers from here only.
+export {
+  fetchGameComments,
+  addGameComment,
+  deleteGameComment,
+  toggleGameCommentLike,
+  toggleGameLike,
+  fetchGameSocialCounts,
+} from "./gameSocial";
+export type { GameCommentRow, GameSocialCounts } from "./gameSocial";
+
 // Map-notes inbox + realtime live in `./mapNotes.ts`. Re-export here so the
 // rest of the app keeps importing data helpers from the centralized API layer.
 export {
@@ -233,8 +251,17 @@ export type UnifiedFeedItem =
       visibility: GameVisibility;
       comment_count: number;
       created_by: string | null;
-      /** Always 0 — games have no like feature, so there is no `liked_by_me` either. */
       like_count: number;
+      liked_by_me: boolean;
+      /**
+       * Everything a joinable card renders, from `unified_feed_games_v2`.
+       *
+       * One jsonb column rather than nine on the union, because notes and
+       * statuses would carry eight nulls each and because it keeps "this is
+       * about a game" legible. Null when the RPC predates that migration, which
+       * is exactly the case the feed card falls back for.
+       */
+      game: FeedGameMeta | null;
     }
   | {
       kind: "status";
@@ -251,6 +278,64 @@ export type UnifiedFeedItem =
       like_count: number;
       liked_by_me: boolean;
     };
+
+/** The `game` object on a unified-feed game row. */
+export type FeedGameMeta = {
+  starts_at: string | null;
+  ends_at: string | null;
+  ended_at: string | null;
+  live_started_at: string | null;
+  duration_minutes: number | null;
+  status: "open" | "full" | "live" | "completed" | "cancelled" | null;
+  location_label: string | null;
+  spots_needed: number | null;
+  participant_count: number | null;
+  substitute_count: number | null;
+  spots_remaining: number | null;
+  distance_km: number | null;
+  requirements: Record<string, unknown> | null;
+  joined_by_me: boolean | null;
+};
+
+/**
+ * A feed game row as the `GameRow` the rest of the app reasons with.
+ *
+ * `gameViewerRole`, `GameActionBar` and every `mapGameTimer` predicate take a
+ * `GameRow`; the feed has the same facts in a different shape. Converting once
+ * here is what lets a feed card offer the identical Join/Start/End behaviour as
+ * the map popup, rather than a second implementation of the same rules.
+ */
+export function feedItemToGameRow(
+  item: Extract<UnifiedFeedItem, { kind: "game" }>,
+): GameRow {
+  const g = item.game;
+  const participants = g?.participant_count ?? 0;
+  const remaining = g?.spots_remaining ?? 0;
+  return {
+    id: item.id,
+    title: item.title?.trim() || "Pickup game",
+    sport: item.sport ?? "",
+    spots_needed: g?.spots_needed ?? participants + remaining,
+    participant_count: participants,
+    substitute_count: g?.substitute_count ?? 0,
+    spots_remaining: remaining,
+    starts_at: g?.starts_at ?? null,
+    created_by: item.created_by,
+    created_at: item.created_at,
+    status: g?.status ?? undefined,
+    live_started_at: g?.live_started_at ?? null,
+    ended_at: g?.ended_at ?? null,
+    duration_minutes: g?.duration_minutes ?? null,
+    ends_at: g?.ends_at ?? null,
+    visibility: item.visibility,
+    location_label: g?.location_label ?? null,
+    description: item.body,
+    requirements: g?.requirements ?? null,
+    distance_km: g?.distance_km ?? 0,
+    lat: item.lat,
+    lng: item.lng,
+  };
+}
 
 /** Games + map notes within a tight radius (default 25 km) for Discovery “Live”. */
 export type LiveFeedItem = Extract<UnifiedFeedItem, { kind: "game" | "note" }>;

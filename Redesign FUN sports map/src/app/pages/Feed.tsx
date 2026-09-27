@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   Compass,
@@ -15,6 +15,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
+import { toast } from "sonner";
 import { cn } from "../components/ui/utils";
 import { useNotifications } from "../../hooks/useNotifications";
 import { useGeolocation } from "../../hooks/useGeolocation";
@@ -27,13 +28,17 @@ import {
   fetchFeedMediaPosts,
   fetchUnifiedFeed,
   getSimilarAthletes,
+  fetchMyFollowedIds,
+  joinGame,
+  leaveGame,
+  upsertMyStatus,
   mergeGlobalNetworkChronological,
   type GlobalNetworkItem,
   type LiveFeedItem,
   type LocalNewsItem,
   type UnifiedFeedItem,
 } from "../../lib/api";
-import type { FeedMediaPostRow, SimilarAthleteRow } from "../../lib/supabase";
+import type { FeedMediaPostRow, GameRow, SimilarAthleteRow } from "../../lib/supabase";
 import { AVAILABILITY_OPTIONS } from "../../lib/athleteProfile";
 import {
   GameFeedCard,
@@ -170,9 +175,11 @@ function renderGlobalNetworkItem(
     userId: string | null | undefined;
     navigate: (to: string) => void;
     refreshFeeds: () => void;
+    onJoinGame: (game: GameRow) => Promise<void>;
+    onLeaveGame: (game: GameRow) => Promise<void>;
   },
 ): React.ReactNode {
-  const { userId, navigate, refreshFeeds } = ctx;
+  const { userId, navigate, refreshFeeds, onJoinGame, onLeaveGame } = ctx;
   if (row.type === "media") {
     return (
       <MediaFeedCard
@@ -200,6 +207,11 @@ function renderGlobalNetworkItem(
         currentUserId={userId ?? null}
         onOpenOnMap={() => navigate(`/?focusGameId=${encodeURIComponent(it.id)}`)}
         onInvalidate={refreshFeeds}
+        onJoin={onJoinGame}
+        onLeave={onLeaveGame}
+        // Chat is on the map, where the messenger lives. Landing on the game and
+        // opening its thread from there beats a second messenger in the feed.
+        onOpenChat={(g) => navigate(`/?focusGameId=${encodeURIComponent(g.id)}&chat=1`)}
       />
     );
   }
@@ -260,6 +272,68 @@ export default function Feed() {
   const [similarError, setSimilarError] = useState<Error | null>(null);
   const [enablingDiscovery, setEnablingDiscovery] = useState(false);
 
+  /**
+   * Join and leave, from the feed.
+   *
+   * The same two RPCs the map's popup calls; the refetch afterwards is what makes
+   * the card's spots bar and "You're in" state agree with the server, since the
+   * feed row carries `joined_by_me` from the same query.
+   */
+  const refreshFeedsRef = useRef<(() => void) | null>(null);
+
+  /** The composer behind the "Post update" button, which used to do nothing. */
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerDraft, setComposerDraft] = useState("");
+  const [composerBusy, setComposerBusy] = useState(false);
+
+  /** Who you follow, so "Following" can be the people you follow. */
+  const [followedIds, setFollowedIds] = useState<Set<string> | null>(null);
+
+  const handleJoinGame = useCallback(
+    async (game: GameRow) => {
+      const { error: err, role } = await joinGame(game.id);
+      if (err) {
+        toast.error("Couldn't join", { description: err.message });
+        return;
+      }
+      toast.success(
+        role === "substitute" ? "You're on the waitlist" : "You're in",
+        { description: role === "substitute" ? "We'll tell you if a spot opens." : "The squad chat is on the map." },
+      );
+      refreshFeedsRef.current?.();
+    },
+    [],
+  );
+
+  const handleLeaveGame = useCallback(
+    async (game: GameRow) => {
+      const err = await leaveGame(game.id);
+      if (err) {
+        toast.error("Couldn't leave", { description: err.message });
+        return;
+      }
+      toast.success("You're out");
+      refreshFeedsRef.current?.();
+    },
+    [],
+  );
+
+  const handlePostUpdate = useCallback(async () => {
+    const body = composerDraft.trim();
+    if (!body || composerBusy) return;
+    setComposerBusy(true);
+    const err = await upsertMyStatus(body);
+    setComposerBusy(false);
+    if (err) {
+      toast.error("Couldn't post that", { description: err.message });
+      return;
+    }
+    setComposerDraft("");
+    setComposerOpen(false);
+    toast.success("Posted");
+    refreshFeedsRef.current?.();
+  }, [composerDraft, composerBusy]);
+
   const refreshFeeds = useCallback(() => {
     setMediaLoading(true);
     // Fetch the personal set (public + squad + own via RLS); Explore derives the public subset.
@@ -287,28 +361,69 @@ export default function Feed() {
       setLiveItems(r.data ?? []);
     });
   }, [coords?.lat, coords?.lng, user?.id]);
+  /**
+   * The follow graph, loaded when the Following tab is first opened.
+   *
+   * Deferred rather than loaded on mount: most visits never open this tab, and
+   * the query is a round-trip the map already pays for elsewhere.
+   */
+  useEffect(() => {
+    if (tab !== "friends" || followedIds !== null || !user?.id) return;
+    let cancelled = false;
+    void fetchMyFollowedIds().then((r) => {
+      if (cancelled) return;
+      setFollowedIds(r.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, followedIds, user?.id]);
 
-  // Explore = strictly public content; Feed = personal (public + squad + own).
+  /** Everything from the people you actually follow, newest first. */
+  const followingStream = useMemo(() => {
+    if (!followedIds || followedIds.size === 0) return [];
+    return mergeGlobalNetworkChronological(
+      unified.filter((it) => it.created_by != null && followedIds.has(it.created_by)),
+      mediaPosts.filter((m) => followedIds.has(m.user_id)),
+    );
+  }, [followedIds, unified, mediaPosts]);
+
+  // The join/leave handlers are declared above this and must not close over
+  // `refreshFeeds` directly — that would rebuild them on every feed change, and
+  // GameActionBar resets its busy state when its handlers change identity.
+  refreshFeedsRef.current = refreshFeeds;
+
+
   const publicMedia = useMemo(
     () => mediaPosts.filter((m) => (m.visibility ?? "public") === "public" && !m.authorIsPrivate),
     [mediaPosts],
   );
 
-  // Games live on the Recommended Games page; Explore stays social-only and public.
+  /**
+   * Explore: everything public near you, games included.
+   *
+   * Games were filtered out here and in the activity stream below, on the
+   * grounds that they "live on the Recommended Games page". That made the one
+   * thing this app is about the one thing its feed would not show — and a game
+   * is a better post than a status, because you can act on it. The card is a
+   * real one now (schedule, spots, Join, a public thread), so there is nothing
+   * to protect the feed from.
+   */
   const mergedGlobal = useMemo(
     () =>
       mergeGlobalNetworkChronological(
-        coords ? unified.filter((it) => it.kind !== "game" && unifiedItemIsPublic(it)) : [],
+        coords ? unified.filter((it) => unifiedItemIsPublic(it)) : [],
         publicMedia,
       ),
     [coords, unified, publicMedia],
   );
 
-  // Feed (activity) social stream: your squad's photos/reels + statuses you're allowed to see.
+  // Feed (activity): your squad's photos and statuses, plus the games near you —
+  // the same reasoning as Explore, and the reason someone opens this tab at all.
   const activitySocial = useMemo(
     () =>
       mergeGlobalNetworkChronological(
-        unified.filter((it) => it.kind === "status"),
+        unified.filter((it) => it.kind === "status" || it.kind === "game"),
         mediaPosts,
       ),
     [unified, mediaPosts],
@@ -646,6 +761,8 @@ export default function Feed() {
                         userId: user?.id,
                         navigate,
                         refreshFeeds,
+                        onJoinGame: handleJoinGame,
+                        onLeaveGame: handleLeaveGame,
                       })}
                     </li>
                   ))}
@@ -694,7 +811,13 @@ export default function Feed() {
                 <ul className="grid gap-6">
                   {activitySocial.map((row, i) => (
                     <li key={globalNetworkRowKey(row, i)}>
-                      {renderGlobalNetworkItem(row, { userId: user?.id, navigate, refreshFeeds })}
+                      {renderGlobalNetworkItem(row, {
+                        userId: user?.id,
+                        navigate,
+                        refreshFeeds,
+                        onJoinGame: handleJoinGame,
+                        onLeaveGame: handleLeaveGame,
+                      })}
                     </li>
                   ))}
                 </ul>
@@ -821,12 +944,45 @@ export default function Feed() {
         )}
 
         {tab === "friends" && (
-          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 text-center py-20">
-            <div className="size-20 bg-white/[0.03] border border-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Sparkles className="size-8 text-muted-foreground" />
-            </div>
-            <h2 className="text-xl font-black italic uppercase text-white mb-2">Following</h2>
-            <p className="text-sm text-muted-foreground max-w-xs mx-auto">Updates from your squad will appear here. Start following players from the map!</p>
+          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {followedIds === null ? (
+              <GlobalNetworkSkeleton />
+            ) : followingStream.length === 0 ? (
+              <div className="py-20 text-center">
+                <div className="mx-auto mb-6 flex size-20 items-center justify-center rounded-full bg-surface-1">
+                  <Sparkles className="size-8 text-muted-foreground" />
+                </div>
+                <h2 className="mb-2 text-xl font-black uppercase italic text-white">
+                  {followedIds.size === 0 ? "Nobody yet" : "Nothing new"}
+                </h2>
+                <p className="mx-auto max-w-xs text-sm text-muted-foreground">
+                  {followedIds.size === 0
+                    ? "Follow the players you meet and their games, notes and photos land here."
+                    : "The people you follow have not posted or hosted anything nearby lately."}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate("/")}
+                  className="mt-6 inline-flex min-h-11 items-center rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-[var(--glow-md)] transition hover:bg-primary-container"
+                >
+                  Find players on the map
+                </button>
+              </div>
+            ) : (
+              <ul className="grid gap-6">
+                {followingStream.map((row, i) => (
+                  <li key={globalNetworkRowKey(row, i)}>
+                    {renderGlobalNetworkItem(row, {
+                      userId: user?.id,
+                      navigate,
+                      refreshFeeds,
+                      onJoinGame: handleJoinGame,
+                      onLeaveGame: handleLeaveGame,
+                    })}
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         )}
 
@@ -908,18 +1064,60 @@ export default function Feed() {
         )}
       </main>
 
-      {/* Persistent Action Bar */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[70] w-full max-w-xs px-4">
-        <button
-          type="button"
-          onClick={() => {
-            // Wire to post composer
-          }}
-          className="flex w-full items-center justify-center gap-3 rounded-[32px] bg-primary px-8 py-5 text-sm font-black uppercase italic tracking-tighter text-white shadow-[0_20px_40px_-10px_rgba(225,29,72,0.4)] transition-all hover:scale-105 active:scale-95 group"
-        >
-          <PenSquare className="size-5 group-hover:rotate-12 transition-transform" />
-          Post Update
-        </button>
+      {/* Post an update. This button was a no-op with a "Wire to post composer"
+          comment behind it, under a rose-coloured shadow it never matched. */}
+      <div className="fixed bottom-8 left-1/2 z-[70] w-full max-w-sm -translate-x-1/2 px-4">
+        {composerOpen ? (
+          <div className="rounded-[28px] bg-surface-2/95 p-3 shadow-[var(--glow-lg)] backdrop-blur-xl">
+            <textarea
+              value={composerDraft}
+              onChange={(e) => setComposerDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setComposerOpen(false);
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void handlePostUpdate();
+              }}
+              rows={3}
+              maxLength={280}
+              autoFocus
+              placeholder="What are you playing today?"
+              className="w-full resize-none rounded-2xl bg-surface-3 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              aria-label="Your update"
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="pl-1 text-[11px] tabular-nums text-slate-500">
+                {composerDraft.trim().length}/280
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setComposerOpen(false)}
+                  className="min-h-10 rounded-full px-4 text-sm font-semibold text-slate-400 transition hover:text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handlePostUpdate()}
+                  disabled={!composerDraft.trim() || composerBusy}
+                  aria-busy={composerBusy}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-[var(--glow-md)] transition hover:bg-primary-container disabled:opacity-50"
+                >
+                  {composerBusy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                  {composerBusy ? "Posting…" : "Post"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setComposerOpen(true)}
+            className="group flex w-full items-center justify-center gap-3 rounded-[32px] bg-primary px-8 py-5 text-sm font-black uppercase italic tracking-tighter text-primary-foreground shadow-[var(--glow-lg)] transition-all hover:scale-[1.03] active:scale-95"
+          >
+            <PenSquare className="size-5 transition-transform group-hover:rotate-12" />
+            Post update
+          </button>
+        )}
       </div>
     </div>
   );
