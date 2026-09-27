@@ -1,5 +1,27 @@
 # Schema changelog
 
+## 2026-09-27 — Games ranked for the person looking at them
+
+`20260927150000_suggested_games.sql`.
+
+Before: nothing in the schema answered "is anyone playing my sport near me
+tonight?". `get_games_nearby` ordered by distance, `get_unified_feed` by
+`created_at`, and the client's `rankGameRows` was a four-key sort. The app knew
+what games existed and nothing about which one you would go to.
+
+After: `get_suggested_games` scores sport match 40%, time-to-start 25%, distance
+20%, spots left 10% and host reputation 5%, modelled on `get_similar_athletes` —
+the only other weighted scorer here. Your own games and ones you already joined
+are excluded; the gender, liveness and TTL rules are the same ones
+`get_games_nearby` enforces, so a suggestion is always a pin the map would draw.
+An unrated host scores the middle of the scale, not the bottom, so reputation
+tips a tie rather than burying a first-time host.
+
+Also `get_games_at_venue` (+ a guest wrapper): the games hosted at a set of
+coordinates, past ones flagged. OSM records what a place is *tagged* as, not what
+happens there — a park tagged `leisure=park` may have three hoops and a `pitch`
+may be locked every evening — and this is the only first-hand evidence either way.
+
 ## 2026-09-27 — Games become things you can talk about in public
 
 `20260927130000_game_social.sql`, then `20260927140000_unified_feed_games_v2.sql`.

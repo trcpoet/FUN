@@ -12,6 +12,7 @@ const MapboxMap = React.lazy(() =>
 );
 import { TopNavigation } from "./components/TopUI";
 import { BottomCarousel } from "./components/BottomCarousel";
+import { SuggestedGamePrompt } from "./components/SuggestedGamePrompt";
 const GameMessengerSheet = React.lazy(() =>
   import("./components/GameMessengerSheet").then((m) => ({ default: m.GameMessengerSheet }))
 );
@@ -413,6 +414,32 @@ export default function App() {
     handleCenterOnCoords({ lat: game.lat, lng: game.lng });
     openGamePopupNonceRef.current += 1;
     setGamePopupRequest({ nonce: openGamePopupNonceRef.current, gameId: game.id });
+    // `&chat=1` from a feed card's Chat button: the messenger lives here, not in
+    // the feed, so the link has to be able to ask for the thread as well as the pin.
+    if (params.get("chat") === "1") {
+      setMessengerFocus({
+        kind: "game",
+        gameId: game.id,
+        title: game.title,
+        sport: game.sport,
+        startsAt: game.starts_at,
+        endsAt: game.ends_at ?? null,
+        endedAt: game.ended_at ?? null,
+        liveStartedAt: game.live_started_at ?? null,
+        status: game.status,
+        durationMinutes: game.duration_minutes ?? null,
+        createdAt: game.created_at,
+        participantCount: game.participant_count,
+        spotsRemaining: game.spots_remaining,
+        createdBy: game.created_by,
+        visibility: game.visibility ?? null,
+        lat: game.lat,
+        lng: game.lng,
+        locationLabel: game.location_label ?? null,
+      });
+      setMessagesOpen(true);
+      params.delete("chat");
+    }
     params.delete("focusGameId");
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
   }, [games, location.pathname, location.search, navigate]);
@@ -609,6 +636,43 @@ export default function App() {
     },
     [currentUserId]
   );
+
+  /**
+   * `?host=1` — "Host one", from the feed's empty state.
+   *
+   * The useful reply to "nobody is playing your sport near you" is the button
+   * that fixes it, and the button has to land on a create sheet rather than on
+   * the map with a hint. Uses the viewer's own position, which is the only spot
+   * this link can mean.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("host") !== "1") return;
+    const strip = () => {
+      params.delete("host");
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" },
+        { replace: true },
+      );
+    };
+    const here = realUserCoordsRef.current;
+    if (!here) {
+      strip();
+      return;
+    }
+    void (async () => {
+      if (!(await ensureSession("create"))) {
+        strip();
+        return;
+      }
+      setCreateGameCoords({ lat: here.lat, lng: here.lng });
+      setCreateGameAnchorPoint(null);
+      setCreateGameLocationLabel(null);
+      setCreateGameOpen(true);
+      strip();
+    })();
+  }, [location.pathname, location.search, navigate, ensureSession]);
+
 
   const reloadJoinedGameIds = useCallback(async () => {
     if (!supabase || !currentUserId) return;
@@ -1168,6 +1232,20 @@ export default function App() {
       />
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
+        {/* One nudge, above everything else on the map: the best game in a sport
+            you actually play, close enough in time to reach. Silent otherwise. */}
+        {!messagesOpen && !selectedGame ? (
+          <div className="pointer-events-none absolute bottom-[104px] left-0 right-0 z-40">
+            <SuggestedGamePrompt
+              lat={gamesFetchLat}
+              lng={gamesFetchLng}
+              currentUserId={currentUserId}
+              radiusKm={effectiveGamesRadiusKm}
+              onOpenGame={(g) => handleOpenGameFromCard(g)}
+            />
+          </div>
+        ) : null}
+
         <BottomCarousel
           games={liveNowOpen ? liveStripGames : displayGames}
           selectedGame={selectedGame}

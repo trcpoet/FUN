@@ -160,6 +160,15 @@ where proname = '<name>' and pronargs = <n> and pronamespace = 'public'::regname
   `game_social` for the two tables it counts. Re-run
   `notify pgrst, 'reload schema';` after.
 
+- **`20260927150000_suggested_games.sql` — apply any time.**
+  Purely additive: `get_suggested_games` (the one scorer behind the map's nudge
+  and Explore's shelf) plus `get_games_at_venue` / `get_guest_games_at_venue` for
+  a venue's "played here" history. Both callers treat a missing function as
+  "nothing to suggest", so the client is safe either side of it. `get_suggested_games`
+  is SECURITY DEFINER but returns nothing without `auth.uid()`, and enforces the
+  same gender, liveness and TTL rules as `get_games_nearby` — a suggestion is
+  always a game the map would draw.
+
 ## Known gaps
 
 - The SQL Editor snippets in the Supabase dashboard are **historical scratch**, not a

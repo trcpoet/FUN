@@ -8,7 +8,7 @@
 import { supabase } from "./supabase";
 import { isMissingRpc } from "./rpcErrors";
 import { retryTransient } from "./retryTransient";
-import { pickReadRpc } from "./guestRpc";
+import { isGuestSession, pickReadRpc } from "./guestRpc";
 import { subscribeWithRetry } from "./realtimeRetry";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
 import { parseGender, type Gender } from "./gamePreferenceOptions";
@@ -799,6 +799,96 @@ export async function getGamesNearby(
     radius_km: radiusKm,
   });
   return { data: (data as GameRow[]) ?? null, error: error ? new Error(error.message) : null };
+}
+
+/** A game from `get_suggested_games`: a `GameRow` plus why it was suggested. */
+export type SuggestedGameRow = GameRow & {
+  /** 0-1. Sport match 40%, time-to-start 25%, distance 20%, spots 10%, host trust 5%. */
+  match_score: number;
+  /** True when the sport is one of yours — what "In your sports" is allowed to claim. */
+  sport_match: boolean;
+  host_sportsmanship: number | null;
+};
+
+/**
+ * Games near you, ranked for you.
+ *
+ * One scorer behind both the map's "For you" chip and Explore's shelf, so those
+ * two surfaces cannot disagree about what is worth showing. Returns nothing for
+ * a guest — a suggestion needs someone to suggest to — and nothing at all until
+ * `20260927150000_suggested_games` is applied, which the callers treat as "no
+ * suggestions" rather than as an error.
+ */
+export async function getSuggestedGames(params: {
+  lat: number;
+  lng: number;
+  radiusKm?: number;
+  limit?: number;
+}): Promise<{ data: SuggestedGameRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_suggested_games", {
+    p_lat: params.lat,
+    p_lng: params.lng,
+    p_radius_km: params.radiusKm ?? 25,
+    p_limit: params.limit ?? 20,
+  });
+  if (error) {
+    if (isMissingRpc(error)) return { data: [], error: null };
+    return { data: [], error: new Error(error.message) };
+  }
+  return { data: (data as SuggestedGameRow[]) ?? [], error: null };
+}
+
+/** A game hosted at (or very near) a venue. The "played here" history. */
+export type VenueGameRow = {
+  id: string;
+  title: string | null;
+  sport: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  ended_at: string | null;
+  status: string | null;
+  spots_needed: number | null;
+  participant_count: number;
+  distance_m: number;
+  is_past: boolean;
+};
+
+/**
+ * What people have actually played at this place.
+ *
+ * OSM records what a venue is tagged as, not what happens there — a park tagged
+ * `leisure=park` may have three hoops, a `pitch` may be locked every evening.
+ * The games hosted at these coordinates are the only first-hand evidence.
+ */
+export async function getGamesAtVenue(params: {
+  lat: number;
+  lng: number;
+  radiusM?: number;
+  includeCompleted?: boolean;
+  limit?: number;
+}): Promise<{ data: VenueGameRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const guest = await isGuestSession();
+  const { data, error } = guest
+    ? await supabase.rpc("get_guest_games_at_venue", {
+        p_lat: params.lat,
+        p_lng: params.lng,
+        p_radius_m: params.radiusM ?? 150,
+        p_limit: params.limit ?? 30,
+      })
+    : await supabase.rpc("get_games_at_venue", {
+        p_lat: params.lat,
+        p_lng: params.lng,
+        p_radius_m: params.radiusM ?? 150,
+        p_include_completed: params.includeCompleted ?? true,
+        p_limit: params.limit ?? 30,
+      });
+  if (error) {
+    if (isMissingRpc(error)) return { data: [], error: null };
+    return { data: [], error: new Error(error.message) };
+  }
+  return { data: (data as VenueGameRow[]) ?? [], error: null };
 }
 
 export async function createGame(params: {

@@ -47,6 +47,7 @@ import {
   StatusFeedCard,
 } from "../components/feed/UnifiedFeedCards";
 import LightRays from "../components/feed/LightRays";
+import { SuggestedGamesShelf } from "../components/feed/SuggestedGamesShelf";
 import { LocalNewsSection } from "../components/feed/LocalNewsSection";
 import { glassMessengerPage } from "../styles/glass";
 import { useAuth } from "../contexts/AuthContext";
@@ -250,6 +251,7 @@ export default function Feed() {
   const { notifications, markRead } = useNotifications({ limit: 12 });
   const { coords } = useGeolocation();
   const {
+    athleteProfile,
     discoverableForMatching,
     loading: myProfileLoading,
     updateProfile: updateMyProfileFields,
@@ -671,6 +673,16 @@ export default function Feed() {
               </button>
             </div>
 
+            {/* The one surface that ranks games for the person reading it. The two
+                tiles below are navigation; this is the answer. */}
+            <SuggestedGamesShelf
+              lat={coords?.lat ?? null}
+              lng={coords?.lng ?? null}
+              mySports={athleteProfile?.primarySports ?? undefined}
+              onOpenGame={(gameId) => navigate(`/?focusGameId=${encodeURIComponent(gameId)}`)}
+              onHostGame={() => navigate("/?host=1")}
+            />
+
             {/* Hot Picks — quick entry to the dedicated pages */}
             <section className="space-y-4">
               <div className="flex items-center gap-2 px-1">
@@ -690,8 +702,8 @@ export default function Feed() {
                   </div>
                   <div className="relative flex h-full flex-col justify-between">
                     <div>
-                      <Badge className="mb-3 border-none bg-primary/20 text-[9px] font-black uppercase tracking-[0.2em] text-primary">For you</Badge>
-                      <h3 className="text-xl font-black italic uppercase leading-none tracking-tighter text-white">Recommended<br/>Games</h3>
+                      <Badge className="mb-3 border-none bg-primary/20 text-[9px] font-black uppercase tracking-[0.2em] text-primary">All games</Badge>
+                      <h3 className="text-xl font-black italic uppercase leading-none tracking-tighter text-white">Games<br/>near you</h3>
                     </div>
                     <div className="flex items-center justify-between gap-2 text-xs font-bold text-muted-foreground transition-colors group-hover:text-white">
                       <span>Live games near you</span>
