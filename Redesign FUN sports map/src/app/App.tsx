@@ -34,7 +34,7 @@ import type { DmInboxRow, GameInboxRow, ProfileNearbyRow, ProfileSearchRow } fro
 import { useMyProfile } from "../hooks/useMyProfile";
 import { useUserStats } from "../hooks/useUserStats";
 import { useNotifications } from "../hooks/useNotifications";
-import { useTotalUnreadMessages } from "../hooks/useTotalUnreadMessages";
+import { useUnread } from "./contexts/UnreadContext";
 import { supabase } from "../lib/supabase";
 import { joinGame, leaveGame, deleteHostedGame, getGameLatLng, avatarIdToGlbUrl, startGame, endGame, fetchNotesNearby, fetchNoteById, fetchVenueById } from "../lib/api";
 import { isPermissionDenied, friendlyRpcError } from "../lib/rpcErrors";
@@ -316,7 +316,7 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
   const { notifications, markRead } = useNotifications({ limit: 10, enabled: secondaryReady });
-  const messagesUnreadCount = useTotalUnreadMessages();
+  const messagesUnreadCount = useUnread().total;
   const [locationVisibility, setLocationVisibility] = useState<LocationVisibilityMode>(() => readLocationVisibility());
   // DB-backed follows (seeded from any legacy localStorage set for instant first paint).
   const [followedIds, setFollowedIds] = useState<Set<string>>(() => readFollowedIds());

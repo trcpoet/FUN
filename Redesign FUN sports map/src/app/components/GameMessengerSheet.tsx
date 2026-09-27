@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Send, Share2, StickyNote, Users } from "lucide-react";
+import { ArrowLeft, ChevronDown, Info, Loader2, MapPin, Maximize2, Minimize2, Share2, StickyNote, Users } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
   Sheet,
@@ -41,7 +41,14 @@ import {
   unarchiveGameChat,
 } from "../../lib/gameChat";
 import { fetchDmMessages, fetchMyDmInbox, sendDmMessage, subscribeDmMessages } from "../../lib/dmChat";
-import { badgeText, clearUnread, getUnreadCount, incrementUnread, threadKey } from "../../lib/unreadCounts";
+import { useNearBottom } from "../../hooks/useNearBottom";
+import { useUnread } from "../contexts/UnreadContext";
+import {
+  fetchThreadReadReceipts,
+  subscribeThreadReads,
+  type ReadReceiptRow,
+} from "../../lib/chatReads";
+import { ReadReceipts } from "./chat/ReadReceipts";
 import {
   formatUrgentCountdown,
   getCountdownRemainingMs,
@@ -57,7 +64,21 @@ import {
   subscribeNoteComments,
 } from "../../lib/api";
 import { InviteAdminPanel } from "./chat/InviteAdminPanel";
-import { useChatTrust, type ChatTrust, trustBadgeLabel } from "../../hooks/useChatTrust";
+import { Composer } from "./chat/Composer";
+import { InboxRow } from "./chat/InboxRow";
+import { MessageList } from "./chat/MessageList";
+import { NoteThreadHeaderCard } from "./chat/NoteThreadHeaderCard";
+import { TrustBadge } from "./chat/TrustBadge";
+import {
+  dmMessageToChat,
+  gameMessageToChat,
+  newClientId,
+  noteCommentToChat,
+  pendingToChat,
+  type ChatMessage,
+  type PendingMessage,
+} from "./chat/messageTypes";
+import { useChatTrust, type ChatTrust } from "../../hooks/useChatTrust";
 import { NoteCommentLikeButton } from "./feed/NoteCommentLikeButton";
 import { GameActionBar } from "./game/GameActionBar";
 import { gameViewerRole } from "../lib/gameViewerRole";
@@ -238,37 +259,6 @@ function threadScheduleLines(
   return { timeLine: "Set time", countdownLine: "", ended: false };
 }
 
-function TrustBadge({ trust }: { trust: ChatTrust | undefined }) {
-  const label = trustBadgeLabel(trust);
-  if (!label) return null;
-  if (trust === "self") return null;
-  const tone = (() => {
-    switch (trust) {
-      case "stranger":
-        return "border-slate-500/40 bg-slate-700/30 text-slate-300";
-      case "host":
-        return "border-amber-400/40 bg-amber-500/15 text-amber-200";
-      case "friend":
-      case "mutual":
-        return "border-emerald-400/40 bg-emerald-500/15 text-emerald-200";
-      default:
-        return "border-white/10 bg-white/5 text-slate-300";
-    }
-  })();
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide",
-        tone,
-      )}
-      aria-label={label}
-      title={label}
-    >
-      {label}
-    </span>
-  );
-}
-
 function SquadMemberRow({
   member,
   trust,
@@ -416,6 +406,7 @@ export function GameMessengerSheet({
   onPlanRematch,
 }: GameMessengerSheetProps) {
   const navigate = useNavigate();
+  const unread = useUnread();
   const [mode, setMode] = useState<"groups" | "direct" | "notes">("groups");
   const [inbox, setInbox] = useState<GameInboxRow[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
@@ -474,9 +465,20 @@ export function GameMessengerSheet({
   const [openingLocation, setOpeningLocation] = useState(false);
   const [shareBusyGameId, setShareBusyGameId] = useState<string | null>(null);
   const listEndRef = useRef<HTMLDivElement>(null);
-  const [unreadTick, setUnreadTick] = useState(0);
-
-  const bumpUnreadTick = useCallback(() => setUnreadTick((n) => n + 1), []);
+  /** There is history older than what is loaded. */
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  /** Messages that arrived while the reader was up in the history. */
+  const [unseenCount, setUnseenCount] = useState(0);
+  const { ref: scrollerRef, atBottom, scrollToBottom } = useNearBottom();
+  /** The newest message we have already reacted to, so we react once. */
+  const lastSeenMessageId = useRef<string | null>(null);
+  /** Everyone else's read watermark in the open thread. */
+  const [receipts, setReceipts] = useState<ReadReceiptRow[]>([]);
+  /** Messages drawn before the server confirmed them. */
+  const [pending, setPending] = useState<PendingMessage[]>([]);
+  /** Bumped to force the open thread to re-hydrate. */
+  const [reloadKey, setReloadKey] = useState(0);
 
   const handleOpenThreadLocation = useCallback(async () => {
     if (!focusThread) return;
@@ -658,7 +660,8 @@ export function GameMessengerSheet({
 
     let cancelled = false;
     setMessagesLoading(true);
-    fetchGameMessages(focusThread.gameId).then(({ data, error }) => {
+    setHasOlder(false);
+    fetchGameMessages(focusThread.gameId).then(({ data, error, hasMore }) => {
       if (cancelled) return;
       setMessagesLoading(false);
       if (error) {
@@ -667,6 +670,7 @@ export function GameMessengerSheet({
         return;
       }
       setMessages(data ?? []);
+      setHasOlder(hasMore);
     });
 
     const unsub = subscribeGameMessages(focusThread.gameId, (row) => {
@@ -680,7 +684,7 @@ export function GameMessengerSheet({
       cancelled = true;
       unsub();
     };
-  }, [open, focusThread]);
+  }, [open, focusThread, reloadKey]);
 
   useEffect(() => {
     if (!open || !focusThread || focusThread.kind !== "dm") {
@@ -690,7 +694,8 @@ export function GameMessengerSheet({
 
     let cancelled = false;
     setDmMessagesLoading(true);
-    fetchDmMessages(focusThread.threadId).then(({ data, error }) => {
+    setHasOlder(false);
+    fetchDmMessages(focusThread.threadId).then(({ data, error, hasMore }) => {
       if (cancelled) return;
       setDmMessagesLoading(false);
       if (error) {
@@ -698,6 +703,7 @@ export function GameMessengerSheet({
         setDmMessages([]);
         return;
       }
+      setHasOlder(hasMore);
       setDmMessages(data ?? []);
     });
 
@@ -715,7 +721,7 @@ export function GameMessengerSheet({
       cancelled = true;
       unsubscribe();
     };
-  }, [open, focusThread]);
+  }, [open, focusThread, reloadKey]);
 
   // Note threads: hydrate the post + comments + realtime fan-out for new comments.
   useEffect(() => {
@@ -798,63 +804,13 @@ export function GameMessengerSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, focusThread]);
 
-  // While the sheet is open, listen for new messages in other threads to keep unread badges live.
+
+  /** A new thread starts at the newest message with nothing outstanding. */
   useEffect(() => {
-    if (!open) return;
-
-    const unsubs: Array<() => void> = [];
-
-    // Groups: subscribe to joined game threads shown in inbox (cap to keep channels reasonable).
-    const gameIds = inbox.slice(0, 25).map((r) => r.id);
-    for (const gid of gameIds) {
-      const unsub = subscribeGameMessages(gid, (row) => {
-        const isActive = focusThread?.kind === "game" && focusThread.gameId === gid;
-        if (isActive) return;
-        incrementUnread(threadKey("game", gid), 1);
-        bumpUnreadTick();
-      });
-      unsubs.push(unsub);
-    }
-
-    // DMs: subscribe to visible DM threads (cap). Skip the focused DM — the effect above already subscribes
-    // with the same channel topic (`dm_messages:${tid}`); a second subscribe throws in Supabase Realtime.
-    const dmThreadIds = dmInbox.slice(0, 25).map((r) => r.thread_id);
-    for (const tid of dmThreadIds) {
-      if (focusThread?.kind === "dm" && focusThread.threadId === tid) continue;
-      const { unsubscribe } = subscribeDmMessages({
-        threadId: tid,
-        onInsert: () => {
-          const isActive = focusThread?.kind === "dm" && focusThread.threadId === tid;
-          if (isActive) return;
-          incrementUnread(threadKey("dm", tid), 1);
-          bumpUnreadTick();
-        },
-      });
-      unsubs.push(unsubscribe);
-    }
-
-    // Notes: subscribe to inbox rows so unread bumps when someone replies.
-    const noteIds = noteInbox.slice(0, 25).map((r) => r.id);
-    for (const nid of noteIds) {
-      if (focusThread?.kind === "note" && focusThread.noteId === nid) continue;
-      const unsub = subscribeNoteComments(nid, () => {
-        const isActive = focusThread?.kind === "note" && focusThread.noteId === nid;
-        if (isActive) return;
-        incrementUnread(threadKey("note", nid), 1);
-        bumpUnreadTick();
-      });
-      unsubs.push(unsub);
-    }
-
-    return () => {
-      unsubs.forEach((u) => u());
-    };
-  }, [open, inbox, dmInbox, noteInbox, focusThread, bumpUnreadTick]);
-
-  useEffect(() => {
-    if (!open || !focusThread) return;
-    listEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, dmMessages, noteComments, open, focusThread]);
+    lastSeenMessageId.current = null;
+    setUnseenCount(0);
+    setPending([]);
+  }, [focusThread]);
 
   useEffect(() => {
     if (!focusThread) setThreadExpanded(false);
@@ -898,6 +854,126 @@ export function GameMessengerSheet({
     };
   }, [open, focusThread]);
 
+  /**
+   * Who has read the open thread.
+   *
+   * One RPC on open and one realtime channel while it is open — not one per
+   * thread in the inbox. `subscribeThreadReads` listens for `*` rather than
+   * INSERT because the first time someone reads a thread is an insert and every
+   * time after that is an update; listening for one of the two means "Seen"
+   * either never appears or never moves.
+   *
+   * Map notes are skipped entirely. They have no audience, the RPC returns
+   * nothing for them, and `chat_reads` has no peer-read policy for note rows.
+   */
+  useEffect(() => {
+    if (!open || !focusThread || focusThread.kind === "note") {
+      setReceipts([]);
+      return;
+    }
+    const kind = focusThread.kind;
+    const threadId = kind === "game" ? focusThread.gameId : focusThread.threadId;
+    let cancelled = false;
+    const load = () => {
+      void fetchThreadReadReceipts(kind, threadId).then((rows) => {
+        if (!cancelled) setReceipts(rows);
+      });
+    };
+    load();
+    const unsub = subscribeThreadReads(threadId, load);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [open, focusThread]);
+
+  /**
+   * Put the message on screen, then try to send it.
+   *
+   * The bubble appears before the round trip and stays there, dimmed, until the
+   * row comes back. A failure turns it amber with "tap to retry" rather than
+   * dropping the text on the floor, which is what a lost send used to do beyond
+   * an error line above the composer.
+   *
+   * Retry is safe because of the `(user_id, client_id)` unique index: if the
+   * first attempt actually landed and only the response was lost, the second
+   * raises 23505, which `sendGameMessage` reports as `duplicate` and this treats
+   * as success. Re-hydrating afterwards guarantees the confirmed row is on
+   * screen even if its realtime event was the thing that went missing.
+   *
+   * Note comments are sent the old way: `add_note_comment` is an RPC that takes
+   * no client id, so there is nothing to reconcile a pending bubble against, and
+   * matching on body would mis-merge two identical replies.
+   */
+  const deliver = useCallback(
+    async (body: string, clientId: string) => {
+      if (!focusThread) return;
+
+      setPending((prev) => {
+        const without = prev.filter((p) => p.clientId !== clientId);
+        return [
+          ...without,
+          { clientId, body, createdAtMs: Date.now(), status: "sending" as const },
+        ];
+      });
+      setSendError(null);
+
+      const fail = (message: string) => {
+        setPending((prev) =>
+          prev.map((p) => (p.clientId === clientId ? { ...p, status: "failed" as const } : p)),
+        );
+        setSendError(message);
+      };
+      const settle = () => setPending((prev) => prev.filter((p) => p.clientId !== clientId));
+
+      if (focusThread.kind === "game") {
+        const { data: sent, error, duplicate } = await sendGameMessage(
+          focusThread.gameId,
+          body,
+          clientId,
+        );
+        if (error) return fail(error.message);
+        settle();
+        if (sent) {
+          setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
+        } else if (duplicate) {
+          setReloadKey((n) => n + 1);
+        }
+        loadInbox();
+        return;
+      }
+
+      if (focusThread.kind === "dm") {
+        const { data: sent, error, duplicate } = await sendDmMessage(
+          focusThread.threadId,
+          body,
+          clientId,
+        );
+        if (error) return fail(error.message);
+        settle();
+        if (sent) {
+          setDmMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
+        } else if (duplicate) {
+          setReloadKey((n) => n + 1);
+        }
+        loadDmInbox();
+        return;
+      }
+
+      const { data: sent, error } = await addNoteComment({
+        noteId: focusThread.noteId,
+        body,
+      });
+      if (error) return fail(error.message);
+      settle();
+      if (sent) {
+        setNoteComments((prev) => (prev.some((c) => c.id === sent.id) ? prev : [...prev, sent]));
+      }
+      loadNoteInbox();
+    },
+    [focusThread, loadInbox, loadDmInbox, loadNoteInbox],
+  );
+
   const handleSend = async () => {
     if (!focusThread || !draft.trim()) return;
     setSendError(null);
@@ -905,46 +981,25 @@ export function GameMessengerSheet({
       setSendError("Sign in to send messages.");
       return;
     }
-
+    const body = draft.trim();
+    // Clear the composer first. Holding the text hostage until the server
+    // answers is what makes a slow connection feel broken.
+    setDraft("");
     setSending(true);
-    if (focusThread.kind === "game") {
-      const { data: sent, error } = await sendGameMessage(focusThread.gameId, draft);
+    try {
+      await deliver(body, newClientId());
+    } finally {
       setSending(false);
-      if (error) {
-        setSendError(error.message);
-        return;
-      }
-      setDraft("");
-      if (sent) {
-        setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
-      }
-      loadInbox();
-    } else if (focusThread.kind === "note") {
-      const { data: sent, error } = await addNoteComment({ noteId: focusThread.noteId, body: draft });
-      setSending(false);
-      if (error) {
-        setSendError(error.message);
-        return;
-      }
-      setDraft("");
-      if (sent) {
-        setNoteComments((prev) => (prev.some((c) => c.id === sent.id) ? prev : [...prev, sent]));
-      }
-      loadNoteInbox();
-    } else {
-      const { data: sent, error } = await sendDmMessage(focusThread.threadId, draft);
-      setSending(false);
-      if (error) {
-        setSendError(error.message);
-        return;
-      }
-      setDraft("");
-      if (sent) {
-        setDmMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
-      }
-      loadDmInbox();
     }
   };
+
+  const handleRetry = useCallback(
+    (message: ChatMessage) => {
+      if (!message.clientId) return;
+      void deliver(message.body, message.clientId);
+    },
+    [deliver],
+  );
 
   const handleLeaveChat = async () => {
     if (!focusThread || focusThread.kind !== "game" || !onLeaveThread || leavingThread) return;
@@ -1054,11 +1109,11 @@ export function GameMessengerSheet({
   useEffect(() => {
     setRevealedMessageIds(new Set());
   }, [focusThread]);
-  const revealMessage = useCallback((id: string) => {
+  const revealMessages = useCallback((ids: string[]) => {
     setRevealedMessageIds((prev) => {
-      if (prev.has(id)) return prev;
+      if (ids.every((id) => prev.has(id))) return prev;
       const next = new Set(prev);
-      next.add(id);
+      for (const id of ids) next.add(id);
       return next;
     });
   }, []);
@@ -1086,20 +1141,196 @@ export function GameMessengerSheet({
         : `${participantTotal} ${participantTotal === 1 ? "player" : "players"}${spotsLeft != null ? ` · ${spotsLeft} spots left` : ""}`
       : "";
 
-  // Mark thread read when opened.
+  /**
+   * The thread's messages, normalised.
+   *
+   * One list for all three kinds. Which table they came from stops mattering
+   * here; what differs downstream is who is named, who is veiled and what sits
+   * next to the timestamp, and those are the three functions below.
+   */
+  const chatMessages = useMemo<ChatMessage[]>(() => {
+    const kind = focusThread?.kind;
+    const base =
+      kind === "dm"
+        ? dmMessages.map(dmMessageToChat)
+        : kind === "note"
+          ? noteComments.map(noteCommentToChat)
+          : kind === "game"
+            ? messages.map(gameMessageToChat)
+            : [];
+    if (!kind || pending.length === 0) return base;
+    // Pending bubbles always sit at the end: they are the most recent thing you
+    // did, whatever the server's clock later says about them.
+    return [...base, ...pending.map((p) => pendingToChat(p, currentUserId, kind))];
+  }, [focusThread, dmMessages, noteComments, messages, pending, currentUserId]);
+
+  const chatLoading =
+    focusThread?.kind === "dm"
+      ? dmMessagesLoading
+      : focusThread?.kind === "note"
+        ? noteCommentsLoading
+        : messagesLoading;
+
+  const isNoteThread = focusThread?.kind === "note";
+
+  /** A group thread names its speakers; a 1:1 does not need to. */
+  const chatAuthorFor = useCallback(
+    (m: ChatMessage) => {
+      if (!m.authorId) return null;
+      return {
+        displayName: nameForUserId(m.authorId),
+        avatarUrl: avatarForUserId(m.authorId),
+        badge: <TrustBadge trust={trustByUserId.get(m.authorId)} />,
+      };
+    },
+    [nameForUserId, avatarForUserId, trustByUserId],
+  );
+
+  /**
+   * Strangers in a public game chat start behind one tap.
+   *
+   * A predicate rather than a rendered veil: `buildChatList` needs to know which
+   * messages are hidden *before* it can collapse a consecutive run of them into
+   * one, and that decision cannot be made a bubble at a time.
+   */
+  const chatIsVeiled = useCallback(
+    (m: ChatMessage) => {
+      if (!isPublicChat || !m.authorId) return false;
+      return trustByUserId.get(m.authorId) === "stranger";
+    },
+    [isPublicChat, trustByUserId],
+  );
+
+  /**
+   * Fetch the page before the oldest message we hold, and keep the reader's place.
+   *
+   * Prepending to a scroller moves everything down by the height of what was
+   * added, which without correction teleports the reader. Measuring the scroller
+   * before and after and adding the difference back leaves the message they were
+   * looking at exactly where it was.
+   *
+   * Note threads are not paginated: their comments come from an RPC with no
+   * cursor, so that waits for the inbox migration that recreates it.
+   */
+  const handleLoadOlder = useCallback(async () => {
+    if (!focusThread || loadingOlder) return;
+    const scroller = scrollerRef.current;
+    const heightBefore = scroller?.scrollHeight ?? 0;
+    const topBefore = scroller?.scrollTop ?? 0;
+    setLoadingOlder(true);
+    try {
+      if (focusThread.kind === "game") {
+        const oldest = messages[0]?.created_at;
+        if (!oldest) return;
+        const { data, hasMore } = await fetchGameMessages(focusThread.gameId, { before: oldest });
+        const seen = new Set(messages.map((m) => m.id));
+        const older = (data ?? []).filter((m) => !seen.has(m.id));
+        // The cursor is inclusive, so a page of nothing new means we are at the
+        // start of the thread — whatever the server said about there being more.
+        if (older.length === 0) setHasOlder(false);
+        else {
+          setMessages((prev) => [...older, ...prev]);
+          setHasOlder(hasMore);
+        }
+      } else if (focusThread.kind === "dm") {
+        const oldest = dmMessages[0]?.created_at;
+        if (!oldest) return;
+        const { data, hasMore } = await fetchDmMessages(focusThread.threadId, { before: oldest });
+        const seen = new Set(dmMessages.map((m) => m.id));
+        const older = (data ?? []).filter((m) => !seen.has(m.id));
+        if (older.length === 0) setHasOlder(false);
+        else {
+          setDmMessages((prev) => [...older, ...prev]);
+          setHasOlder(hasMore);
+        }
+      }
+    } finally {
+      setLoadingOlder(false);
+      requestAnimationFrame(() => {
+        const el = scrollerRef.current;
+        if (!el) return;
+        el.scrollTop = topBefore + (el.scrollHeight - heightBefore);
+      });
+    }
+  }, [focusThread, loadingOlder, messages, dmMessages, scrollerRef]);
+
+  /** Only a note comment can be liked. */
+  const chatFooterSlotFor = useCallback(
+    (m: ChatMessage) => {
+      if (!m.noteComment) return null;
+      const mine = currentUserId != null && m.authorId === currentUserId;
+      return (
+        <NoteCommentLikeButton
+          comment={m.noteComment}
+          className={cn(
+            "px-1.5 py-0",
+            mine ? "text-violet-50/90 hover:text-rose-200" : "text-slate-400 hover:text-rose-300",
+          )}
+        />
+      );
+    },
+    [currentUserId],
+  );
+
+  /**
+   * "Seen" hangs under the last thing *you* said, not under the last thing in the
+   * thread — which is what you actually want to know has landed.
+   */
+  const myLastMessageId = useMemo(() => {
+    if (!currentUserId) return null;
+    for (let i = chatMessages.length - 1; i >= 0; i -= 1) {
+      if (chatMessages[i].authorId === currentUserId) return chatMessages[i].id;
+    }
+    return null;
+  }, [chatMessages, currentUserId]);
+
+  const seenByAfterMine = useMemo(() => {
+    if (!myLastMessageId) return [];
+    const mine = chatMessages.find((m) => m.id === myLastMessageId);
+    if (!mine) return [];
+    return receipts.filter((r) => Date.parse(r.last_read_at) >= mine.createdAtMs);
+  }, [receipts, myLastMessageId, chatMessages]);
+
+  /**
+   * Follow the conversation only if the reader is already following it.
+   *
+   * The old effect scrolled to the bottom smoothly on every change to any of the
+   * three message arrays, which took the thread away from anyone reading history
+   * and animated two hundred bubbles past them to do it. Now: land on the newest
+   * message when a thread opens, stay pinned while the reader is at the bottom,
+   * follow your own sends wherever you are, and otherwise count what arrived and
+   * offer to catch up.
+   */
   useEffect(() => {
     if (!open || !focusThread) return;
-    if (focusThread.kind === "game") {
-      clearUnread(threadKey("game", focusThread.gameId));
-      bumpUnreadTick();
-    } else if (focusThread.kind === "note") {
-      clearUnread(threadKey("note", focusThread.noteId));
-      bumpUnreadTick();
+    const last = chatMessages[chatMessages.length - 1];
+    if (!last) return;
+    if (lastSeenMessageId.current === last.id) return;
+    const opening = lastSeenMessageId.current === null;
+    lastSeenMessageId.current = last.id;
+    const mine = currentUserId != null && last.authorId === currentUserId;
+    if (opening || mine || atBottom) {
+      // Instant on open: smooth-scrolling a whole thread is the jank.
+      scrollToBottom(opening ? "auto" : "smooth");
+      setUnseenCount(0);
     } else {
-      clearUnread(threadKey("dm", focusThread.threadId));
-      bumpUnreadTick();
+      setUnseenCount((n) => n + 1);
     }
-  }, [open, focusThread, bumpUnreadTick]);
+  }, [chatMessages, open, focusThread, currentUserId, atBottom, scrollToBottom]);
+
+  /**
+   * Opening a thread reads it, and so does every message that arrives while you
+   * are looking at it — but only while the tab is actually in front of someone.
+   * `markRead` debounces and the server refuses to move a watermark backwards,
+   * so calling it on every new message is cheap.
+   */
+  const markRead = unread.markRead;
+  useEffect(() => {
+    if (!open || !focusThread) return;
+    if (focusThread.kind === "game") markRead("game", focusThread.gameId);
+    else if (focusThread.kind === "note") markRead("note", focusThread.noteId);
+    else markRead("dm", focusThread.threadId);
+  }, [open, focusThread, markRead, chatMessages.length]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -1440,9 +1671,7 @@ export function GameMessengerSheet({
                 (() => {
                   const partitions = partitionInboxByLifecycle(inbox, headerNow);
                   const renderRow = (row: GameInboxRow, ended: boolean) => {
-                    void unreadTick;
-                    const unread = getUnreadCount(threadKey("game", row.id));
-                    const badge = badgeText(unread);
+                    const unreadCount = unread.countFor("game", row.id);
                     const openThread = () => {
                       setThreadExpanded(inboxExpanded);
                       onFocusThreadChange({
@@ -1467,31 +1696,12 @@ export function GameMessengerSheet({
                     };
                     return (
                       <li key={row.id}>
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={openThread}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openThread();
-                            }
-                          }}
-                          className={cn(
-                            "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
-                            ended
-                              ? "border-white/[0.05] bg-white/[0.015] hover:bg-white/[0.04] opacity-90"
-                              : "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
-                            "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
-                            "hover:border-cyan-300/20",
-                            "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
-                          )}
+                        <InboxRow
+                          unread={unreadCount}
+                          onOpen={openThread}
+                          ended={ended}
+                          label={`${row.title} — open chat`}
                         >
-                          {badge ? (
-                            <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums text-white shadow ring-2 ring-[#0b1020]">
-                              {badge}
-                            </span>
-                          ) : null}
                           <div className="flex justify-between gap-2 items-center">
                             <span className="flex items-center gap-1.5 min-w-0 flex-1">
                               <span className="font-semibold text-slate-100 text-sm truncate">
@@ -1557,7 +1767,7 @@ export function GameMessengerSheet({
                               {format(new Date(row.last_message_at), "MMM d, h:mm a")}
                             </p>
                           )}
-                        </div>
+                        </InboxRow>
                       </li>
                     );
                   };
@@ -1596,9 +1806,7 @@ export function GameMessengerSheet({
                 const commentedNotes = noteInbox.filter((r) => !r.is_author);
                 const filtered = notesView === "mine" ? myNotes : commentedNotes;
                 const renderNoteRow = (row: NoteInboxRow) => {
-                    void unreadTick;
-                    const unread = getUnreadCount(threadKey("note", row.id));
-                    const badge = badgeText(unread);
+                    const unreadCount = unread.countFor("note", row.id);
                     const visLabel =
                       row.visibility === "friends"
                         ? "Friends"
@@ -1626,29 +1834,11 @@ export function GameMessengerSheet({
                         : "Pinned to this location";
                     return (
                       <li key={row.id}>
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={openThread}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openThread();
-                            }
-                          }}
-                          className={cn(
-                            "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
-                            "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
-                            "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
-                            "hover:border-cyan-300/20",
-                            "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
-                          )}
+                        <InboxRow
+                          unread={unreadCount}
+                          onOpen={openThread}
+                          label={`${row.is_author ? "Your note" : "Note"} — open thread`}
                         >
-                          {badge ? (
-                            <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums text-white shadow ring-2 ring-[#0b1020]">
-                              {badge}
-                            </span>
-                          ) : null}
                           <div className="flex items-start gap-3">
                             <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-300">
                               <StickyNote className="size-4" aria-hidden />
@@ -1688,7 +1878,7 @@ export function GameMessengerSheet({
                               </p>
                             </div>
                           </div>
-                        </div>
+                        </InboxRow>
                       </li>
                     );
                   };
@@ -1770,9 +1960,7 @@ export function GameMessengerSheet({
             ) : (
               <ul className="space-y-1.5">
                 {dmInbox.map((row) => {
-                  void unreadTick;
-                  const unread = getUnreadCount(threadKey("dm", row.thread_id));
-                  const badge = badgeText(unread);
+                  const unreadCount = unread.countFor("dm", row.thread_id);
                   const label = row.display_name?.trim() || "Player";
                   const openThread = () => {
                     setThreadExpanded(false);
@@ -1786,29 +1974,11 @@ export function GameMessengerSheet({
                   };
                   return (
                     <li key={row.thread_id}>
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={openThread}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            openThread();
-                          }
-                        }}
-                        className={cn(
-                          "relative min-w-0 cursor-pointer rounded-xl border px-3 py-3 text-left outline-none transition-colors",
-                          "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.055]",
-                          "shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_10px_28px_rgba(0,0,0,0.28)]",
-                          "hover:border-cyan-300/20",
-                          "focus-visible:ring-2 focus-visible:ring-cyan-500/40",
-                        )}
+                      <InboxRow
+                        unread={unreadCount}
+                        onOpen={openThread}
+                        label={`${label} — open conversation`}
                       >
-                        {badge ? (
-                          <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums text-white shadow ring-2 ring-[#0b1020]">
-                            {badge}
-                          </span>
-                        ) : null}
                         <div className="flex items-start gap-3">
                           <Avatar className="size-10 shrink-0 border border-white/10">
                             {row.avatar_url?.trim() ? (
@@ -1832,7 +2002,7 @@ export function GameMessengerSheet({
                             </p>
                           </div>
                         </div>
-                      </div>
+                      </InboxRow>
                     </li>
                   );
                 })}
@@ -1862,246 +2032,95 @@ export function GameMessengerSheet({
                   aria-hidden
                   className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_20%_0%,rgba(34,211,238,0.12),transparent_45%),radial-gradient(900px_circle_at_85%_35%,rgba(124,58,237,0.14),transparent_52%)]"
                 />
-                <div className="relative flex-1 overflow-y-auto px-3 py-2 space-y-2">
-                {focusThread?.kind === "dm" ? (
-                  dmMessagesLoading ? (
-                    <div className="flex justify-center py-12 text-slate-500">
-                      <Loader2 className="w-8 h-8 animate-spin opacity-60" />
-                    </div>
-                  ) : (
-                    dmMessages.map((m) => {
-                      const mine = currentUserId != null && m.user_id === currentUserId;
-                      return (
-                        <div key={m.id} className={cn("flex", mine ? "justify-end" : "justify-start")}>
-                          <div
-                            className={cn(
-                              "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
-                              mine
-                                ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
-                                : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
-                            )}
-                          >
-                            <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                            <p className={cn("text-[10px] mt-1 opacity-70", mine ? "text-violet-50/90" : "text-slate-400/80")}>
-                              {format(new Date(m.created_at), "h:mm a")}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )
-                ) : focusThread?.kind === "note" ? (
-                  <>
-                    {/* Pinned post bubble — the note body itself. */}
-                    {(activeNote?.body ?? focusThread.body)?.trim() ? (
-                      <div className="flex justify-start">
-                        <div className="max-w-[92%] rounded-2xl border border-cyan-400/25 bg-cyan-500/[0.07] px-3 py-2 shadow-[0_10px_26px_rgba(0,0,0,0.25)]">
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-300/80 mb-1">
-                            Note
-                          </p>
-                          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-100">
-                            {activeNote?.body ?? focusThread.body}
-                          </p>
-                          <p className="text-[10px] mt-1 text-slate-500">
-                            {(activeNote?.created_at ?? focusThread.createdAt)
-                              ? format(
-                                  new Date(activeNote?.created_at ?? focusThread.createdAt!),
-                                  "MMM d · h:mm a",
-                                )
-                              : ""}
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-                    {noteCommentsLoading ? (
-                      <div className="flex justify-center py-8 text-slate-500">
-                        <Loader2 className="w-6 h-6 animate-spin opacity-60" />
-                      </div>
-                    ) : noteComments.length === 0 ? (
+                <div
+                  ref={scrollerRef}
+                  className="relative flex-1 h-full overflow-y-auto px-3 py-2"
+                >
+                <MessageList
+                  messages={chatMessages}
+                  loading={chatLoading}
+                  currentUserId={currentUserId}
+                  header={
+                    isNoteThread && (activeNote?.body ?? focusThread.body)?.trim() ? (
+                      <NoteThreadHeaderCard
+                        body={(activeNote?.body ?? focusThread.body) as string}
+                        createdAt={activeNote?.created_at ?? focusThread.createdAt}
+                      />
+                    ) : null
+                  }
+                  empty={
+                    isNoteThread ? (
                       <p className="text-xs text-slate-500 text-center py-6">
                         Be the first to reply.
                       </p>
-                    ) : (
-                      noteComments.map((c) => {
-                        const mine = currentUserId != null && c.user_id === currentUserId;
-                        return (
-                          <div key={c.id} className={cn("flex", mine ? "justify-end" : "justify-start")}>
-                            <div
-                              className={cn(
-                                "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
-                                mine
-                                  ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
-                                  : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
-                              )}
-                            >
-                              <p className="whitespace-pre-wrap break-words">{c.body}</p>
-                              <div
-                                className={cn(
-                                  "mt-1 flex items-center justify-between gap-2 opacity-90",
-                                )}
-                              >
-                                <p
-                                  className={cn(
-                                    "text-[10px] opacity-80",
-                                    mine ? "text-violet-50/90" : "text-slate-400/80",
-                                  )}
-                                >
-                                  {format(new Date(c.created_at), "h:mm a")}
-                                </p>
-                                <NoteCommentLikeButton
-                                  comment={c}
-                                  className={cn(
-                                    "px-1.5 py-0",
-                                    mine
-                                      ? "text-violet-50/90 hover:text-rose-200"
-                                      : "text-slate-400 hover:text-rose-300",
-                                  )}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </>
-                ) : messagesLoading ? (
-                  <div className="flex justify-center py-12 text-slate-500">
-                    <Loader2 className="w-8 h-8 animate-spin opacity-60" />
-                  </div>
-                ) : (
-                  messages.map((m) => {
-                    const mine = currentUserId != null && m.user_id === currentUserId;
-                    const senderLabel = nameForUserId(m.user_id);
-                    const senderAvatarUrl = avatarForUserId(m.user_id);
-                    const senderTrust = trustByUserId.get(m.user_id);
-                    const isStranger = !mine && senderTrust === "stranger";
-                    const collapsedByDefault = isPublicChat && isStranger;
-                    const revealed = revealedMessageIds.has(m.id);
-                    const showCollapsed = collapsedByDefault && !revealed;
-                    return (
-                      <div
-                        key={m.id}
-                        className={cn("flex", mine ? "justify-end" : "justify-start")}
-                      >
-                        <div
-                          className={cn(
-                            "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed border shadow-[0_10px_26px_rgba(0,0,0,0.25)]",
-                            mine
-                              ? "bg-gradient-to-b from-violet-500/85 via-violet-600/75 to-fuchsia-600/70 text-white border-white/10 rounded-br-md"
-                              : showCollapsed
-                                ? "bg-slate-800/40 text-slate-400 border-slate-700/60 rounded-bl-md"
-                                : "bg-white/[0.06] text-slate-200 border-white/10 rounded-bl-md",
-                          )}
-                        >
-                          {!mine && (
-                            <div className="mb-1 flex items-center gap-2">
-                              <Avatar className="size-6 shrink-0 overflow-hidden rounded-full border border-white/10">
-                                {senderAvatarUrl ? (
-                                  <AvatarImage src={senderAvatarUrl} alt="" className="object-cover" />
-                                ) : null}
-                                <AvatarFallback className="bg-slate-800 text-[10px] font-semibold text-slate-200">
-                                  {senderLabel.slice(0, 2).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              <button
-                                type="button"
-                                onClick={() => navigate(`/athlete/${m.user_id}`)}
-                                className="text-[10px] font-semibold text-cyan-300/90 hover:text-cyan-200 transition-colors"
-                                aria-label={`Open ${senderLabel}'s profile`}
-                                title="Open profile"
-                              >
-                                {senderLabel}
-                              </button>
-                              <TrustBadge trust={senderTrust} />
-                            </div>
-                          )}
-                          {showCollapsed ? (
-                            <button
-                              type="button"
-                              onClick={() => revealMessage(m.id)}
-                              className="text-left text-xs text-slate-300 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-                              aria-label="Reveal message from a stranger"
-                            >
-                              Stranger sent a message — tap to read
-                            </button>
-                          ) : (
-                            <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                          )}
-                          <p
-                            className={cn(
-                              "text-[10px] mt-1 opacity-70",
-                              mine ? "text-violet-50/90" : "text-slate-400/80",
-                            )}
-                          >
-                            {format(new Date(m.created_at), "h:mm a")}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                {/* The post-game loop, at the bottom of the thread where the
-                    conversation ends: did it happen, how were they, run it back.
-                    Renders nothing until the game is over, and nothing at all
-                    without 20260927160000_post_game_loop applied. */}
-                {focusThread?.kind === "game" && schedule.ended && currentUserId ? (
-                  <PostGamePanel
-                    gameId={focusThread.gameId}
-                    hostId={threadHostId}
-                    currentUserId={currentUserId}
-                    onPlanRematch={onPlanRematch ? handlePlanRematch : undefined}
-                    className="mt-2"
-                  />
-                ) : null}
-                <div ref={listEndRef} />
+                    ) : undefined
+                  }
+                  footer={
+                    /* The post-game loop, at the bottom of the thread where the
+                       conversation ends: did it happen, how were they, run it back.
+                       Renders nothing until the game is over, and nothing at all
+                       without 20260927160000_post_game_loop applied. */
+                    focusThread?.kind === "game" && schedule.ended && currentUserId ? (
+                      <PostGamePanel
+                        gameId={focusThread.gameId}
+                        hostId={threadHostId}
+                        currentUserId={currentUserId}
+                        onPlanRematch={onPlanRematch ? handlePlanRematch : undefined}
+                        className="mt-2"
+                      />
+                    ) : null
+                  }
+                  authorFor={focusThread?.kind === "game" ? chatAuthorFor : undefined}
+                  isVeiled={focusThread?.kind === "game" ? chatIsVeiled : undefined}
+                  revealedIds={revealedMessageIds}
+                  onReveal={revealMessages}
+                  footerSlotFor={isNoteThread ? chatFooterSlotFor : undefined}
+                  renderAfter={(m) =>
+                    m.id === myLastMessageId && seenByAfterMine.length > 0 ? (
+                      <ReadReceipts readers={seenByAfterMine} />
+                    ) : null
+                  }
+                  onOpenAuthor={(uid) => navigate(`/athlete/${uid}`)}
+                  onRetry={handleRetry}
+                  canLoadOlder={hasOlder && !chatLoading}
+                  loadingOlder={loadingOlder}
+                  onLoadOlder={() => void handleLoadOlder()}
+                  spinnerClassName={isNoteThread ? "w-6 h-6" : "w-8 h-8"}
+                  spinnerPadClassName={isNoteThread ? "py-8" : "py-12"}
+                  endRef={listEndRef}
+                />
                 </div>
-              </div>
 
-              <div className="border-t border-white/[0.08] p-3 shrink-0 bg-white/[0.02] backdrop-blur-2xl shadow-[0_-18px_40px_rgba(0,0,0,0.45)]">
-                {sendError && (
-                  <p className="text-xs text-amber-400 mb-2 px-1">{sendError}</p>
-                )}
-                <div className="flex gap-2 items-end">
-                  <textarea
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        if (!sending && draft.trim()) void handleSend();
-                      }
-                    }}
-                    placeholder={
-                      focusThread?.kind === "note"
-                        ? "Write a reply…"
-                        : focusThread?.kind === "dm"
-                          ? "Send a message…"
-                          : "Message the squad…"
-                    }
-                    rows={2}
-                    className="flex-1 resize-none rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-                  />
+                {unseenCount > 0 ? (
                   <button
                     type="button"
-                    disabled={sending || !draft.trim()}
-                    onClick={() => void handleSend()}
-                    className={cn(
-                      "shrink-0 h-11 w-11 rounded-xl text-white flex items-center justify-center transition-colors",
-                      "border border-white/10",
-                      "bg-gradient-to-b from-violet-500/95 to-fuchsia-600/85 hover:from-violet-400 hover:to-fuchsia-500",
-                      "shadow-[0_12px_30px_rgba(124,58,237,0.22)]",
-                      "disabled:opacity-40 disabled:pointer-events-none",
-                    )}
-                    aria-label="Send"
+                    onClick={() => {
+                      scrollToBottom("smooth");
+                      setUnseenCount(0);
+                    }}
+                    className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                    aria-label={`${unseenCount} new ${unseenCount === 1 ? "message" : "messages"} — jump to the newest`}
                   >
-                    {sending ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Send className="w-5 h-5" />
-                    )}
+                    {unseenCount} new
+                    <ChevronDown className="size-3.5" aria-hidden />
                   </button>
-                </div>
+                ) : null}
               </div>
+
+              <Composer
+                value={draft}
+                onChange={setDraft}
+                onSend={() => void handleSend()}
+                sending={sending}
+                error={sendError}
+                placeholder={
+                  focusThread?.kind === "note"
+                    ? "Write a reply…"
+                    : focusThread?.kind === "dm"
+                      ? "Send a message…"
+                      : "Message the squad…"
+                }
+              />
             </div>
 
             {threadExpanded && (

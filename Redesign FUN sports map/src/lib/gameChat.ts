@@ -256,47 +256,105 @@ export function unarchiveGameChat(gameId: string): Promise<Error | null> {
   return setGameChatArchived(gameId, false);
 }
 
-export async function fetchGameMessages(gameId: string): Promise<{
+/** How many messages one page of history holds. */
+export const CHAT_PAGE_SIZE = 50;
+
+/**
+ * A unique-violation on `(user_id, client_id)`, which means this exact message
+ * already landed. Treating it as success is the whole point of the index: it is
+ * what makes "Failed — tap to retry" safe on a train.
+ */
+export function isDuplicateSend(error: { code?: string } | null): boolean {
+  return error?.code === "23505";
+}
+
+/**
+ * The newest page of a game thread, or the page before `before`.
+ *
+ * This used to order ascending and take 200, which returns the two hundred
+ * *oldest* messages — so any thread past that point opened on stale history with
+ * only realtime inserts arriving after it, and the recent conversation was
+ * simply unreachable. Reading backwards from the newest and reversing the page is
+ * both the fix and what pagination needs anyway.
+ *
+ * The cursor is inclusive (`lte`) rather than exclusive on purpose. Two rows can
+ * share a `created_at` to the microsecond, and an exclusive cursor would skip
+ * one of them forever, which is unrecoverable; an inclusive one re-reads the
+ * boundary row instead and the caller drops it by id.
+ */
+export async function fetchGameMessages(
+  gameId: string,
+  opts?: { before?: string; limit?: number },
+): Promise<{
   data: GameMessageRow[] | null;
   error: Error | null;
+  /** True when there is older history past this page. */
+  hasMore: boolean;
 }> {
-  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
-  const { data, error } = await supabase
+  if (!supabase)
+    return { data: null, error: new Error("Supabase not configured"), hasMore: false };
+  const limit = opts?.limit ?? CHAT_PAGE_SIZE;
+  let query = supabase
     .from("game_messages")
     .select("id, game_id, user_id, body, created_at")
     .eq("game_id", gameId)
-    .order("created_at", { ascending: true })
-    .limit(200);
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit + 1);
+  if (opts?.before) query = query.lte("created_at", opts.before);
+  const { data, error } = await query;
   if (error && isGameMessagesSchemaCacheMissing(error)) {
     // Treat as empty thread while we wait for schema cache reload.
-    return { data: [], error: null };
+    return { data: [], error: null, hasMore: false };
   }
-  return { data: (data as GameMessageRow[]) ?? null, error: error ? new Error(error.message) : null };
+  if (error) return { data: null, error: new Error(error.message), hasMore: false };
+  const rows = (data as GameMessageRow[]) ?? [];
+  const hasMore = rows.length > limit;
+  return { data: rows.slice(0, limit).reverse(), error: null, hasMore };
 }
 
-export async function sendGameMessage(gameId: string, body: string): Promise<{
+/**
+ * Send, optionally carrying a client-chosen id.
+ *
+ * `clientId` makes a retry safe. The partial unique index on
+ * `(user_id, client_id)` turns a duplicate send into a 23505, which
+ * `isDuplicateSend` recognises — so a message that actually landed before the
+ * connection dropped is not posted twice when the user taps retry.
+ */
+export async function sendGameMessage(
+  gameId: string,
+  body: string,
+  clientId?: string,
+): Promise<{
   data: GameMessageRow | null;
   error: Error | null;
+  duplicate: boolean;
 }> {
-  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  if (!supabase)
+    return { data: null, error: new Error("Supabase not configured"), duplicate: false };
   const trimmed = body.trim();
-  if (!trimmed) return { data: null, error: new Error("Message is empty") };
+  if (!trimmed) return { data: null, error: new Error("Message is empty"), duplicate: false };
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { data: null, error: new Error("Not signed in") };
+  if (!user) return { data: null, error: new Error("Not signed in"), duplicate: false };
   const { data, error } = await supabase
     .from("game_messages")
     .insert({
       game_id: gameId,
       user_id: user.id,
       body: trimmed.slice(0, 2000),
+      ...(clientId ? { client_id: clientId } : {}),
     })
     .select("id, game_id, user_id, body, created_at")
     .single();
+  if (error && isDuplicateSend(error)) {
+    return { data: null, error: null, duplicate: true };
+  }
   return {
     data: (data as GameMessageRow) ?? null,
     error: error ? new Error(error.message) : null,
+    duplicate: false,
   };
 }
 
