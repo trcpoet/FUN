@@ -2098,7 +2098,7 @@ export function GameMessengerSheet({
                       scrollToBottom("smooth");
                       setUnseenCount(0);
                     }}
-                    className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-bold text-slate-950 shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                    className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
                     aria-label={`${unseenCount} new ${unseenCount === 1 ? "message" : "messages"} — jump to the newest`}
                   >
                     {unseenCount} new
