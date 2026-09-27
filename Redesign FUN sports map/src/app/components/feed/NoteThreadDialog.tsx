@@ -22,6 +22,8 @@ import {
   noteVisibilityLabel,
 } from "../../lib/noteVisibility";
 import { LikeButton } from "./LikeButton";
+import { MessageList } from "../chat/MessageList";
+import { noteCommentToChat } from "../chat/messageTypes";
 import { NoteCommentLikeButton } from "./NoteCommentLikeButton";
 
 /** `add_note_comment` slices the body at this length server-side (see api.ts). */
@@ -135,6 +137,7 @@ export function NoteThreadDialog({
    * plain table read — and a `?? 0` there would flash "0 comments" on a note that has plenty.
    */
   const knownCount = loaded ? comments.length : note.comment_count ?? null;
+  const chatMessages = useMemo(() => comments.map(noteCommentToChat), [comments]);
   const commentCountLabel =
     knownCount == null ? "Comments" : `${knownCount} ${knownCount === 1 ? "comment" : "comments"}`;
 
@@ -310,41 +313,25 @@ export function NoteThreadDialog({
             </div>
           ) : loading ? (
             <p className="py-6 text-center text-xs text-slate-500">Loading replies…</p>
-          ) : comments.length === 0 ? (
-            <p className="py-6 text-center text-xs text-slate-500">Be the first to reply.</p>
           ) : (
-            <ul className="space-y-2">
-              {comments.map((c) => {
-                const isMine = Boolean(currentUserId && c.user_id === currentUserId);
-                return (
-                  <li
-                    key={c.id}
-                    className={cn(
-                      "rounded-2xl border px-3 py-2",
-                      isMine
-                        ? "border-cyan-400/20 bg-cyan-400/[0.06]"
-                        : "border-white/[0.06] bg-white/[0.02]",
-                    )}
-                  >
-                    <p className="whitespace-pre-wrap break-words text-sm text-slate-200">
-                      {c.body}
-                    </p>
-                    <div className="mt-1 flex items-center justify-between gap-2">
-                      <p className="text-[10px] text-slate-500">
-                        {isMine ? (
-                          <>
-                            <span className="font-semibold text-cyan-300/80">You</span>
-                            <span aria-hidden> · </span>
-                          </>
-                        ) : null}
-                        {noteCreatedLabel(c.created_at)}
-                      </p>
-                      <NoteCommentLikeButton comment={c} />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            /*
+              The fifth copy of the message bubble used to live here, drawing
+              replies as full-width cards that said "You ·" to tell you apart from
+              everyone else. It is the same conversation the messenger shows, so it
+              is now the same component: left and right, grouped by speaker, with
+              one timestamp per turn.
+            */
+            <MessageList
+              messages={chatMessages}
+              loading={false}
+              currentUserId={currentUserId ?? null}
+              empty={
+                <p className="py-6 text-center text-xs text-slate-500">Be the first to reply.</p>
+              }
+              footerSlotFor={(m) =>
+                m.noteComment ? <NoteCommentLikeButton comment={m.noteComment} /> : null
+              }
+            />
           )}
         </div>
 

@@ -3,6 +3,7 @@ import type { DmInboxRow, DmMessageRow } from "./supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { isMissingRpc } from "./rpcErrors";
 import { subscribeWithRetry } from "./realtimeRetry";
+import { CHAT_PAGE_SIZE } from "./gameChat";
 
 function rpcMissing(error: { message?: string; code?: string; hint?: string | null } | null, _fnName: string): boolean {
   // Genuinely-absent RPCs only. A 42501 on can_dm previously matched the
@@ -93,18 +94,30 @@ export async function fetchMyDmInbox(): Promise<{ data: DmInboxRow[] | null; err
   }
 }
 
-export async function fetchDmMessages(threadId: string): Promise<{ data: DmMessageRow[] | null; error: Error | null }> {
-  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
-  const { data, error } = await supabase
+/** The newest page of a DM thread, or the page before `before`. See `fetchGameMessages`. */
+export async function fetchDmMessages(
+  threadId: string,
+  opts?: { before?: string; limit?: number },
+): Promise<{ data: DmMessageRow[] | null; error: Error | null; hasMore: boolean }> {
+  if (!supabase)
+    return { data: null, error: new Error("Supabase not configured"), hasMore: false };
+  const limit = opts?.limit ?? CHAT_PAGE_SIZE;
+  let query = supabase
     .from("dm_messages")
     .select("id, thread_id, user_id, body, created_at")
     .eq("thread_id", threadId)
-    .order("created_at", { ascending: true })
-    .limit(200);
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit + 1);
+  if (opts?.before) query = query.lte("created_at", opts.before);
+  const { data, error } = await query;
   if (error && isDmMessagesSchemaCacheMissing(error)) {
-    return { data: [], error: null };
+    return { data: [], error: null, hasMore: false };
   }
-  return { data: (data as DmMessageRow[]) ?? null, error: error ? new Error(error.message) : null };
+  if (error) return { data: null, error: new Error(error.message), hasMore: false };
+  const rows = (data as DmMessageRow[]) ?? [];
+  const hasMore = rows.length > limit;
+  return { data: rows.slice(0, limit).reverse(), error: null, hasMore };
 }
 
 export async function sendDmMessage(threadId: string, body: string): Promise<{ data: DmMessageRow | null; error: Error | null }> {

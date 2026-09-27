@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft, Info, Loader2, MapPin, Maximize2, Minimize2, Share2, StickyNote, Users } from "lucide-react";
+import { ArrowLeft, ChevronDown, Info, Loader2, MapPin, Maximize2, Minimize2, Share2, StickyNote, Users } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
   Sheet,
@@ -41,6 +41,7 @@ import {
   unarchiveGameChat,
 } from "../../lib/gameChat";
 import { fetchDmMessages, fetchMyDmInbox, sendDmMessage, subscribeDmMessages } from "../../lib/dmChat";
+import { useNearBottom } from "../../hooks/useNearBottom";
 import { clearUnread, getUnreadCount, incrementUnread, threadKey } from "../../lib/unreadCounts";
 import {
   formatUrgentCountdown,
@@ -455,6 +456,14 @@ export function GameMessengerSheet({
   const [shareBusyGameId, setShareBusyGameId] = useState<string | null>(null);
   const listEndRef = useRef<HTMLDivElement>(null);
   const [unreadTick, setUnreadTick] = useState(0);
+  /** There is history older than what is loaded. */
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  /** Messages that arrived while the reader was up in the history. */
+  const [unseenCount, setUnseenCount] = useState(0);
+  const { ref: scrollerRef, atBottom, scrollToBottom } = useNearBottom();
+  /** The newest message we have already reacted to, so we react once. */
+  const lastSeenMessageId = useRef<string | null>(null);
 
   const bumpUnreadTick = useCallback(() => setUnreadTick((n) => n + 1), []);
 
@@ -638,7 +647,8 @@ export function GameMessengerSheet({
 
     let cancelled = false;
     setMessagesLoading(true);
-    fetchGameMessages(focusThread.gameId).then(({ data, error }) => {
+    setHasOlder(false);
+    fetchGameMessages(focusThread.gameId).then(({ data, error, hasMore }) => {
       if (cancelled) return;
       setMessagesLoading(false);
       if (error) {
@@ -647,6 +657,7 @@ export function GameMessengerSheet({
         return;
       }
       setMessages(data ?? []);
+      setHasOlder(hasMore);
     });
 
     const unsub = subscribeGameMessages(focusThread.gameId, (row) => {
@@ -670,7 +681,8 @@ export function GameMessengerSheet({
 
     let cancelled = false;
     setDmMessagesLoading(true);
-    fetchDmMessages(focusThread.threadId).then(({ data, error }) => {
+    setHasOlder(false);
+    fetchDmMessages(focusThread.threadId).then(({ data, error, hasMore }) => {
       if (cancelled) return;
       setDmMessagesLoading(false);
       if (error) {
@@ -678,6 +690,7 @@ export function GameMessengerSheet({
         setDmMessages([]);
         return;
       }
+      setHasOlder(hasMore);
       setDmMessages(data ?? []);
     });
 
@@ -831,10 +844,11 @@ export function GameMessengerSheet({
     };
   }, [open, inbox, dmInbox, noteInbox, focusThread, bumpUnreadTick]);
 
+  /** A new thread starts at the newest message with nothing outstanding. */
   useEffect(() => {
-    if (!open || !focusThread) return;
-    listEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, dmMessages, noteComments, open, focusThread]);
+    lastSeenMessageId.current = null;
+    setUnseenCount(0);
+  }, [focusThread]);
 
   useEffect(() => {
     if (!focusThread) setThreadExpanded(false);
@@ -1034,11 +1048,11 @@ export function GameMessengerSheet({
   useEffect(() => {
     setRevealedMessageIds(new Set());
   }, [focusThread]);
-  const revealMessage = useCallback((id: string) => {
+  const revealMessages = useCallback((ids: string[]) => {
     setRevealedMessageIds((prev) => {
-      if (prev.has(id)) return prev;
+      if (ids.every((id) => prev.has(id))) return prev;
       const next = new Set(prev);
-      next.add(id);
+      for (const id of ids) next.add(id);
       return next;
     });
   }, []);
@@ -1102,20 +1116,73 @@ export function GameMessengerSheet({
     [nameForUserId, avatarForUserId, trustByUserId],
   );
 
-  /** Strangers in a public game chat start behind one tap. */
-  const chatVeilFor = useCallback(
+  /**
+   * Strangers in a public game chat start behind one tap.
+   *
+   * A predicate rather than a rendered veil: `buildChatList` needs to know which
+   * messages are hidden *before* it can collapse a consecutive run of them into
+   * one, and that decision cannot be made a bubble at a time.
+   */
+  const chatIsVeiled = useCallback(
     (m: ChatMessage) => {
-      if (!isPublicChat || !m.authorId) return null;
-      if (currentUserId != null && m.authorId === currentUserId) return null;
-      if (trustByUserId.get(m.authorId) !== "stranger") return null;
-      if (revealedMessageIds.has(m.id)) return null;
-      return {
-        label: "Stranger sent a message — tap to read",
-        onReveal: () => revealMessage(m.id),
-      };
+      if (!isPublicChat || !m.authorId) return false;
+      return trustByUserId.get(m.authorId) === "stranger";
     },
-    [isPublicChat, currentUserId, trustByUserId, revealedMessageIds, revealMessage],
+    [isPublicChat, trustByUserId],
   );
+
+  /**
+   * Fetch the page before the oldest message we hold, and keep the reader's place.
+   *
+   * Prepending to a scroller moves everything down by the height of what was
+   * added, which without correction teleports the reader. Measuring the scroller
+   * before and after and adding the difference back leaves the message they were
+   * looking at exactly where it was.
+   *
+   * Note threads are not paginated: their comments come from an RPC with no
+   * cursor, so that waits for the inbox migration that recreates it.
+   */
+  const handleLoadOlder = useCallback(async () => {
+    if (!focusThread || loadingOlder) return;
+    const scroller = scrollerRef.current;
+    const heightBefore = scroller?.scrollHeight ?? 0;
+    const topBefore = scroller?.scrollTop ?? 0;
+    setLoadingOlder(true);
+    try {
+      if (focusThread.kind === "game") {
+        const oldest = messages[0]?.created_at;
+        if (!oldest) return;
+        const { data, hasMore } = await fetchGameMessages(focusThread.gameId, { before: oldest });
+        const seen = new Set(messages.map((m) => m.id));
+        const older = (data ?? []).filter((m) => !seen.has(m.id));
+        // The cursor is inclusive, so a page of nothing new means we are at the
+        // start of the thread — whatever the server said about there being more.
+        if (older.length === 0) setHasOlder(false);
+        else {
+          setMessages((prev) => [...older, ...prev]);
+          setHasOlder(hasMore);
+        }
+      } else if (focusThread.kind === "dm") {
+        const oldest = dmMessages[0]?.created_at;
+        if (!oldest) return;
+        const { data, hasMore } = await fetchDmMessages(focusThread.threadId, { before: oldest });
+        const seen = new Set(dmMessages.map((m) => m.id));
+        const older = (data ?? []).filter((m) => !seen.has(m.id));
+        if (older.length === 0) setHasOlder(false);
+        else {
+          setDmMessages((prev) => [...older, ...prev]);
+          setHasOlder(hasMore);
+        }
+      }
+    } finally {
+      setLoadingOlder(false);
+      requestAnimationFrame(() => {
+        const el = scrollerRef.current;
+        if (!el) return;
+        el.scrollTop = topBefore + (el.scrollHeight - heightBefore);
+      });
+    }
+  }, [focusThread, loadingOlder, messages, dmMessages, scrollerRef]);
 
   /** Only a note comment can be liked. */
   const chatFooterSlotFor = useCallback(
@@ -1134,6 +1201,33 @@ export function GameMessengerSheet({
     },
     [currentUserId],
   );
+
+  /**
+   * Follow the conversation only if the reader is already following it.
+   *
+   * The old effect scrolled to the bottom smoothly on every change to any of the
+   * three message arrays, which took the thread away from anyone reading history
+   * and animated two hundred bubbles past them to do it. Now: land on the newest
+   * message when a thread opens, stay pinned while the reader is at the bottom,
+   * follow your own sends wherever you are, and otherwise count what arrived and
+   * offer to catch up.
+   */
+  useEffect(() => {
+    if (!open || !focusThread) return;
+    const last = chatMessages[chatMessages.length - 1];
+    if (!last) return;
+    if (lastSeenMessageId.current === last.id) return;
+    const opening = lastSeenMessageId.current === null;
+    lastSeenMessageId.current = last.id;
+    const mine = currentUserId != null && last.authorId === currentUserId;
+    if (opening || mine || atBottom) {
+      // Instant on open: smooth-scrolling a whole thread is the jank.
+      scrollToBottom(opening ? "auto" : "smooth");
+      setUnseenCount(0);
+    } else {
+      setUnseenCount((n) => n + 1);
+    }
+  }, [chatMessages, open, focusThread, currentUserId, atBottom, scrollToBottom]);
 
   // Mark thread read when opened.
   useEffect(() => {
@@ -1853,7 +1947,10 @@ export function GameMessengerSheet({
                   aria-hidden
                   className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_20%_0%,rgba(34,211,238,0.12),transparent_45%),radial-gradient(900px_circle_at_85%_35%,rgba(124,58,237,0.14),transparent_52%)]"
                 />
-                <div className="relative flex-1 overflow-y-auto px-3 py-2 space-y-2">
+                <div
+                  ref={scrollerRef}
+                  className="relative flex-1 h-full overflow-y-auto px-3 py-2"
+                >
                 <MessageList
                   messages={chatMessages}
                   loading={chatLoading}
@@ -1889,14 +1986,34 @@ export function GameMessengerSheet({
                     ) : null
                   }
                   authorFor={focusThread?.kind === "game" ? chatAuthorFor : undefined}
-                  veilFor={focusThread?.kind === "game" ? chatVeilFor : undefined}
+                  isVeiled={focusThread?.kind === "game" ? chatIsVeiled : undefined}
+                  revealedIds={revealedMessageIds}
+                  onReveal={revealMessages}
                   footerSlotFor={isNoteThread ? chatFooterSlotFor : undefined}
                   onOpenAuthor={(uid) => navigate(`/athlete/${uid}`)}
+                  canLoadOlder={hasOlder && !chatLoading}
+                  loadingOlder={loadingOlder}
+                  onLoadOlder={() => void handleLoadOlder()}
                   spinnerClassName={isNoteThread ? "w-6 h-6" : "w-8 h-8"}
                   spinnerPadClassName={isNoteThread ? "py-8" : "py-12"}
                   endRef={listEndRef}
                 />
                 </div>
+
+                {unseenCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      scrollToBottom("smooth");
+                      setUnseenCount(0);
+                    }}
+                    className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-bold text-slate-950 shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                    aria-label={`${unseenCount} new ${unseenCount === 1 ? "message" : "messages"} — jump to the newest`}
+                  >
+                    {unseenCount} new
+                    <ChevronDown className="size-3.5" aria-hidden />
+                  </button>
+                ) : null}
               </div>
 
               <Composer
