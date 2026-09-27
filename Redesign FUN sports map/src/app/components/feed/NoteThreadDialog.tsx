@@ -64,6 +64,9 @@ export function NoteThreadDialog({
   onRequestSignIn,
 }: Props) {
   const [comments, setComments] = useState<MapNoteCommentRow[]>([]);
+  /** There are replies older than the page we hold. */
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState("");
@@ -91,6 +94,7 @@ export function NoteThreadDialog({
     // under the new note's body reads as if they belong to it.
     setLoaded(false);
     setComments([]);
+    setHasOlder(false);
     void fetchNoteComments(note.id).then((r) => {
       if (cancelled) return;
       setLoading(false);
@@ -100,6 +104,7 @@ export function NoteThreadDialog({
         return;
       }
       setComments(r.data ?? []);
+      setHasOlder(r.hasMore);
       setLoaded(true);
     });
     return () => {
@@ -136,7 +141,31 @@ export function NoteThreadDialog({
    * `comment_count`, but a deployment that predates `get_note_by_id` still falls back to a
    * plain table read — and a `?? 0` there would flash "0 comments" on a note that has plenty.
    */
-  const knownCount = loaded ? comments.length : note.comment_count ?? null;
+  // Never below what the feed row already claimed: the thread is fetched one
+  // page at a time now, so `comments.length` is the page, not the total.
+  const knownCount = loaded
+    ? Math.max(comments.length, note.comment_count ?? 0)
+    : note.comment_count ?? null;
+
+  const loadOlder = useCallback(async () => {
+    const oldest = comments[0]?.created_at;
+    if (!oldest || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const r = await fetchNoteComments(note.id, { before: oldest });
+      const seen = new Set(comments.map((c) => c.id));
+      const older = (r.data ?? []).filter((c) => !seen.has(c.id));
+      // The cursor is inclusive, so a page with nothing new means we are at the
+      // start of the thread, whatever the server said about there being more.
+      if (older.length === 0) setHasOlder(false);
+      else {
+        setComments((prev) => [...older, ...prev]);
+        setHasOlder(r.hasMore);
+      }
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [comments, loadingOlder, note.id]);
   const chatMessages = useMemo(() => comments.map(noteCommentToChat), [comments]);
   const commentCountLabel =
     knownCount == null ? "Comments" : `${knownCount} ${knownCount === 1 ? "comment" : "comments"}`;
@@ -325,9 +354,20 @@ export function NoteThreadDialog({
               messages={chatMessages}
               loading={false}
               currentUserId={currentUserId ?? null}
+              canLoadOlder={hasOlder}
+              loadingOlder={loadingOlder}
+              onLoadOlder={() => void loadOlder()}
               empty={
                 <p className="py-6 text-center text-xs text-slate-500">Be the first to reply.</p>
               }
+              authorFor={(m) => {
+                const name = m.noteComment?.author_name?.trim();
+                if (!name) return null;
+                return {
+                  displayName: name,
+                  avatarUrl: m.noteComment?.author_avatar_url?.trim() || null,
+                };
+              }}
               footerSlotFor={(m) =>
                 m.noteComment ? <NoteCommentLikeButton comment={m.noteComment} /> : null
               }

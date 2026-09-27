@@ -165,6 +165,14 @@ export type MapNoteCommentRow = {
   like_count?: number;
   /** Returned by `get_note_comments_with_likes` RPC; absent on legacy fallback. */
   liked_by_me?: boolean;
+  /**
+   * Who wrote it. Added by 20260928160000 — absent on the legacy fallback, which
+   * is why the bubble treats a missing name as "no author" rather than "Player".
+   */
+  author_name?: string | null;
+  author_avatar_url?: string | null;
+  /** Set by the sender for optimistic reconciliation; null on older rows. */
+  client_id?: string | null;
 };
 
 export type StatusCommentRow = {

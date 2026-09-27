@@ -778,7 +778,8 @@ export function GameMessengerSheet({
     }
 
     setNoteCommentsLoading(true);
-    void fetchNoteComments(focusThread.noteId).then(({ data, error }) => {
+    setHasOlder(false);
+    void fetchNoteComments(focusThread.noteId).then(({ data, error, hasMore }) => {
       if (cancelled) return;
       setNoteCommentsLoading(false);
       if (error) {
@@ -787,6 +788,7 @@ export function GameMessengerSheet({
         return;
       }
       setNoteComments(data ?? []);
+      setHasOlder(hasMore);
     });
 
     const unsub = subscribeNoteComments(focusThread.noteId, (row) => {
@@ -901,9 +903,8 @@ export function GameMessengerSheet({
    * as success. Re-hydrating afterwards guarantees the confirmed row is on
    * screen even if its realtime event was the thing that went missing.
    *
-   * Note comments are sent the old way: `add_note_comment` is an RPC that takes
-   * no client id, so there is nothing to reconcile a pending bubble against, and
-   * matching on body would mis-merge two identical replies.
+   * All three kinds carry a client id now, note replies included — the RPC gained
+   * the parameter in 20260928160000.
    */
   const deliver = useCallback(
     async (body: string, clientId: string) => {
@@ -963,6 +964,7 @@ export function GameMessengerSheet({
       const { data: sent, error } = await addNoteComment({
         noteId: focusThread.noteId,
         body,
+        clientId,
       });
       if (error) return fail(error.message);
       settle();
@@ -1243,6 +1245,17 @@ export function GameMessengerSheet({
           setDmMessages((prev) => [...older, ...prev]);
           setHasOlder(hasMore);
         }
+      } else if (focusThread.kind === "note") {
+        const oldest = noteComments[0]?.created_at;
+        if (!oldest) return;
+        const { data, hasMore } = await fetchNoteComments(focusThread.noteId, { before: oldest });
+        const seen = new Set(noteComments.map((c) => c.id));
+        const older = (data ?? []).filter((c) => !seen.has(c.id));
+        if (older.length === 0) setHasOlder(false);
+        else {
+          setNoteComments((prev) => [...older, ...prev]);
+          setHasOlder(hasMore);
+        }
       }
     } finally {
       setLoadingOlder(false);
@@ -1252,7 +1265,27 @@ export function GameMessengerSheet({
         el.scrollTop = topBefore + (el.scrollHeight - heightBefore);
       });
     }
-  }, [focusThread, loadingOlder, messages, dmMessages, scrollerRef]);
+  }, [focusThread, loadingOlder, messages, dmMessages, noteComments, scrollerRef]);
+
+  /**
+   * A note reply names its author from the row itself.
+   *
+   * There is no roster for a map note — anyone who can see it can reply — so the
+   * name travels with the comment rather than coming from a member list. A row
+   * from the legacy fallback RPC has no name, and returns null here, which the
+   * bubble renders as no header at all rather than inventing "Player".
+   */
+  const noteAuthorFor = useCallback(
+    (m: ChatMessage) => {
+      const name = m.noteComment?.author_name?.trim();
+      if (!name) return null;
+      return {
+        displayName: name,
+        avatarUrl: m.noteComment?.author_avatar_url?.trim() || null,
+      };
+    },
+    [],
+  );
 
   /** Only a note comment can be liked. */
   const chatFooterSlotFor = useCallback(
@@ -2070,7 +2103,13 @@ export function GameMessengerSheet({
                       />
                     ) : null
                   }
-                  authorFor={focusThread?.kind === "game" ? chatAuthorFor : undefined}
+                  authorFor={
+                    focusThread?.kind === "game"
+                      ? chatAuthorFor
+                      : isNoteThread
+                        ? noteAuthorFor
+                        : undefined
+                  }
                   isVeiled={focusThread?.kind === "game" ? chatIsVeiled : undefined}
                   revealedIds={revealedMessageIds}
                   onReveal={revealMessages}

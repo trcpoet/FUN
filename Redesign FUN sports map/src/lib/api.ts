@@ -133,27 +133,49 @@ export async function fetchNotesNearby(params: {
   return { data: (data as MapNoteRow[]) ?? [], error: error ? new Error(error.message) : null };
 }
 
-export async function fetchNoteComments(noteId: string): Promise<{ data: MapNoteCommentRow[]; error: Error | null }> {
-  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
-  // Prefer the richer RPC (per-comment like_count + liked_by_me). Fall back to
-  // the legacy `get_note_comments` if the new function isn't deployed yet.
-  const withLikes = await supabase.rpc("get_note_comments_with_likes", { p_note_id: noteId });
+/** One page of a note thread. Matches the chat's page size. */
+export const NOTE_COMMENT_PAGE_SIZE = 50;
+
+export async function fetchNoteComments(
+  noteId: string,
+  opts?: { before?: string; limit?: number },
+): Promise<{ data: MapNoteCommentRow[]; error: Error | null; hasMore: boolean }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured"), hasMore: false };
+  const limit = opts?.limit ?? NOTE_COMMENT_PAGE_SIZE;
+  // Prefer the richer RPC (like counts, author, paging). Fall back to the legacy
+  // `get_note_comments` if the new function isn't deployed yet — that one takes
+  // no cursor, so the fallback is simply the whole thread with no author.
+  const withLikes = await supabase.rpc("get_note_comments_with_likes", {
+    p_note_id: noteId,
+    // One extra row, so "is there more?" needs no second round trip.
+    p_limit: limit + 1,
+    ...(opts?.before ? { p_before: opts.before } : {}),
+  });
   if (!withLikes.error) {
-    return { data: (withLikes.data as MapNoteCommentRow[]) ?? [], error: null };
+    const rows = (withLikes.data as MapNoteCommentRow[]) ?? [];
+    const hasMore = rows.length > limit;
+    // The extra row is the oldest, because the page comes back in reading order.
+    return { data: hasMore ? rows.slice(rows.length - limit) : rows, error: null, hasMore };
   }
   if (!isMissingMapNotesRpc(withLikes.error)) {
-    return { data: [], error: new Error(withLikes.error.message) };
+    return { data: [], error: new Error(withLikes.error.message), hasMore: false };
   }
   const { data, error } = await supabase.rpc("get_note_comments", { p_note_id: noteId });
   if (error && isMissingMapNotesRpc(error)) {
-    return { data: [], error: null };
+    return { data: [], error: null, hasMore: false };
   }
-  return { data: (data as MapNoteCommentRow[]) ?? [], error: error ? new Error(error.message) : null };
+  return {
+    data: (data as MapNoteCommentRow[]) ?? [],
+    error: error ? new Error(error.message) : null,
+    hasMore: false,
+  };
 }
 
 export async function addNoteComment(params: {
   noteId: string;
   body: string;
+  /** Lets the pending bubble be matched to its row, and makes retry idempotent. */
+  clientId?: string;
 }): Promise<{ data: MapNoteCommentRow | null; error: Error | null }> {
   if (!supabase) return { data: null, error: new Error("Supabase not configured") };
   const trimmed = params.body.trim();
@@ -161,6 +183,7 @@ export async function addNoteComment(params: {
   const { data, error } = await supabase.rpc("add_note_comment", {
     p_note_id: params.noteId,
     p_body: trimmed.slice(0, 2000),
+    ...(params.clientId ? { p_client_id: params.clientId } : {}),
   });
   if (error && isMissingMapNotesRpc(error)) {
     return {

@@ -387,6 +387,30 @@ is done.
   production, so the "stranger" was a friend. Re-run with a genuine non-follower, it is
   refused.
 
+- **`20260928160000_note_comment_authors_and_paging.sql` — ✅ APPLIED 2026-09-28.**
+  DROP + CREATE of `get_note_comments_with_likes` (gains `author_name`,
+  `author_avatar_url`, a `p_limit` cap and a `p_before` cursor) and of
+  `add_note_comment` (gains `p_client_id`).
+
+  Note replies were the last surface where you could not tell who wrote what — the
+  function returned a bare `user_id`. Safe to widen: it is granted to `authenticated`
+  only, so no identity reaches a guest, and it is SECURITY INVOKER so the `profiles`
+  join resolves under the caller's own RLS.
+
+  **Both are drop+create, and dropping a function drops its grants.** Verified after
+  applying with `has_function_privilege`: `authenticated` can execute both, `anon`
+  cannot, and no stale overload survived that PostgREST could resolve ambiguously.
+  Also probed through PostgREST itself with the publishable key — both return
+  `42501 permission denied`, not `PGRST202 could not find the function`, which proves
+  the schema cache picked up the new parameter names *and* that anon is refused.
+
+  Paging verified on a five-comment fixture with distinct timestamps: the full thread
+  returns `c1..c5` in reading order, `p_limit => 2` returns the newest two, and a
+  `p_before` cursor on c4 returns `c3,c4` — inclusive, as designed, with the caller
+  dropping the repeated boundary row by id. An earlier run of this test was
+  meaningless because `generate_series` gave all five rows the same `created_at`,
+  leaving the order to a random uuid tiebreak; it was redone with distinct times.
+
 ## Open security finding — anonymous sign-ins are enabled
 
 Not a migration, and not introduced by this work, but it interacts badly with it.
