@@ -1,5 +1,35 @@
 # Schema changelog
 
+## 2026-09-27 — The loop that closes after the game
+
+`20260927160000_post_game_loop.sql`.
+
+Before: the trust system was complete and had never fired. `athlete_endorsements`,
+`endorse_athlete`, `get_athlete_reputation`, `profiles.sportsmanship_avg`,
+`TrustRatingsBlock`, the badge in chat — all shipped, and every rating in the
+database was zero, because nothing in the app had ever asked anyone to rate anyone.
+`game_participants.confirmed_result` had been in the schema since it was written
+and nothing had ever set it. And `athlete_endorsements` had RLS enabled with INSERT
+and UPDATE policies and **no SELECT policy at all**, so any client read of it
+returned nothing — silently, because the trigger-maintained aggregate on `profiles`
+kept working and the number on screen looked fine.
+
+After: three tables and the moment that fills them, in the game's own chat thread
+once the game is over. `game_outcome_reports` answers "did it happen?" (and a
+`played` finally sets `confirmed_result`, which is the honest numerator of
+games-played over games-created). `get_rateable_teammates` is the row of faces that
+calls the endorsement RPC that has existed all along. `game_polls` /
+`game_poll_votes` are the host-only "run it back?" with one In-or-Out vote each and
+a partial unique index allowing exactly one open poll per game.
+
+`get_game_outcome_summary` is plpgsql rather than sql on purpose: an aggregate with
+no GROUP BY returns one row even when the WHERE matched nothing, so a participant
+test in the WHERE clause would still have handed an outsider a row — including the
+participant count.
+
+Check-in is deliberately still deferred; when it lands, joining a game should mark
+attendance rather than asking a second time.
+
 ## 2026-09-27 — Games ranked for the person looking at them
 
 `20260927150000_suggested_games.sql`.

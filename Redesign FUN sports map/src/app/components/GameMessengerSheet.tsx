@@ -62,6 +62,7 @@ import { NoteCommentLikeButton } from "./feed/NoteCommentLikeButton";
 import { GameActionBar } from "./game/GameActionBar";
 import { gameViewerRole } from "../lib/gameViewerRole";
 import { inboxGameRow, threadGameRow } from "../lib/threadGameRow";
+import { PostGamePanel } from "./chat/PostGamePanel";
 import { toast } from "sonner";
 
 export type GameThreadFocus = {
@@ -2039,6 +2040,19 @@ export function GameMessengerSheet({
                     );
                   })
                 )}
+                {/* The post-game loop, at the bottom of the thread where the
+                    conversation ends: did it happen, how were they, run it back.
+                    Renders nothing until the game is over, and nothing at all
+                    without 20260927160000_post_game_loop applied. */}
+                {focusThread?.kind === "game" && schedule.ended && currentUserId ? (
+                  <PostGamePanel
+                    gameId={focusThread.gameId}
+                    hostId={threadHostId}
+                    currentUserId={currentUserId}
+                    onPlanRematch={onPlanRematch ? handlePlanRematch : undefined}
+                    className="mt-2"
+                  />
+                ) : null}
                 <div ref={listEndRef} />
                 </div>
               </div>

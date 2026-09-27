@@ -169,6 +169,18 @@ where proname = '<name>' and pronargs = <n> and pronamespace = 'public'::regname
   same gender, liveness and TTL rules as `get_games_nearby` — a suggestion is
   always a game the map would draw.
 
+- **`20260927160000_post_game_loop.sql` — apply after `game_lifecycle_fixes`.**
+  Additive: `game_outcome_reports`, `game_polls`, `game_poll_votes`, their RLS and
+  RPCs, plus the SELECT policy `athlete_endorsements` never had (RLS is enabled on
+  it with INSERT and UPDATE policies and no SELECT policy, so every client read of
+  it has silently returned nothing — the trigger-maintained
+  `profiles.sportsmanship_avg` masked it, because the number showed while the rows
+  behind it did not). It restates `viewer_is_game_participant` so it does not
+  depend on apply order. The client treats every function here as optional: an
+  un-migrated database shows a finished game with no prompt rather than an error.
+  Ordered after the lifecycle fixes because the prompt keys off an honest
+  "this game is over", which is what those give it.
+
 ## Known gaps
 
 - The SQL Editor snippets in the Supabase dashboard are **historical scratch**, not a

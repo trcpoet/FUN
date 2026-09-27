@@ -173,6 +173,24 @@ export async function addNoteComment(params: {
   return { data: (data as MapNoteCommentRow) ?? null, error: error ? new Error(error.message) : null };
 }
 
+// The post-game loop (did it happen / rate / run it back) lives in `./postGame.ts`.
+export {
+  fetchGameOutcomeSummary,
+  reportGameOutcome,
+  fetchRateableTeammates,
+  rateTeammate,
+  fetchRematchPoll,
+  createRematchPoll,
+  voteRematchPoll,
+  closeRematchPoll,
+} from "./postGame";
+export type {
+  GameOutcome,
+  GameOutcomeSummary,
+  RateableTeammate,
+  RematchPoll,
+} from "./postGame";
+
 // Statuses live in `./status.ts`. Re-exported so components reach them through
 // the centralized layer, per the rule in CLAUDE.md. (Profile and PublicProfile
 // still import that module directly — worth moving when they are next touched.)
