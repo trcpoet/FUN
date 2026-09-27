@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, Sparkles } from "lucide-react";
 import { getSuggestedGames, type SuggestedGameRow } from "../../../lib/api";
-import { formatUrgentCountdown, isGameLive } from "../../../lib/mapGameTimer";
+import { GameHeadline } from "../game/GameHeadline";
+import { GameStatusChip } from "../game/GameStatusChip";
+import { spotsLabel } from "../game/SpotsBar";
 import { sportEmojiFor } from "../../../lib/sportDisplay";
 import { useSharedNow } from "../../../hooks/useSharedNow";
-import { cn } from "../ui/utils";
 
 /**
  * "Is anyone playing my sport near me tonight?"
@@ -108,16 +109,6 @@ export function SuggestedGamesShelf(props: {
       ) : (
         <ul className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 scrollbar-hide">
           {rows.map((g) => {
-            const live = isGameLive(g, nowMs);
-            const startMs = g.starts_at ? Date.parse(g.starts_at) : Number.NaN;
-            const when = live
-              ? "Playing now"
-              : !Number.isNaN(startMs) && startMs > nowMs
-              ? `in ${formatUrgentCountdown(startMs - nowMs)}`
-              : !Number.isNaN(startMs)
-              ? "Starting now"
-              : "Any time";
-            const remaining = g.spots_remaining ?? 0;
 
             return (
               <li key={g.id} className="w-[220px] shrink-0 snap-start">
@@ -135,28 +126,17 @@ export function SuggestedGamesShelf(props: {
                         Your sport
                       </span>
                     ) : null}
-                    {live ? (
-                      <span className="rounded-full bg-alert px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-alert-foreground">
-                        Live
-                      </span>
-                    ) : null}
+                    <GameStatusChip game={g} nowMs={nowMs} size="xs" />
                   </div>
 
-                  <p
-                    className={cn(
-                      "text-[15px] font-bold tabular-nums",
-                      live ? "text-alert" : "text-white",
-                    )}
-                  >
-                    {when}
-                  </p>
+                  <GameHeadline game={g} nowMs={nowMs} variant="short" />
 
                   <p className="line-clamp-2 text-xs leading-snug text-slate-300">
                     {g.title?.trim() || "Pickup game"}
                   </p>
 
                   <p className="mt-auto pt-1 text-[11px] tabular-nums text-slate-500">
-                    {remaining > 0 ? `${remaining} ${remaining === 1 ? "spot" : "spots"} left` : "Full"}
+                    {spotsLabel(g)}
                     {g.distance_km != null
                       ? ` · ${g.distance_km < 1 ? `${Math.round(g.distance_km * 1000)} m` : `${g.distance_km.toFixed(1)} km`}`
                       : ""}
