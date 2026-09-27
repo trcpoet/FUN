@@ -108,17 +108,49 @@ remove something the **currently deployed** client still asks for, and one adds
 something the **new** client needs before it ships. So: add first, swap the client,
 remove last.
 
-**Step 1 — before the deploy.** All additive; the live client ignores every one of
-them and behaves exactly as it does today.
+**Step 1 — before the deploy. ✅ APPLIED TO PRODUCTION 2026-09-27.** All additive;
+the live client ignores every one of them and behaves exactly as it did.
 
 ```
-20260922130000_guest_browse_read_paths.sql
-20260927120000_game_lifecycle_fixes.sql
-20260927130000_game_social.sql
-20260927140000_unified_feed_games_v2.sql
-20260927150000_suggested_games.sql
-20260927160000_post_game_loop.sql
+20260922130000_guest_browse_read_paths.sql    ✅ applied + verified
+20260927120000_game_lifecycle_fixes.sql       ✅ applied + verified
+20260927130000_game_social.sql                ✅ applied + verified
+20260927140000_unified_feed_games_v2.sql      ✅ applied + verified
+20260927150000_suggested_games.sql            ✅ applied + verified
+20260927160000_post_game_loop.sql             ✅ applied + verified
 ```
+
+Applied through the Supabase MCP, each in its own transaction, each verified against
+its own checks before the next was applied. What the verification actually exercised,
+on temporary rows inside transactions that were rolled back:
+
+- the gender rule across all six viewer/host combinations;
+- a guest read returning a public Co-ed game with `created_by` null, while the
+  invite-only and Same-gender games at the same coordinates did not come back;
+- a game started 90 minutes late coming out **live with 90 minutes left** rather than
+  born ended, and End closing `status`, `ended_at` and `ends_at` together — the
+  before/after being `live, ends_at +70min` then `completed, ends_at now`;
+- rescheduling a completed game leaving it completed and over;
+- a member commenting, liking and reading back `liked_by_me = true`, while the guest
+  wrapper returned the same text with the author stripped;
+- the feed returning a populated `game` object, and dropping a 5-day-old untimed game
+  that the old TTL-less predicate would have kept forever;
+- the scorer ranking basketball-soon > volleyball-soon > basketball-in-3-days >
+  tennis-soon for a basketball player, excluding the viewer's own games, and
+  returning nothing at all to a guest;
+- the full post-game loop: outcome recorded (and `confirmed_result` finally written),
+  a teammate rated 5, the poll created twice yielding one poll, two In votes counted,
+  and a **non-host blocked by RLS** from opening a poll.
+
+Two live consequences of Step 1, both intended:
+
+- `mark_ended_games_completed` is now scheduled under pg_cron every 5 minutes. On its
+  first two runs it moved the 34 games whose windows had long expired from
+  `open`/`live` to `completed`. They were already invisible on the map; the stored
+  status now agrees with that.
+- `get_unified_feed` lost its `anon` EXECUTE grant (it had one; `20260922140000` was
+  going to remove it anyway). Verified safe: the only caller is `Feed.tsx`, behind
+  `RequireMember`.
 
 **Step 2 — merge `perf/map-raf-write-budget` into main and let Vercel deploy.**
 Confirm the new build is live before going on.
@@ -225,6 +257,24 @@ is done.
   un-migrated database shows a finished game with no prompt rather than an error.
   Ordered after the lifecycle fixes because the prompt keys off an honest
   "this game is over", which is what those give it.
+
+## Open security finding — anonymous sign-ins are enabled
+
+Not a migration, and not introduced by this work, but it interacts badly with it.
+
+`auth.users` holds 4 anonymous accounts out of 13 (last sign-in 2026-03-25, so they are
+dormant test accounts). Anonymous sign-in being **enabled** means anyone holding the
+publishable anon key can mint a JWT whose role is `authenticated` — and the entire
+guest model draws its line exactly there: `anon` browses, `authenticated` acts. Every
+`to authenticated` policy in the schema, old and new, admits such a user.
+
+Supabase's own linter flags this on 42 tables, 36 of which predate today.
+
+The app no longer needs it: guest browsing replaced anonymous sign-in, which is why
+the "In Supabase enable: Authentication → Providers → Anonymous" error copy was
+removed from Create Game. Recommended: turn the Anonymous provider **off** at
+Authentication → Providers. Before doing so, note those 4 accounts host 7 games and
+hold 6 participant rows — all expired — so decide whether to reassign or leave them.
 
 ## Known gaps
 
