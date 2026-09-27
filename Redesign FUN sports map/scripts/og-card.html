@@ -1,0 +1,203 @@
+<!doctype html>
+<!--
+  The 1200x630 share card, rendered from the app's own tokens rather than drawn
+  by hand or generated. `npm run og:card` screenshots this at 1200x630 into
+  public/og-card.png, so the card cannot drift from the brand: change --primary
+  or the wordmark treatment and re-run.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <style>
+      @font-face {
+        font-family: "Bungee";
+        font-weight: 400;
+        font-display: block;
+        src: url("https://fonts.gstatic.com/s/bungee/v17/N0bU2SZBIuF2PU_0DXR1C9zfmQ.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Space Grotesk";
+        font-weight: 300 700;
+        font-display: block;
+        src: url("https://fonts.gstatic.com/s/spacegrotesk/v22/V8mDoQDjQSkFtoMM3T6r8E7mPbF4C_k3HqU.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Outfit";
+        font-weight: 100 900;
+        font-display: block;
+        src: url("https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtqUYLknw.woff2") format("woff2");
+      }
+
+      :root {
+        --primary: #00f2fe;
+        --primary-tint: #96f8ff;
+        --primary-container: #00c8d4;
+        --alert: #ff6a00;
+        --background: #0a0f1c;
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      body {
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        position: relative;
+        background: var(--background);
+        font-family: "Outfit", system-ui, sans-serif;
+        color: #e2e8f0;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* Same arena atmosphere the account screen uses. */
+      .layer { position: absolute; inset: 0; pointer-events: none; }
+
+      .streets {
+        background-image:
+          repeating-linear-gradient(32deg, rgba(148, 163, 184, 0.05) 0 1px, transparent 1px 90px),
+          repeating-linear-gradient(-18deg, rgba(148, 163, 184, 0.04) 0 1px, transparent 1px 120px);
+      }
+      .grid {
+        background-image:
+          linear-gradient(rgba(0, 242, 254, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0, 242, 254, 0.05) 1px, transparent 1px);
+        background-size: 52px 52px;
+        mask-image: radial-gradient(ellipse 120% 120% at 20% 45%, black 40%, transparent 95%);
+      }
+      /* The right third is the map. Real pins, the way the app draws them: a
+         sport glyph in a teal disc, and one Blaze Orange for a game already
+         under way. That is the product, not decoration. */
+      .pin {
+        position: absolute;
+        width: 92px;
+        height: 92px;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 42px;
+        line-height: 1;
+        background: rgba(0, 242, 254, 0.14);
+        box-shadow:
+          0 0 0 2px rgba(0, 242, 254, 0.55),
+          0 0 46px rgba(0, 242, 254, 0.3),
+          0 18px 40px rgba(0, 0, 0, 0.5);
+      }
+      .pin::after {
+        content: "";
+        position: absolute;
+        bottom: -9px;
+        left: 50%;
+        width: 16px;
+        height: 16px;
+        margin-left: -8px;
+        border-radius: 3px;
+        transform: rotate(45deg);
+        background: rgba(0, 242, 254, 0.55);
+      }
+      .pin--live {
+        background: rgba(255, 106, 0, 0.16);
+        box-shadow:
+          0 0 0 2px rgba(255, 106, 0, 0.6),
+          0 0 46px rgba(255, 106, 0, 0.32),
+          0 18px 40px rgba(0, 0, 0, 0.5);
+      }
+      .pin--live::after { background: rgba(255, 106, 0, 0.6); }
+
+      .pin--a { top: 96px;  left: 790px; }
+      .pin--b { top: 268px; left: 972px; }
+      .pin--c { top: 424px; left: 760px; }
+
+      /* The live pin says so, in the one place orange is allowed to speak. */
+      .live-chip {
+        position: absolute;
+        top: 236px;
+        left: 1068px;
+        padding: 4px 11px 5px;
+        border-radius: 999px;
+        background: #ff6a00;
+        color: #1a0a00;
+        font-family: "Space Grotesk", system-ui, sans-serif;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .vignette {
+        background: radial-gradient(ellipse 62% 105% at 2% 50%, rgba(10, 15, 28, 0.97) 30%, transparent 78%);
+      }
+
+      .content {
+        position: relative;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 24px;
+        padding: 0 86px;
+        max-width: 760px;
+      }
+
+      .wordmark {
+        font-family: "Bungee", cursive;
+        font-size: 86px;
+        line-height: 1;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--primary);
+        transform: skewX(-11deg);
+        align-self: flex-start;
+        text-shadow:
+          0 0 34px rgba(0, 245, 255, 0.55),
+          0 0 70px rgba(0, 200, 255, 0.25),
+          0 3px 0 #0891b2,
+          0 6px 0 #0e7490,
+          0 9px 20px rgba(0, 0, 0, 0.55);
+      }
+
+      h1 {
+        font-family: "Space Grotesk", system-ui, sans-serif;
+        font-weight: 700;
+        font-style: italic;
+        text-transform: uppercase;
+        font-size: 58px;
+        line-height: 1.05;
+        letter-spacing: -0.01em;
+        color: #ffffff;
+      }
+      h1 em {
+        font-style: italic;
+        background-image: linear-gradient(95deg, var(--primary-tint) 0%, var(--primary) 45%, var(--primary-container) 100%);
+        background-clip: text;
+        -webkit-background-clip: text;
+        color: transparent;
+      }
+
+      p {
+        font-size: 27px;
+        line-height: 1.45;
+        color: #94a3b8;
+        max-width: 30ch;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layer streets"></div>
+    <div class="layer grid"></div>
+    <div class="layer">
+      <div class="pin pin--a">🏀</div>
+      <div class="pin pin--live pin--b">⚽</div>
+      <span class="live-chip">Live</span>
+      <div class="pin pin--c">🎾</div>
+    </div>
+    <div class="layer vignette"></div>
+
+    <div class="content">
+      <span class="wordmark">FUN</span>
+      <h1>Find a game <em>tonight</em></h1>
+      <p>Every pickup game near you, on one map.</p>
+    </div>
+  </body>
+</html>

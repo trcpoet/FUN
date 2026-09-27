@@ -73,12 +73,105 @@ export type ClusterVenueResult = {
   clusters: VenueClusterPoint[]; // the raw merged cluster centers
 };
 
+/** A pitch worth offering a park, reduced to the three things the scan reads. */
+type FilteredPitch = { lng: number; lat: number; suffix: string; order: number };
+
+/**
+ * The filtered pitches, bucketed by position.
+ *
+ * The scan below used to run over every point for every park — and for each one it
+ * re-derived that point's sport suffix from its OSM tags. At a thousand venues with
+ * three sports selected that is 48 ms of main-thread time on the frame that draws
+ * the map, and it grows with the square of the viewport: 450 ms at three thousand.
+ * The work is a radius query, so it is indexed like one. Cells are at least
+ * `PARK_FILTER_ICON_RADIUS_M` across, which is what makes the 3x3 neighbourhood a
+ * superset of the circle.
+ */
+export type FilteredPitchIndex = {
+  cells: Map<string, FilteredPitch[]>;
+  /** Cell size in degrees. Longitude is sized at the dataset's highest latitude, where
+   *  a degree is narrowest, so no cell anywhere in it is narrower than the radius. */
+  dLat: number;
+  dLng: number;
+};
+
+const METERS_PER_DEGREE_LAT = 111_320;
+
+export function buildFilteredPitchIndex(
+  allPoints: Feature<Point, SportsVenueProperties>[],
+  filterSuffixes: Set<string>,
+): FilteredPitchIndex {
+  const dLat = PARK_FILTER_ICON_RADIUS_M / METERS_PER_DEGREE_LAT;
+  let maxAbsLat = 0;
+  const pitches: FilteredPitch[] = [];
+  for (let i = 0; i < allPoints.length; i++) {
+    const p = allPoints[i]!;
+    if (p.properties.leisure === "park") continue; // parks don't seed other parks
+    const suffix = primaryVenueSportSuffix(p.properties.sport, p.properties.leisure);
+    if (!filterSuffixes.has(suffix)) continue;
+    const [lng, lat] = p.geometry.coordinates;
+    pitches.push({ lng, lat, suffix, order: i });
+    const abs = Math.abs(lat);
+    if (abs > maxAbsLat) maxAbsLat = abs;
+  }
+
+  // cos() of a latitude near the poles approaches 0, so clamp before dividing.
+  const cosRef = Math.max(0.01, Math.cos(toRadians(Math.min(maxAbsLat, 89))));
+  const dLng = PARK_FILTER_ICON_RADIUS_M / (METERS_PER_DEGREE_LAT * cosRef);
+
+  const cells = new Map<string, FilteredPitch[]>();
+  for (const pitch of pitches) {
+    const key = `${Math.floor(pitch.lat / dLat)}:${Math.floor(pitch.lng / dLng)}`;
+    const bucket = cells.get(key);
+    if (bucket) bucket.push(pitch);
+    else cells.set(key, [pitch]);
+  }
+  return { cells, dLat, dLng };
+}
+
 /**
  * When a venue sport filter is active, a park that contains a pitch of a filtered
  * sport shows THAT sport's icon (nearest matching pitch within
  * PARK_FILTER_ICON_RADIUS_M of the park centroid) instead of the generic stadium —
  * so a filtered park signals which of your sports it has. Proximity-based: parks
  * store no sport, and true containment needs polygons we don't carry client-side.
+ *
+ * Ties break towards the pitch that came first in the source data, so the icon a
+ * park shows does not depend on how the points happened to be bucketed.
+ */
+export function nearestFilteredPitchIconId(
+  index: FilteredPitchIndex,
+  parkLng: number,
+  parkLat: number,
+): string | null {
+  const latCell = Math.floor(parkLat / index.dLat);
+  const lngCell = Math.floor(parkLng / index.dLng);
+
+  let bestSuffix: string | null = null;
+  let bestDist = Infinity;
+  let bestOrder = Infinity;
+
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const bucket = index.cells.get(`${latCell + dy}:${lngCell + dx}`);
+      if (!bucket) continue;
+      for (const pitch of bucket) {
+        const d = distanceMeters(parkLat, parkLng, pitch.lat, pitch.lng);
+        if (d > PARK_FILTER_ICON_RADIUS_M) continue;
+        if (d < bestDist || (d === bestDist && pitch.order < bestOrder)) {
+          bestDist = d;
+          bestOrder = pitch.order;
+          bestSuffix = pitch.suffix;
+        }
+      }
+    }
+  }
+  return bestSuffix ? getGameMapboxIconId(bestSuffix) : null;
+}
+
+/**
+ * One-off version of the scan, for a single park against a raw point list.
+ * `enrichVenueGeoJSON` builds the index once and calls the indexed form instead.
  */
 export function parkFilteredSportIconId(
   parkLng: number,
@@ -86,20 +179,11 @@ export function parkFilteredSportIconId(
   allPoints: Feature<Point, SportsVenueProperties>[],
   filterSuffixes: Set<string>,
 ): string | null {
-  let bestSuffix: string | null = null;
-  let bestDist = Infinity;
-  for (const p of allPoints) {
-    if (p.properties.leisure === "park") continue; // parks don't seed other parks
-    const suffix = primaryVenueSportSuffix(p.properties.sport, p.properties.leisure);
-    if (!filterSuffixes.has(suffix)) continue;
-    const [lng, lat] = p.geometry.coordinates;
-    const d = distanceMeters(parkLat, parkLng, lat, lng);
-    if (d <= PARK_FILTER_ICON_RADIUS_M && d < bestDist) {
-      bestDist = d;
-      bestSuffix = suffix;
-    }
-  }
-  return bestSuffix ? getGameMapboxIconId(bestSuffix) : null;
+  return nearestFilteredPitchIconId(
+    buildFilteredPitchIndex(allPoints, filterSuffixes),
+    parkLng,
+    parkLat,
+  );
 }
 
 /** Enrich raw OSM points with icon ids for Mapbox symbol layers / native clustering. */
@@ -108,14 +192,18 @@ export function enrichVenueGeoJSON(geojson: SportsVenueGeoJSON, venueSportsFilte
   const filterSuffixes =
     venueSportsFilter.length > 0 ? new Set(venueSportsFilter.map(resolveSportMapboxSuffix)) : null;
 
+  // Built once for the whole collection rather than once per park — the difference
+  // between one pass over the points and one pass per park.
+  const pitchIndex = filterSuffixes ? buildFilteredPitchIndex(points, filterSuffixes) : null;
+
   const features = points
     .filter((f) => venueMatchesSelectedSports(f.properties.sport, venueSportsFilter, f.properties.leisure))
     .map((f) => {
       let sportMapIcon = venueSportMapIconId(f.properties.sport, f.properties.leisure);
       // A filtered park shows the contained filtered sport's icon.
-      if (filterSuffixes && f.properties.leisure === "park") {
+      if (pitchIndex && f.properties.leisure === "park") {
         const [lng, lat] = f.geometry.coordinates;
-        const sportIcon = parkFilteredSportIconId(lng, lat, points, filterSuffixes);
+        const sportIcon = nearestFilteredPitchIconId(pitchIndex, lng, lat);
         if (sportIcon) sportMapIcon = sportIcon;
       }
       return {

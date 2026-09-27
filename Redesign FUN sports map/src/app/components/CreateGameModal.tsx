@@ -22,7 +22,9 @@ import {
   Lock,
   ShieldCheck,
 } from "lucide-react";
-import { motion, useAnimate } from "motion/react";
+import { motion } from "motion/react";
+import { usePressAnimation } from "../../hooks/usePressAnimation";
+import { RangeSlider } from "./ui/RangeSlider";
 import { supabase } from "../../lib/supabase";
 import { createGame, createMapNote } from "../../lib/api";
 import { getSportsForPicker, filterSportsByQuery, sportEmojiFor } from "../../lib/sportDisplay";
@@ -92,9 +94,13 @@ export type CreateGameModalProps = {
 
 const ALL_SPORTS = getSportsForPicker();
 
-const SPORT_ROW_EASE: [number, number, number, number] = [0.22, 0.1, 0.22, 1];
-
-/** Pointer-driven press so release always eases back (whileTap alone feels abrupt). */
+/**
+ * A sport in the picker.
+ *
+ * The press animation used to be a private copy of `usePressAnimation` that did
+ * not check `prefers-reduced-motion`, so this was the one control in the app
+ * that still bounced for someone who had asked it not to.
+ */
 function SportOptionRow({
   selected,
   icon,
@@ -106,38 +112,19 @@ function SportOptionRow({
   label: string;
   onSelect: () => void;
 }) {
-  const [scope, animate] = useAnimate();
-
-  const settle = () => {
-    if (!scope.current) return;
-    void animate(scope.current, { scale: 1 }, { duration: 0.72, ease: SPORT_ROW_EASE });
-  };
-
-  const press = () => {
-    if (!scope.current) return;
-    void animate(scope.current, { scale: 0.96 }, { duration: 0.58, ease: SPORT_ROW_EASE });
-  };
+  const press = usePressAnimation();
 
   return (
     <motion.button
-      ref={scope}
       type="button"
       role="option"
       aria-selected={selected}
       initial={{ scale: 1 }}
-      onPointerDown={(e) => {
-        if (e.button !== 0) return;
-        press();
-      }}
-      onPointerUp={settle}
-      onPointerLeave={settle}
-      onPointerCancel={settle}
+      {...press}
       onClick={onSelect}
       className={cn(
         "w-full flex min-h-[2.5rem] items-center gap-2.5 rounded-lg py-2 px-2.5 text-left text-sm transition-colors",
-        selected
-          ? "text-violet-100 ring-1 ring-violet-500/50"
-          : "text-slate-300 hover:bg-white/5"
+        selected ? "bg-surface-3 text-primary" : "text-slate-300 hover:bg-white/5"
       )}
     >
       <span className="shrink-0 text-xl leading-none" aria-hidden>
@@ -151,6 +138,9 @@ function SportOptionRow({
 function toggleStr(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
+
+/** How far the duration slider reaches. The DB ceiling (MAX_DURATION_MIN) is 8h. */
+const SLIDER_MAX_DURATION_MIN = 240;
 
 function clampDuration(n: number): number {
   if (!Number.isFinite(n)) return 90;
@@ -202,7 +192,22 @@ export function CreateGameModal({
   const [pickDate, setPickDate] = useState<Date | undefined>(undefined);
   const [pickTime, setPickTime] = useState("12:00");
   const [loading, setLoading] = useState(false);
+  /**
+   * What the submit is currently doing.
+   *
+   * Creating a game runs two rate-limit RPCs before the insert, and the button
+   * said "Creating…" through all three — so the slowest part of the flow looked
+   * like the fastest part having stalled.
+   */
+  const [submitStage, setSubmitStage] = useState<"checking" | "creating" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Which control the error is about, so it can be scrolled to and marked.
+   * A "pick a date" message rendered at the bottom of a 520px scroller is a
+   * message about something the person cannot see.
+   */
+  const [errorField, setErrorField] = useState<"when" | null>(null);
+  const whenSectionRef = useRef<HTMLDivElement>(null);
   const [playerPrefsOpen, setPlayerPrefsOpen] = useState(false);
   const [req, setReq] = useState<GameRequirementsPayload>(emptyGameRequirements());
   const [nearbyGames, setNearbyGames] = useState<any[]>([]);
@@ -293,14 +298,17 @@ export function CreateGameModal({
     const asDate = new Date(combined);
     if (Number.isNaN(asDate.getTime())) {
       setError("Please enter a valid date and time.");
+      setErrorField("when");
       return;
     }
     if (asDate.getTime() < Date.now()) {
       setError("Pick a date and time in the future.");
+      setErrorField("when");
       return;
     }
     setDateTime(combined);
     setError(null);
+    setErrorField(null);
     setWhenPickerOpen(false);
   }, [pickDate, pickTime, combineLocalDateTime]);
 
@@ -325,38 +333,57 @@ export function CreateGameModal({
     return format(new Date(), "HH:mm");
   }, [pickDate]);
 
+  /**
+   * Bring the field an error is about into view.
+   *
+   * Setting the message is not enough when the form is a 520px scroller and the
+   * field is somewhere above the fold.
+   */
+  useEffect(() => {
+    if (errorField !== "when") return;
+    whenSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [errorField]);
+
   const handleSubmit = async () => {
     if (createKind !== "game") return;
     if (!supabase || !userCoords) {
       setError("Location required. Press and hold a spot on the map.");
+      setErrorField(null);
       return;
     }
     if (ensureSession && !(await ensureSession())) {
-      setError("Sign-in required. In Supabase enable: Authentication → Providers → Anonymous.");
+      setError("Sign in to create this — your account is in the Profile tab.");
+      setErrorField(null);
       return;
     }
 
     if (!dateTime.trim()) {
       setError("Pick a date and time for the game.");
+      setErrorField("when");
       return;
     }
     const startDate = new Date(dateTime.trim());
     if (Number.isNaN(startDate.getTime())) {
       setError("Please enter a valid date and time.");
+      setErrorField("when");
       return;
     }
     if (startDate.getTime() < Date.now()) {
       setError("Pick a date and time in the future.");
+      setErrorField("when");
       return;
     }
     const startsAt = startDate.toISOString();
 
     // Check rate limits
     setLoading(true);
+    setSubmitStage("checking");
     setError(null);
+    setErrorField(null);
     const { data: activeCount, error: countErr } = await supabase.rpc("get_active_hosted_games_count");
     if (!countErr && typeof activeCount === 'number' && activeCount >= 3) {
       setLoading(false);
+      setSubmitStage(null);
       setError("You've reached your active hosting limit (max 3 at a time). Join existing games!");
       return;
     }
@@ -372,12 +399,14 @@ export function CreateGameModal({
       });
       if (!nearbyErr && nearby && nearby.length > 0) {
         setLoading(false);
+        setSubmitStage(null);
         setNearbyGames(nearby);
         setShowWarning(true);
         return;
       }
     }
 
+    setSubmitStage("creating");
     const visibility = visibilityLabelToEnum(req.visibility);
     const { gameId, error: err } = await createGame({
       title: title.trim() || "Pickup game",
@@ -407,8 +436,10 @@ export function CreateGameModal({
     });
 
     setLoading(false);
+    setSubmitStage(null);
     if (err) {
       setError(err.message);
+      setErrorField(null);
       return;
     }
     onOpenChange(false);
@@ -419,10 +450,12 @@ export function CreateGameModal({
     if (createKind !== "note") return;
     if (!userCoords) {
       setError("Location required. Press and hold a spot on the map.");
+      setErrorField(null);
       return;
     }
     if (ensureSession && !(await ensureSession())) {
-      setError("Sign-in required. In Supabase enable: Authentication → Providers → Anonymous.");
+      setError("Sign in to create this — your account is in the Profile tab.");
+      setErrorField(null);
       return;
     }
 
@@ -494,7 +527,7 @@ export function CreateGameModal({
         aria-labelledby="create-game-modal-title"
         aria-describedby="create-game-modal-desc"
         className={glassMessengerPanel(
-          "fixed z-[70] w-[360px] max-h-[88vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl shadow-violet-950/20 focus:outline-none"
+          "fixed z-[70] w-[360px] max-h-[88vh] flex flex-col rounded-2xl overflow-hidden shadow-[var(--glow-lg)] focus:outline-none"
         )}
         style={
           hasAnchor
@@ -511,7 +544,7 @@ export function CreateGameModal({
               }
         }
       >
-        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/5 bg-gradient-to-r from-slate-900/80 to-violet-950/20">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 bg-surface-1">
           <div className="min-w-0 flex-1 space-y-1">
             <h2 id="create-game-modal-title" className="text-white font-semibold text-sm tracking-tight">
               {createKind === "game" ? "New game" : "New note"}
@@ -526,7 +559,7 @@ export function CreateGameModal({
                 className={cn(
                   "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors",
                   createKind === "game"
-                    ? "border-violet-400/50 bg-violet-500/20 text-violet-100"
+                    ? "bg-surface-3 text-primary"
                     : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.06]",
                 )}
                 aria-label="Create a new game"
@@ -570,7 +603,7 @@ export function CreateGameModal({
           {/* Location */}
           <div className="rounded-xl border border-white/5 bg-slate-900/50 p-3">
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-1.5">
-              <MapPin className="w-3.5 h-3.5 text-violet-400/80" />
+              <MapPin className="w-3.5 h-3.5 text-primary/80" />
               Location
             </div>
             <p className={cn("text-slate-200 text-xs", locationLabel ? "font-medium" : "font-mono")}>
@@ -639,7 +672,7 @@ export function CreateGameModal({
           {/* Sport + search */}
           <div>
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
-              <Trophy className="w-3.5 h-3.5 text-violet-400/80" />
+              <Trophy className="w-3.5 h-3.5 text-primary/80" />
               Sport
             </div>
             <div className="relative mb-2">
@@ -648,7 +681,7 @@ export function CreateGameModal({
                 value={sportQuery}
                 onChange={(e) => setSportQuery(e.target.value)}
                 placeholder="Search sports…"
-                className="h-9 pl-9 text-sm bg-slate-900/60 border-white/10 text-slate-200 placeholder:text-slate-600 rounded-xl focus-visible:ring-violet-500/30"
+                className="h-9 pl-9 text-sm bg-slate-900/60 border-white/10 text-slate-200 placeholder:text-slate-600 rounded-xl focus-visible:ring-primary/35"
                 aria-label="Search sports"
               />
             </div>
@@ -695,7 +728,7 @@ export function CreateGameModal({
           {/* Players — radios */}
           <div>
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
-              <Users className="w-3.5 h-3.5 text-violet-400/80" />
+              <Users className="w-3.5 h-3.5 text-primary/80" />
               Athletes
             </div>
             <div className="rounded-xl border border-white/5 bg-slate-900/40 p-3">
@@ -721,15 +754,15 @@ export function CreateGameModal({
                 </div>
               </div>
 
-              <input
-                type="range"
+              <RangeSlider
+                className="mt-3"
                 min={MIN_SPOTS}
                 max={MAX_SPOTS}
                 step={1}
                 value={spots}
-                onChange={(e) => setSpots(clampSpots(Number(e.target.value)))}
-                className="w-full mt-3 accent-violet-500/80"
+                onValueChange={(n) => setSpots(clampSpots(n))}
                 aria-label="Total spots for this game"
+                aria-valuetext={`${spots} ${spots === 1 ? "spot" : "spots"}`}
               />
 
               <p className="text-slate-600 text-[10px] mt-1.5">
@@ -739,19 +772,24 @@ export function CreateGameModal({
           </div>
 
           {/* When — subtle gamified calendar */}
-          <div>
+          <div ref={whenSectionRef} style={{ scrollMarginTop: 12 }}>
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
-              <Clock className="w-3.5 h-3.5 text-violet-400/80" />
+              <Clock className="w-3.5 h-3.5 text-primary/80" />
               When
             </div>
-            <div className="rounded-2xl border border-white/6 bg-gradient-to-b from-slate-900/60 to-slate-950/80 p-1 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+            <div
+              className={cn(
+                "rounded-2xl border bg-gradient-to-b from-slate-900/60 to-slate-950/80 p-1 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]",
+                errorField === "when" ? "border-rose-400/70" : "border-white/6",
+              )}
+            >
               <Popover open={whenPickerOpen} onOpenChange={handleWhenOpenChange}>
                 <PopoverTrigger asChild>
                   <button
                     type="button"
                     className={cn(
                       "w-full rounded-xl border-0 bg-slate-950/50 px-3 py-2.5 text-sm text-left text-slate-200",
-                      "focus:outline-none focus:ring-1 focus:ring-violet-500/35",
+                      "focus:outline-none focus:ring-1 focus:ring-primary/35",
                       !dateTime.trim() && "text-slate-500"
                     )}
                     aria-label="Date and time of the game"
@@ -776,8 +814,8 @@ export function CreateGameModal({
                           onClick={() => applyQuickStart(minutes)}
                           className={cn(
                             "rounded-full border border-white/10 bg-slate-950/60 px-3 py-1 text-[12px] font-semibold text-slate-300 transition-colors",
-                            "hover:border-violet-400/60 hover:text-violet-100",
-                            "focus:outline-none focus:ring-1 focus:ring-violet-500/40",
+                            "hover:border-primary/60 hover:text-primary",
+                            "focus:outline-none focus:ring-1 focus:ring-primary/40",
                           )}
                         >
                           {label}
@@ -807,7 +845,7 @@ export function CreateGameModal({
                         onChange={(e) => setPickTime(e.target.value)}
                         className={cn(
                           "flex-1 rounded-lg border border-white/10 bg-slate-950/80 px-2 py-1.5 text-sm text-slate-200",
-                          "focus:outline-none focus:ring-1 focus:ring-violet-500/40 [color-scheme:dark]"
+                          "focus:outline-none focus:ring-1 focus:ring-primary/40 [color-scheme:dark]"
                         )}
                         aria-label="Time of the game"
                       />
@@ -823,7 +861,7 @@ export function CreateGameModal({
                       </Button>
                       <Button
                         type="button"
-                        className="h-8 rounded-lg bg-violet-600 px-4 text-xs font-semibold text-white hover:bg-violet-500"
+                        className="h-8 rounded-full bg-primary px-4 text-xs font-semibold text-primary-foreground hover:bg-primary-container"
                         onClick={applyWhenDone}
                       >
                         Done
@@ -839,7 +877,7 @@ export function CreateGameModal({
           {/* Duration */}
           <div>
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
-              <Timer className="w-3.5 h-3.5 text-violet-400/80" />
+              <Timer className="w-3.5 h-3.5 text-primary/80" />
               Duration
               <span className="ml-1 normal-case tracking-normal text-[10px] font-normal text-slate-600">
                 (how long it runs, not when it starts)
@@ -860,7 +898,7 @@ export function CreateGameModal({
                       className={cn(
                         "rounded-full border px-3 py-1 text-[12px] font-semibold tabular-nums transition-colors",
                         selected
-                          ? "border-violet-400 bg-violet-500/20 text-violet-100"
+                          ? "border-primary bg-primary/15 text-primary"
                           : "border-white/10 bg-slate-900/50 text-slate-300 hover:border-white/20",
                       )}
                       aria-pressed={selected}
@@ -877,25 +915,29 @@ export function CreateGameModal({
                   className={cn(
                     "rounded-full border px-3 py-1 text-[12px] font-semibold tabular-nums transition-colors",
                     !durationPresetsForSport(sport).includes(durationMin)
-                      ? "border-violet-400 bg-violet-500/20 text-violet-100"
+                      ? "border-primary bg-primary/15 text-primary"
                       : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
                   )}
                 >
                   Custom: {formatDurationLabel(durationMin)}
                 </button>
               </div>
-              <input
-                type="range"
+              <RangeSlider
                 min={MIN_DURATION_MIN}
-                max={240}
+                // The DB allows up to MAX_DURATION_MIN (8h); the slider reaches 4h,
+                // because dragging through eight hours to pick ninety minutes is a
+                // worse control. A prefill longer than that (a rematch of a very
+                // long game) extends the track rather than silently pinning the
+                // thumb at 4h while the real value stays higher.
+                max={Math.max(SLIDER_MAX_DURATION_MIN, durationMin)}
                 step={5}
                 value={durationMin}
-                onChange={(e) => {
-                  setDurationMin(clampDuration(Number(e.target.value)));
+                onValueChange={(n) => {
+                  setDurationMin(clampDuration(n));
                   setDurationDirty(true);
                 }}
-                className="w-full accent-violet-500/80"
-                aria-label="Game duration in minutes"
+                aria-label="Game duration"
+                aria-valuetext={formatDurationLabel(durationMin)}
               />
               <p className="text-slate-600 text-[10px]">
                 After this much time, the game pin disappears from the map and the chat flips to “Game ended · Plan rematch”.
@@ -907,7 +949,7 @@ export function CreateGameModal({
           <div>
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
               {React.createElement(VISIBILITY_META[req.visibility as VisibilityLabel]?.icon ?? Globe, {
-                className: "w-3.5 h-3.5 text-violet-400/80",
+                className: "w-3.5 h-3.5 text-primary/80",
               })}
               Who can see &amp; join
             </div>
@@ -924,7 +966,7 @@ export function CreateGameModal({
                       className={cn(
                         "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-semibold transition-colors",
                         selected
-                          ? "border-violet-400 bg-violet-500/20 text-violet-100"
+                          ? "border-primary bg-primary/15 text-primary"
                           : "border-white/10 bg-slate-900/50 text-slate-300 hover:border-white/20",
                       )}
                       aria-pressed={selected}
@@ -954,21 +996,21 @@ export function CreateGameModal({
           {/* Name */}
           <div>
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
-              <PenLine className="w-3.5 h-3.5 text-violet-400/80" />
+              <PenLine className="w-3.5 h-3.5 text-primary/80" />
               Name your game
             </div>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Friday Night Lights"
-              className="h-9 text-sm bg-slate-900/60 border-white/10 text-slate-200 placeholder:text-slate-600 rounded-xl focus-visible:ring-violet-500/30"
+              className="h-9 text-sm bg-slate-900/60 border-white/10 text-slate-200 placeholder:text-slate-600 rounded-xl focus-visible:ring-primary/35"
             />
           </div>
 
           {/* Description under name */}
           <div>
             <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium uppercase tracking-wider mb-2">
-              <AlignLeft className="w-3.5 h-3.5 text-violet-400/80" />
+              <AlignLeft className="w-3.5 h-3.5 text-primary/80" />
               Description
             </div>
             <Textarea
@@ -976,7 +1018,7 @@ export function CreateGameModal({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What to bring, house rules…"
               rows={3}
-              className="min-h-[72px] text-sm rounded-xl bg-slate-900/60 border-white/10 text-slate-200 placeholder:text-slate-600 focus-visible:ring-violet-500/30 resize-none"
+              className="min-h-[72px] text-sm rounded-xl bg-slate-900/60 border-white/10 text-slate-200 placeholder:text-slate-600 focus-visible:ring-primary/35 resize-none"
             />
           </div>
 
@@ -987,12 +1029,12 @@ export function CreateGameModal({
                 className={cn(
                   "w-full flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition-colors",
                   playerPrefsOpen
-                    ? "border-violet-500/40 bg-violet-500/10 text-violet-100"
+                    ? "border-primary/40 bg-primary/10 text-primary"
                     : "border-white/10 bg-slate-900/40 text-slate-300 hover:bg-slate-900/60 hover:border-white/15",
                 )}
               >
                 <span className="flex items-center gap-2 font-medium">
-                  <SlidersHorizontal className="w-4 h-4 text-violet-400/90 shrink-0" aria-hidden />
+                  <SlidersHorizontal className="w-4 h-4 text-primary/90 shrink-0" aria-hidden />
                   Add player preferences &amp; filters
                 </span>
                 <ChevronDown
@@ -1017,7 +1059,7 @@ export function CreateGameModal({
                       className={cn(
                         "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
                         req.skillLevel === opt
-                          ? "border-violet-400 bg-violet-500/20 text-violet-100"
+                          ? "border-primary bg-primary/15 text-primary"
                           : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
                       )}
                     >
@@ -1038,7 +1080,7 @@ export function CreateGameModal({
                       className={cn(
                         "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
                         req.ageRange === opt
-                          ? "border-violet-400 bg-violet-500/20 text-violet-100"
+                          ? "border-primary bg-primary/15 text-primary"
                           : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
                       )}
                     >
@@ -1059,7 +1101,7 @@ export function CreateGameModal({
                       className={cn(
                         "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
                         req.matchType === opt
-                          ? "border-violet-400 bg-violet-500/20 text-violet-100"
+                          ? "border-primary bg-primary/15 text-primary"
                           : "border-white/10 bg-slate-900/50 text-slate-400 hover:border-white/20",
                       )}
                     >
@@ -1080,17 +1122,12 @@ export function CreateGameModal({
                   value={req.school}
                   onChange={(e) => setReq((r) => ({ ...r, school: e.target.value }))}
                   placeholder="e.g. Lincoln High"
-                  className="h-9 text-sm bg-slate-900/60 border-white/10 text-slate-200 placeholder:text-slate-600 rounded-xl focus-visible:ring-violet-500/30"
+                  className="h-9 text-sm bg-slate-900/60 border-white/10 text-slate-200 placeholder:text-slate-600 rounded-xl focus-visible:ring-primary/35"
                 />
               </div>
             </CollapsibleContent>
           </Collapsible>
 
-          {error && (
-            <p className="text-sm text-red-400/95" role="alert">
-              {error}
-            </p>
-          )}
 
           {showWarning && nearbyGames.length > 0 && (
             <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 mt-1">
@@ -1107,14 +1144,35 @@ export function CreateGameModal({
           )}
         </div>
 
+        {/* The footer is sticky, so this is the one place a message about the form
+            is guaranteed to be read. It used to render at the bottom of the
+            scroller, which for "pick a date" meant several hundred pixels below
+            both the date field and the button it was blocking. */}
         <div className="p-4 pt-2 border-t border-white/5 bg-slate-950/80">
+          {error && (
+            <p
+              className="mb-2 rounded-xl bg-rose-500/12 px-3 py-2 text-[13px] leading-snug text-rose-200"
+              role="alert"
+            >
+              {error}
+            </p>
+          )}
           <Button
             type="button"
             onClick={createKind === "note" ? handleSubmitNote : handleSubmit}
             disabled={!userCoords || loading || (createKind === "note" && !noteBody.trim())}
-            className="w-full h-10 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 text-white text-sm font-semibold shadow-lg shadow-violet-900/30 border-0"
+            aria-busy={loading}
+            className="w-full h-10 rounded-full bg-gradient-to-r from-primary-tint via-primary to-primary-container text-primary-foreground text-sm font-semibold shadow-[var(--glow-md)] border-0 transition hover:brightness-110 disabled:opacity-60"
           >
-            {loading ? (createKind === "note" ? "Posting…" : "Creating…") : (createKind === "note" ? "Post note" : "Create game")}
+            {createKind === "note"
+              ? loading
+                ? "Posting…"
+                : "Post note"
+              : submitStage === "checking"
+              ? "Checking the area…"
+              : submitStage === "creating"
+              ? "Creating game…"
+              : "Create game"}
           </Button>
         </div>
       </div>

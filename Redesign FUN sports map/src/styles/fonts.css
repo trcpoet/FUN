@@ -1,13 +1,67 @@
 /**
- * Profile / app header wordmark — Bungee (lazy-loaded via fonts.css @import).
- * Skew + stacked neon edge + glow for a sporty energy look.
+ * The two typefaces the design system asks for, plus the wordmark face.
+ *
+ * Both are Google's variable builds, so one file per family covers every weight
+ * the app uses — 22 KB for Space Grotesk, 32 KB for Outfit. `font-display: swap`
+ * rather than `optional`: the login screen is the first thing a new visitor sees
+ * and the one that has to earn the download, and `optional` means a cold visitor
+ * never gets the brand type at all. The `size-adjust` values keep the fallback's
+ * metrics close enough that the swap does not reflow the page.
+ *
+ * latin-ext is declared separately so a Latin-only page never downloads it.
+ */
+
+/* Headings and labels: technical, high-impact. */
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/spacegrotesk/v22/V8mDoQDjQSkFtoMM3T6r8E7mPbF4C_k3HqU.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/spacegrotesk/v22/V8mDoQDjQSkFtoMM3T6r8E7mPb94C_k3HqUtEw.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Body: geometric, legible at small sizes on a phone over a map. */
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtqUYLknw.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJuktqUYLkn8BJ.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/**
+ * Profile / app header wordmark — Bungee. Skew + stacked neon edge + glow.
+ *
+ * The v15 URL this used to name has been 404 since Google rotated the family to
+ * v17, so the wordmark had been quietly rendering in the `cursive` fallback —
+ * Comic Sans on most Macs and iPhones — which is the opposite of the intent.
+ * `font-display` is `swap`, not `optional`: this is the app's name, and a
+ * first-time visitor is exactly who needs to see it set properly.
  */
 @font-face {
   font-family: "Bungee";
   font-style: normal;
   font-weight: 400;
-  font-display: optional;
-  src: url("https://fonts.gstatic.com/s/bungee/v15/nwpBtKy2OAdR1K-IwhWudF-R.woff2") format("woff2");
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/bungee/v17/N0bU2SZBIuF2PU_0DXR1C9zfmQ.woff2") format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -17,7 +71,7 @@
   letter-spacing: 0.14em;
   line-height: 1;
   text-transform: uppercase;
-  color: #00f5ff;
+  color: var(--primary, #00f2fe);
   text-shadow:
     0 0 22px rgba(0, 245, 255, 0.55),
     0 0 42px rgba(0, 200, 255, 0.25),

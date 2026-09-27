@@ -11,6 +11,7 @@ import type { GameRow } from "../../lib/supabase";
 import type { ProfileNearbyRow } from "../../lib/supabase";
 import type { MapNoteRow } from "../../lib/supabase";
 import { isVenueGame } from "../../lib/mapGameTimer";
+import { useStableMapOfArrays } from "../../lib/stableItems";
 import type { NavigateToOptions } from "../../lib/directions";
 import { gamesToGeoJSON } from "../types/mapGeoJSON";
 import { loadVenuesForArea } from "../lib/sportsVenues";
@@ -46,7 +47,11 @@ import * as MapCfg from "../map/mapConfig";
 import { quantize, steppedRgb, makeTicker, StyleWriteCache, EPS } from "../map/animationBudget";
 import { applyFunBasemapTheme } from "../map/mapTheme";
 import { loadMapboxGl } from "../lib/mapboxCached";
-import { registerGameSportImages } from "../map/registerGameSportImages";
+import {
+  registerGameSportImages,
+  sportIconIdsForGames,
+  sportIconIdsInFeatures,
+} from "../map/registerGameSportImages";
 import { getGameMapboxIconId } from "../map/gameSportIcons";
 const Avatar3DOverlay = React.lazy(() =>
   import("./Avatar3DOverlay").then((m) => ({ default: m.Avatar3DOverlay }))
@@ -80,6 +85,39 @@ const L_VENUE_SPORT_ICON = "venue-sport-icon";
 const L_VENUE_DOTS = "venue-dots-core";
 /** Dark bluish-purple halos (outer + inner gradient) — animated via rAF */
 const L_VENUE_DOTS_PULSE = "venue-dots-pulse";
+
+/** No interpolation: the animation loops ease these values themselves. */
+const ZERO_TRANSITION = { duration: 0, delay: 0 } as const;
+
+/**
+ * The ten layer-visibility writes, in one place so the caller reads as a single
+ * decision. Only called when a gate actually flipped — `setLayoutProperty`
+ * repaints the map whether or not the value changed.
+ */
+function applyGlLayerVisibility(
+  map: import("mapbox-gl").Map,
+  gates: { showClusters: boolean; showIndividuals: boolean; showVenueDot: boolean }
+): void {
+  const vis = (on: boolean) => (on ? "visible" : "none");
+  const set = (layerId: string, on: boolean) => {
+    if (!map.getLayer(layerId)) return;
+    try {
+      map.setLayoutProperty(layerId, "visibility", vis(on));
+    } catch (_) {
+      /* layer can vanish mid style-swap */
+    }
+  };
+  set(L_GAME_CLUSTERS, gates.showClusters);
+  set(L_GAME_CLUSTER_LABEL, gates.showClusters);
+  set(L_GAME_ICON, gates.showIndividuals);
+  set(L_GAME_COUNT, gates.showIndividuals);
+  set(L_VENUE_GL_CLUSTERS, gates.showVenueDot);
+  set(L_VENUE_GL_CLUSTER_ICON, gates.showVenueDot);
+  set(L_VENUE_DOTS_PULSE, gates.showVenueDot);
+  set(L_VENUE_DOTS_PULSE_INNER, gates.showVenueDot);
+  set(L_VENUE_DOTS, gates.showVenueDot);
+  set(L_VENUE_SPORT_ICON, gates.showVenueDot);
+}
 const L_VENUE_DOTS_PULSE_INNER = "venue-dots-pulse-inner";
 /** Cyan count of notes left at a venue, driven by the `note_count` feature state. */
 const L_VENUE_NOTE_BADGE = "venue-note-badge";
@@ -151,7 +189,7 @@ function effectiveCinematicTier(enable3D: boolean, tier: MapCfg.CinematicTier): 
   return enable3D ? tier : "off";
 }
 
-/** Terrain when cinematic tier is on. Atmosphere/fog comes from Studio only. */
+/** Terrain at the `full` tier only. Atmosphere/fog comes from Studio only. */
 function applyCinematicBasemap(
   map: import("mapbox-gl").Map,
   tier: MapCfg.CinematicTier
@@ -160,7 +198,10 @@ function applyCinematicBasemap(
   // basemap palette here (before the tier gate — the theme applies even with 3D off).
   applyFunBasemapTheme(map);
 
-  if (tier === "off") {
+  // `lite` drops terrain with `off`: a raster-DEM source adds a tile pyramid to
+  // fetch and decode, and makes every frame sample it. On a device that draws in
+  // software that is the difference between a map and a slideshow.
+  if (tier !== "full") {
     try {
       map.setTerrain(null);
     } catch (_) {}
@@ -387,9 +428,6 @@ export function MapboxMap(props: MapboxMapProps) {
    */
   const pulseTier = cinematicTier;
   const pulseTickMs = useMemo(() => MapCfg.getPulseTickMs(cinematicTier), [cinematicTier]);
-  const wobbleEnabled = useMemo(() => MapCfg.getWobbleEnabled(cinematicTier), [cinematicTier]);
-  const wobbleEnabledRef = useRef(wobbleEnabled);
-  wobbleEnabledRef.current = wobbleEnabled;
   /**
    * Whether the venue pulse layers are currently visible. Owned by
    * `applyMapLayerVisibility` so the rAF loop does not have to call
@@ -397,6 +435,8 @@ export function MapboxMap(props: MapboxMapProps) {
    * value inside mapbox purely to support its own dedupe check.
    */
   const pulseVisibleRef = useRef(true);
+  /** Last visibility combination WE wrote to the GL layers — see applyMapLayerVisibility. */
+  const lastGlVisibilitySigRef = useRef("");
   const enable3DRef = useRef(enable3D);
   enable3DRef.current = enable3D;
   const [mapIdle, setMapIdle] = useState(false);
@@ -511,11 +551,26 @@ export function MapboxMap(props: MapboxMapProps) {
     gameIconWritesRef.current.reset();
   }, [basemapStyleEpoch]);
 
+  /**
+   * Starters for the two rAF loops, published by the effects that own them.
+   *
+   * Both loops now stop themselves the moment they have nothing left to animate,
+   * because a running loop means a redrawing map: every mapbox style write calls
+   * `_update(true)` → `triggerRepaint()` whether or not the value changed, and a
+   * write with the default 300ms transition keeps the style dirty — so the map
+   * never fires `idle` and never stops drawing. Anything that gives a loop new
+   * work (hover, a tap bump, fresh venues, a selection) calls the matching
+   * starter; `null` means the loop's effect is not mounted.
+   */
+  const startGameIconMotionRef = useRef<(() => void) | null>(null);
+  const startVenuePulseRef = useRef<((burst?: boolean) => void) | null>(null);
+
   // Smooth tap pulse on the game sport icon when opening the join modal (see GAME_ICON_BUMP_DURATION_MS).
   // Records the start time so the rAF loop can animate the icon shrinking-then-returning.
   const bumpClearTimerRef = useRef<number | null>(null);
   const bumpGameIcon = (gameId: string) => {
     bumpAnimationRef.current = { gameId, startMs: performance.now() };
+    startGameIconMotionRef.current?.();
     setBumpGameId(gameId);
     bumpGameIdRef.current = gameId;
     // Clearing this used to happen inside the rAF, where it fired a setState
@@ -718,18 +773,15 @@ export function MapboxMap(props: MapboxMapProps) {
       hasSelection ? 0.6 : 0.92,
     ]);
 
-    // Gentle continuous wobble: rotate all icons back and forth a few degrees
-    // over time. This is the one value that genuinely differs every frame, so
-    // it is the only write that survived mapbox's dedupe — and being a layout
-    // property on a symbol layer, each surviving write reloaded every tile of
-    // SRC_GAMES. Quantizing to half a degree (0.17px at the icon's outermost
-    // pixel) takes it from 60 writes/sec to roughly 7.7.
-    const rotAmp = MapCfg.GAME_ICON_ROTATE_AMPLITUDE_DEG; // max tilt in degrees
-    const rotPeriod = MapCfg.GAME_ICON_ROTATE_PERIOD_MS; // time for one full wobble
-    const iconRotate = wobbleEnabledRef.current
-      ? quantize(Math.sin((performance.now() / rotPeriod) * Math.PI * 2) * rotAmp, EPS.rotateDeg)
-      : 0; // reduced motion: sit flat
-    writes.writeScalar(map, L_GAME_ICON, "icon-rotate", iconRotate, "layout");
+    // The ambient icon wobble that used to live here is gone. `icon-rotate` is a
+    // LAYOUT property on a symbol layer, so every value that differed reloaded
+    // every tile of SRC_GAMES — re-tile, re-run symbol layout on the worker,
+    // rebuild buckets, re-upload GL buffers, re-run placement — and each write
+    // also forced a repaint of the whole map. Quantizing took it from 60 writes
+    // a second to ~8; eight tile reloads a second is still eight too many for a
+    // ±5° tilt nobody asked for. The layer declares `icon-rotate: 0`, so icons
+    // now sit flat and the map can reach `idle`. Motion that earns its keep
+    // (press bump, hover, selection) is all still here, and all of it is finite.
   }, [gameIconWritesRef]);
 
   // —— Map init: sports-first dark basemap, terrain, fog ———
@@ -764,7 +816,10 @@ export function MapboxMap(props: MapboxMapProps) {
           center: coordsAtInit ? [coordsAtInit.lng, coordsAtInit.lat] : [-98, 40],
           zoom: 15,
           pitch: 0,
-          antialias: true,
+          // Init-only option, so it reads the tier once: MSAA costs a second
+          // render target and a resolve per frame, which a device without GPU
+          // acceleration pays entirely on the CPU.
+          antialias: cinematicTierRef.current === "full",
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -799,8 +854,9 @@ export function MapboxMap(props: MapboxMapProps) {
         if (cancelled || mapRef.current !== map) return;
         setMapLoaded(true);
         setMapError(null);
-        const tier = effectiveCinematicTier(enable3DRef.current, cinematicTierRef.current);
-        applyCinematicBasemap(map!, tier);
+        // The basemap theme + terrain are applied by the effect that watches
+        // `mapLoaded` / `basemapStyleEpoch` (below). Calling it here as well ran
+        // ~70 paint writes and setLights twice on every cold load.
         try {
           map!.doubleClickZoom?.disable();
         } catch (_) {}
@@ -881,9 +937,7 @@ export function MapboxMap(props: MapboxMapProps) {
       removeVenueGlLayers(map);
       venueClustersRef.current = [];
       gameLayersInitedRef.current = false;
-      const tier = effectiveCinematicTier(enable3DRef.current, cinematicTierRef.current);
-      applyCinematicBasemap(map, tier);
-      setBasemapStyleEpoch((n) => n + 1);
+      setBasemapStyleEpoch((n) => n + 1); // the basemap effect re-applies theme + terrain
       setMapLoaded(true);
       setMapIdle(false);
       map.once("idle", () => {
@@ -920,12 +974,15 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [MAPBOX_TOKEN, activeStyleUrl]);
 
-  // Re-apply terrain/fog when device tier or 3D mode changes (no pitch animation).
+  /**
+   * The one place the basemap palette and terrain are applied: on first load, on
+   * a style swap (`basemapStyleEpoch`), and when the tier or 3D mode changes.
+   */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     applyCinematicBasemap(map, effectiveCinematicTier(enable3D, cinematicTier));
-  }, [mapLoaded, enable3D, cinematicTier]);
+  }, [mapLoaded, basemapStyleEpoch, enable3D, cinematicTier]);
 
   // One-time fly to user when coords first become available (avoid fighting search / sport camera)
   useEffect(() => {
@@ -1045,17 +1102,27 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [mapLoaded, selectedVenue?.id, selectedVenue?.center.lng, selectedVenue?.center.lat, enable3D, cinematicTier, isMobile]);
 
-  // —— Open game modal from carousel (center + delayed popup) ——
+  /**
+   * Open a game's card by id (the carousel, and a game you just created).
+   *
+   * Deliberately depends on `games`: a game created a moment ago is not in the
+   * list yet, because the refetch that will bring it is still in flight. The
+   * nonce is only marked handled once the row actually arrives, so this re-runs
+   * on the next list and opens the card then. A request for a game that never
+   * arrives simply never opens, which is the right outcome for one that was
+   * filtered out or is out of range.
+   */
   useEffect(() => {
     if (!mapLoaded || !gamePopupRequest) return;
     if (lastHandledGamePopupNonceRef.current === gamePopupRequest.nonce) return;
-    lastHandledGamePopupNonceRef.current = gamePopupRequest.nonce;
 
     const map = mapRef.current;
     if (!map) return;
 
-    const game = gamesRef.current.find((g) => g.id === gamePopupRequest.gameId);
-    if (!game) return; // requested game isn't on the map
+    const game = games.find((g) => g.id === gamePopupRequest.gameId);
+    if (!game) return; // not on the map yet — try again when the list changes
+
+    lastHandledGamePopupNonceRef.current = gamePopupRequest.nonce;
 
     // Close venue popup (if open) and ensure game selection is synced.
     onSelectVenue(null);
@@ -1077,7 +1144,7 @@ export function MapboxMap(props: MapboxMapProps) {
     }, 650);
 
     return () => window.clearTimeout(t);
-  }, [mapLoaded, gamePopupRequest, onSelectVenue]);
+  }, [mapLoaded, gamePopupRequest, games, onSelectVenue]);
 
   /**
    * Mapbox Directions walking route overlay. A route outlives the popup that started it, so this
@@ -1167,70 +1234,56 @@ export function MapboxMap(props: MapboxMapProps) {
     }
   }, [mapLoaded, selectedVenue, venueLayerEpoch]);
 
-  /** Dark bluish-purple halos: constant pulse; hz eases down when a venue is selected. */
-  // Breathes the venue halo in/out and smoothly animates the hover zoom.
-  //
-  // This used to write ~10 paint properties on all 60 frames per second for the
-  // life of the map, which was the second-largest contributor to a 28,330ms
-  // Total Blocking Time. Unlike the game-icon wobble, the sine here sweeps far
-  // enough that quantization alone still writes on most frames — so the primary
-  // lever is the fixed 20Hz budget, with quantization stacked on top to drop
-  // the two or three properties that happen to be near-stationary at each tick.
-  // The pulse is 0.4Hz idle, so at 20Hz the widest halo moves ~1.6px per step
-  // on an edge whose circle-blur makes it a pure gradient. Reads as smooth.
+  /**
+   * Venue halos: one breath when there is a reason to look, then stillness.
+   *
+   * This loop used to run for the life of the map, writing ~10 paint properties
+   * every 50ms — and that was the most expensive thing the app did. Not because
+   * of the writes: `Map.setPaintProperty` calls `_update(true)` → `triggerRepaint()`
+   * whether or not the value changed (mapbox-gl 3.22.0, :104761), and each write
+   * starts a 300ms transition during which the style is re-marked dirty every
+   * frame (:105755). A write every 50ms therefore kept the entire map redrawing
+   * at display rate forever, `idle` never fired, and Lighthouse measured 27–35s
+   * of Total Blocking Time — nearly all of it inside mapbox, none of it visible
+   * as "our" code in a profile.
+   *
+   * Now the halo breathes for `AMBIENT_BURST_MS` whenever something changed
+   * (venues arrived, the layers were rebuilt, a venue was selected), fades its
+   * amplitude to nothing over `AMBIENT_FADE_MS`, writes the resting values, and
+   * stops — so the map can go idle and the GPU can sleep. The same loop still
+   * eases the venue-dot hover on demand, which is why it is one loop and not two:
+   * hover has to work on tiers where the ambient breath never runs at all.
+   */
   useEffect(() => {
     if (!mapLoaded) return;
-    if (pulseTier === "off") {
-      // Reduced motion: no loop at all. Write the mid-sweep values once so the
-      // halo sits at its average size rather than snapping to the layer's
-      // declared minimum, which would read as a different design rather than
-      // as the same design holding still.
-      const map = mapRef.current;
-      const mid = (lo: number, hi: number) => lo + (hi - lo) * 0.5;
-      const restWrites = new StyleWriteCache();
-      if (map?.getLayer(L_VENUE_DOTS_PULSE)) {
-        restWrites.writeScalar(map, L_VENUE_DOTS_PULSE, "circle-radius",
-          mid(MapCfg.VENUE_DOT_PULSE_RADIUS_MIN_PX, MapCfg.VENUE_DOT_PULSE_RADIUS_MAX_PX));
-        restWrites.writeScalar(map, L_VENUE_DOTS_PULSE, "circle-opacity",
-          mid(MapCfg.VENUE_DOT_PULSE_OPACITY_MIN, MapCfg.VENUE_DOT_PULSE_OPACITY_MAX));
-        restWrites.writeScalar(map, L_VENUE_DOTS_PULSE, "circle-blur",
-          mid(MapCfg.VENUE_DOT_PULSE_BLUR_MIN, MapCfg.VENUE_DOT_PULSE_BLUR_MAX));
-        restWrites.writeScalar(map, L_VENUE_DOTS_PULSE, "circle-color",
-          steppedRgb(MapCfg.VENUE_PULSE_OUTER_RGB_A, MapCfg.VENUE_PULSE_OUTER_RGB_B, 0.5));
-      }
-      if (map?.getLayer(L_VENUE_DOTS_PULSE_INNER)) {
-        restWrites.writeScalar(map, L_VENUE_DOTS_PULSE_INNER, "circle-radius",
-          mid(MapCfg.VENUE_DOT_PULSE_INNER_RADIUS_MIN_PX, MapCfg.VENUE_DOT_PULSE_INNER_RADIUS_MAX_PX));
-        restWrites.writeScalar(map, L_VENUE_DOTS_PULSE_INNER, "circle-opacity",
-          mid(MapCfg.VENUE_DOT_PULSE_OPACITY_MIN, MapCfg.VENUE_DOT_PULSE_INNER_OPACITY_MAX));
-        restWrites.writeScalar(map, L_VENUE_DOTS_PULSE_INNER, "circle-color",
-          steppedRgb(MapCfg.VENUE_PULSE_INNER_RGB_A, MapCfg.VENUE_PULSE_INNER_RGB_B, 0.5));
-      }
-      return;
-    }
-    let cancelled = false;
-    let rafId = 0;
-    venuePulseLastTRef.current = null;
+    /** Ambient breathing is `full` tier only; hover easing runs on every tier. */
+    const ambientEnabled = Number.isFinite(pulseTickMs);
+    const tickMs = ambientEnabled ? pulseTickMs : 16;
+
     // Scoped to this effect, so a style swap or venue-layer rebuild (both in
     // the deps) hands out a fresh cache rather than leaving us convinced we
     // already wrote values the rebuilt layer no longer has.
     const writes = new StyleWriteCache();
-    const ticker = makeTicker(pulseTickMs);
 
-    const tick = () => {
-      if (cancelled) return;
+    let cancelled = false;
+    let rafId = 0;
+    let running = false;
+    let burstUntil = 0;
+    let ticker = makeTicker(tickMs);
+    venuePulseLastTRef.current = null;
+
+    /**
+     * One evaluation of the halo state. `budgetMs` is the time to integrate.
+     * Returns true while there is still something to animate.
+     *
+     * At `gain === 0` every value below collapses onto its mid-sweep resting
+     * value, so the final frame of a burst *is* the resting write — there is no
+     * separate "settle" path that could drift away from what the loop draws.
+     */
+    const frame = (nowMs: number, budgetMs: number): boolean => {
       const map = mapRef.current;
-      const budgetMs = ticker(performance.now());
-      if (budgetMs === 0) {
-        rafId = requestAnimationFrame(tick); // not due yet — cheapest possible frame
-        return;
-      }
-      // Integrate the ACCUMULATED budget the ticker hands back, not the wall
-      // delta since the last frame — the loop only advances on due ticks, so a
-      // per-frame delta would run the pulse at a fraction of its intended
-      // speed. The ticker already clamps a pathological gap (backgrounded tab),
-      // so the phase cannot jump a whole cycle on resume.
       const dt = Math.max(0, budgetMs / 1000);
+      const gain = ambientEnabled ? MapCfg.ambientGain(nowMs, burstUntil) : 0;
 
       // Ease the pulse speed toward its target (slower when a venue is selected, idle otherwise).
       const targetHz = selectedVenuePulseRef.current
@@ -1243,13 +1296,15 @@ export function MapboxMap(props: MapboxMapProps) {
       venuePulsePhaseRef.current += dt * venuePulseHzRef.current * Math.PI * 2;
       const ph = venuePulsePhaseRef.current;
 
-      /** Primary grow/shrink: full sine sweep 0→1 (halos expand and contract each cycle) */
-      const sizeOuter = (Math.sin(ph) + 1) * 0.5;
-      const sizeInner =
-        (Math.sin(ph + MapCfg.VENUE_PULSE_INNER_PHASE_LAG_RAD) + 1) * 0.5;
+      /** Amplitude around the resting mid-point, scaled by the burst's gain. */
+      const breathe = (sine01: number) => 0.5 + (sine01 - 0.5) * gain;
 
-      const gradOuter = (Math.sin(ph) + 1) * 0.5;
-      const gradInner = (Math.sin(ph + Math.PI / 2) + 1) * 0.5;
+      /** Primary grow/shrink: full sine sweep 0→1 (halos expand and contract each cycle) */
+      const sizeOuter = breathe((Math.sin(ph) + 1) * 0.5);
+      const sizeInner = breathe((Math.sin(ph + MapCfg.VENUE_PULSE_INNER_PHASE_LAG_RAD) + 1) * 0.5);
+
+      const gradOuter = breathe((Math.sin(ph) + 1) * 0.5);
+      const gradInner = breathe((Math.sin(ph + Math.PI / 2) + 1) * 0.5);
       // Snap each channel to a 2/255 step so small gradient movements collapse
       // onto the same string and skip the write entirely. At the alphas these
       // halos composite at (<=0.22) a 2/255 delta is under half a level.
@@ -1331,65 +1386,113 @@ export function MapboxMap(props: MapboxMapProps) {
       }
 
       // Venue dot hover: smooth zoom-out via exponential decay (feature-state snaps; rAF animates).
-      {
-        // Ease the hover amount (venueHoverT) toward its target (1 = hovered, 0 = not).
-        const target = venueHoverTargetRef.current;
-        const current = venueHoverTRef.current;
-        const newT = current + (target - current) * Math.min(1, dt * 10);
-        venueHoverTRef.current = Math.abs(target - newT) < 0.002 ? target : newT; // snap when close enough
-        const settled = venueHoverTargetRef.current === 0 && venueHoverTRef.current === 0;
-        if (settled) venueHoverIdRef.current = null;
-        const hid = venueHoverIdRef.current ?? "";
-        const sel = selectedVenuePulseRef.current?.id ?? "";
-        if (map?.getLayer(L_VENUE_DOTS)) {
-          const normalR = MapCfg.VENUE_DOT_RADIUS_PX;
-          const selR = MapCfg.VENUE_DOT_RADIUS_SELECTED_PX;
-          // This is the expensive write in this loop: circle-radius here is
-          // data-driven over every venue feature (up to 1000), so mapbox
-          // repopulates the paint vertex array for the whole layer. Gate it on
-          // a signature that includes the quantized hover radius.
-          if (hid) {
-            const x = venueHoverTRef.current;
-            const ease = x * x * (3 - 2 * x); // smoothstep
-            const hoverR = normalR * MapCfg.VENUE_DOT_HOVER_SCALE;
-            const interpR = quantize(normalR + (hoverR - normalR) * ease, EPS.radiusPx);
-            writes.writeExpression(
-              map,
-              L_VENUE_DOTS,
-              "circle-radius",
-              `hover|${sel}|${hid}|${interpR}`,
-              () => [
-                "case",
-                ["==", ["get", "id"], sel], selR,
-                ["==", ["get", "id"], hid], interpR,
-                normalR,
-              ]
-            );
-          } else {
-            // Hover finished. Put back the selection-only form, otherwise the
-            // hover-shaped expression stays installed on the layer forever.
-            writes.writeExpression(map, L_VENUE_DOTS, "circle-radius", `rest|${sel}`, () => [
+      // Ease the hover amount (venueHoverT) toward its target (1 = hovered, 0 = not).
+      const target = venueHoverTargetRef.current;
+      const current = venueHoverTRef.current;
+      const newT = current + (target - current) * Math.min(1, dt * 10);
+      venueHoverTRef.current = Math.abs(target - newT) < 0.002 ? target : newT; // snap when close enough
+      const hoverSettled = venueHoverTRef.current === target;
+      if (hoverSettled && target === 0) venueHoverIdRef.current = null;
+      const hid = venueHoverIdRef.current ?? "";
+      const sel = selectedVenuePulseRef.current?.id ?? "";
+      if (map?.getLayer(L_VENUE_DOTS)) {
+        const normalR = MapCfg.VENUE_DOT_RADIUS_PX;
+        const selR = MapCfg.VENUE_DOT_RADIUS_SELECTED_PX;
+        // This is the expensive write in this loop: circle-radius here is
+        // data-driven over every venue feature (up to 1000), so mapbox
+        // repopulates the paint vertex array for the whole layer. Gate it on
+        // a signature that includes the quantized hover radius.
+        if (hid) {
+          const x = venueHoverTRef.current;
+          const ease = x * x * (3 - 2 * x); // smoothstep
+          const hoverR = normalR * MapCfg.VENUE_DOT_HOVER_SCALE;
+          const interpR = quantize(normalR + (hoverR - normalR) * ease, EPS.radiusPx);
+          writes.writeExpression(
+            map,
+            L_VENUE_DOTS,
+            "circle-radius",
+            `hover|${sel}|${hid}|${interpR}`,
+            () => [
               "case",
               ["==", ["get", "id"], sel], selR,
+              ["==", ["get", "id"], hid], interpR,
               normalR,
-            ]);
-          }
+            ]
+          );
+        } else {
+          // Hover finished. Put back the selection-only form, otherwise the
+          // hover-shaped expression stays installed on the layer forever.
+          writes.writeExpression(map, L_VENUE_DOTS, "circle-radius", `rest|${sel}`, () => [
+            "case",
+            ["==", ["get", "id"], sel], selR,
+            normalR,
+          ]);
         }
       }
 
-      rafId = requestAnimationFrame(tick); // queue the next frame
+      return gain > 0 || !hoverSettled;
     };
 
-    rafId = requestAnimationFrame(tick);
+    const tick = () => {
+      if (cancelled) return;
+      const now = performance.now();
+      const budgetMs = ticker(now);
+      if (budgetMs === 0) {
+        rafId = requestAnimationFrame(tick); // not due yet — cheapest possible frame
+        return;
+      }
+      // Integrate the ACCUMULATED budget the ticker hands back, not the wall
+      // delta since the last frame — the loop only advances on due ticks, so a
+      // per-frame delta would run the pulse at a fraction of its intended
+      // speed. The ticker already clamps a pathological gap (backgrounded tab),
+      // so the phase cannot jump a whole cycle on resume.
+      if (frame(now, budgetMs)) {
+        rafId = requestAnimationFrame(tick); // queue the next frame
+        return;
+      }
+      running = false; // settled: the map may now go idle
+    };
+
+    /**
+     * Wake the loop. `burst` restarts the ambient breath; hover callers pass
+     * nothing and only get the easing.
+     */
+    const start = (burst = false) => {
+      if (cancelled) return;
+      if (burst && ambientEnabled) burstUntil = performance.now() + MapCfg.AMBIENT_BURST_MS;
+      if (running) return;
+      running = true;
+      ticker = makeTicker(tickMs); // fresh accumulator: a restart is not a long frame
+      rafId = requestAnimationFrame(tick);
+    };
+    startVenuePulseRef.current = start;
+
+    // Settle the rebuilt layers at their resting values immediately, then let the
+    // burst effect below decide whether this rebuild is worth a breath.
+    frame(performance.now(), 0);
+
     return () => {
       cancelled = true;
+      running = false;
       cancelAnimationFrame(rafId); // stop the loop on cleanup
+      if (startVenuePulseRef.current === start) startVenuePulseRef.current = null;
     };
     // basemapStyleEpoch / venueLayerEpoch are deps so the StyleWriteCache above
     // is rebuilt whenever the layers it memoises are: a stale cache would
     // convince us we had already written values the new layers do not have,
     // freezing the halo at its resting size.
   }, [mapLoaded, pulseTier, pulseTickMs, basemapStyleEpoch, venueLayerEpoch]);
+
+  /**
+   * What earns a breath: new venue pins, a rebuilt layer, a selection change.
+   *
+   * Deliberately not "every render" and not a timer — ambient motion is a way of
+   * pointing at something that changed, so it starts when something changes.
+   */
+  useEffect(() => {
+    if (!mapLoaded) return;
+    startVenuePulseRef.current?.(true);
+  }, [mapLoaded, venueLayerEpoch, venuePointsEpoch, selectedVenue?.id]);
 
   /** Geo-anchored games: clustered GL source + symbol/circle layers (no DOM markers). */
   // Decides which layers/markers are visible at the current zoom (clusters vs individual
@@ -1406,28 +1509,17 @@ export function MapboxMap(props: MapboxMapProps) {
     pulseVisibleRef.current = showVenueDot;
     const showPlayers = shouldShowPlayerMarkers(zoom);
 
-    map.setLayoutProperty(L_GAME_CLUSTERS, "visibility", showClusters ? "visible" : "none");
-    map.setLayoutProperty(L_GAME_CLUSTER_LABEL, "visibility", showClusters ? "visible" : "none");
-    map.setLayoutProperty(L_GAME_ICON, "visibility", showIndividuals ? "visible" : "none");
-    map.setLayoutProperty(L_GAME_COUNT, "visibility", showIndividuals ? "visible" : "none");
-
-    if (map.getLayer(L_VENUE_GL_CLUSTERS)) {
-      map.setLayoutProperty(L_VENUE_GL_CLUSTERS, "visibility", showVenueDot ? "visible" : "none");
-    }
-    if (map.getLayer(L_VENUE_GL_CLUSTER_ICON)) {
-      map.setLayoutProperty(L_VENUE_GL_CLUSTER_ICON, "visibility", showVenueDot ? "visible" : "none");
-    }
-    if (map.getLayer(L_VENUE_DOTS_PULSE)) {
-      map.setLayoutProperty(L_VENUE_DOTS_PULSE, "visibility", showVenueDot ? "visible" : "none");
-    }
-    if (map.getLayer(L_VENUE_DOTS_PULSE_INNER)) {
-      map.setLayoutProperty(L_VENUE_DOTS_PULSE_INNER, "visibility", showVenueDot ? "visible" : "none");
-    }
-    if (map.getLayer(L_VENUE_DOTS)) {
-      map.setLayoutProperty(L_VENUE_DOTS, "visibility", showVenueDot ? "visible" : "none");
-    }
-    if (map.getLayer(L_VENUE_SPORT_ICON)) {
-      map.setLayoutProperty(L_VENUE_SPORT_ICON, "visibility", showVenueDot ? "visible" : "none");
+    // The GL writes below are skipped unless one of the three gates actually
+    // flipped. This runs on every frame of every camera move and from half a
+    // dozen effects, and `setLayoutProperty` triggers a full repaint even when
+    // the value is unchanged — which is exactly what stops the map idling after
+    // a gesture ends. DOM markers are still swept every call: a marker created
+    // since the last run has no visibility applied yet, and a style write on an
+    // element that already has that value costs nothing.
+    const visSig = `${showClusters ? 1 : 0}|${showIndividuals ? 1 : 0}|${showVenueDot ? 1 : 0}`;
+    if (lastGlVisibilitySigRef.current !== visSig) {
+      lastGlVisibilitySigRef.current = visSig;
+      applyGlLayerVisibility(map, { showClusters, showIndividuals, showVenueDot });
     }
 
     playerMarkersRef.current.forEach((m) => {
@@ -1466,6 +1558,37 @@ export function MapboxMap(props: MapboxMapProps) {
         : null
     );
   }, []);
+
+  /**
+   * A rebuilt layer comes back at the visibility its definition declares, while
+   * the memo above records what we last wrote — so drop the memo whenever the
+   * layers are recreated, or the first gate change after a rebuild is skipped.
+   */
+  useEffect(() => {
+    lastGlVisibilitySigRef.current = "";
+  }, [basemapStyleEpoch, venueLayerEpoch]);
+
+  /**
+   * The open game card follows the live list.
+   *
+   * `eventPopup.game` is a snapshot taken when the pin was tapped and was never
+   * re-read, so after the host pressed End the card kept offering "End game"
+   * over a pin that had already gone — and a card opened before a join still
+   * showed the old spots count. Re-point it at the row the map is drawing, and
+   * close it when that row is no longer on the map at all (ended, cancelled,
+   * filtered out, or panned past the cap).
+   */
+  useEffect(() => {
+    if (!eventPopup) return;
+    const fresh = games.find((g) => g.id === eventPopup.game.id);
+    if (!fresh) {
+      setEventPopup(null);
+      return;
+    }
+    if (fresh !== eventPopup.game) {
+      setEventPopup((prev) => (prev ? { ...prev, game: fresh } : prev));
+    }
+  }, [games, eventPopup]);
 
   /** Zoom-based scaling for DOM markers (HTML pins + avatar + nearby players). */
   // GL icons scale via Mapbox, but our HTML markers don't — so we manually scale them
@@ -1517,7 +1640,10 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map || !mapLoaded || gameLayersInitedRef.current) return;
     gameLayersInitedRef.current = true; // guard so this only runs once per style load
 
-    registerGameSportImages(map); // load the sport emoji images Mapbox will draw
+    // Only the sports actually nearby. Registering the whole 59-sport catalogue
+    // here meant 59 canvas rasterizations and 59 texture uploads before a single
+    // pin was drawn; the setData effect below tops this up as new sports arrive.
+    registerGameSportImages(map, sportIconIdsForGames(gamesRef.current));
 
     // The game data source, with Mapbox's built-in clustering turned on.
     map.addSource(L_GAME_SOURCE, {
@@ -1666,10 +1792,12 @@ export function MapboxMap(props: MapboxMapProps) {
         gameIconHoverTRef.current = 0;
       }
       gameIconHoverTargetRef.current = 1;
+      startGameIconMotionRef.current?.();
     });
     map.on("mouseleave", L_GAME_ICON, () => {
       map.getCanvas().style.cursor = "";
       gameIconHoverTargetRef.current = 0;
+      startGameIconMotionRef.current?.();
     });
 
     // Throttle visibility/scale updates to one per animation frame while the map moves.
@@ -1745,16 +1873,20 @@ export function MapboxMap(props: MapboxMapProps) {
     [floatingNotes]
   );
 
-  const { anchored: gamesByVenueId } = useMemo(
-    () =>
-      partitionGamesByVenue(
-        games,
-        venueAnchors,
-        MapCfg.GAME_VENUE_ABSORB_RADIUS_METERS,
-        Date.now()
-      ),
-    // mapMinuteEpoch re-runs the ended-game check as time passes.
-    [games, venueAnchors, mapMinuteEpoch]
+  // mapMinuteEpoch re-runs the ended-game check as time passes — but a minute in
+  // which nothing ended must not hand out a new Map, because its identity is what
+  // the absorbed-id set, the composite venue pins and the GL source all key off.
+  const gamesByVenueId = useStableMapOfArrays(
+    useMemo(
+      () =>
+        partitionGamesByVenue(
+          games,
+          venueAnchors,
+          MapCfg.GAME_VENUE_ABSORB_RADIUS_METERS,
+          Date.now()
+        ).anchored,
+      [games, venueAnchors, mapMinuteEpoch]
+    )
   );
 
   /** Flat id set — the form every render path needs to ask "is this one already on a venue?". */
@@ -1781,14 +1913,20 @@ export function MapboxMap(props: MapboxMapProps) {
 
     // Limit to the games near the viewport so we never push thousands of features at once.
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
-    src.setData(gamesToGeoJSON(capped, selectedGameId, absorbedGameIds));
+    const geojson = gamesToGeoJSON(capped, selectedGameId, absorbedGameIds);
+    // Before the data, never after: a symbol whose `icon-image` names an image the
+    // style does not hold renders nothing at all, with no warning.
+    registerGameSportImages(map, sportIconIdsInFeatures(geojson.features));
+    src.setData(geojson);
     applyMapLayerVisibility();
+    // No mapMinuteEpoch: nothing here reads the clock. What the minute tick can
+    // change is which games are absorbed by a venue, and that arrives as a new
+    // `absorbedGameIds` — only when the membership actually changed.
   }, [
     mapLoaded,
     basemapStyleEpoch,
     games,
     selectedGameId,
-    mapMinuteEpoch,
     absorbedGameIds,
     applyMapLayerVisibility,
   ]);
@@ -2153,7 +2291,6 @@ export function MapboxMap(props: MapboxMapProps) {
     games,
     selectedGameId,
     bumpGameId,
-    mapMinuteEpoch,
     absorbedGameIds,
     applyMapLayerVisibility,
   ]);
@@ -2237,7 +2374,6 @@ export function MapboxMap(props: MapboxMapProps) {
     games,
     selectedGameId,
     bumpGameId,
-    mapMinuteEpoch,
     absorbedGameIds,
     applyMapLayerVisibility,
   ]);
@@ -2321,9 +2457,24 @@ export function MapboxMap(props: MapboxMapProps) {
       applyDomMarkerScale();
     });
 
+    // Deliberately NOT a teardown of every marker: this effect diffs by id in the
+    // body, and a cleanup that cleared the map on every re-run made that diff
+    // pointless — each run destroyed and rebuilt every pill and its React root.
+    // Unmount teardown lives in its own effect below.
     return () => {
       cancelled = true;
-      // On unmount, remove any remaining markers.
+    };
+  }, [
+    mapLoaded,
+    games,
+    absorbedGameIds,
+    applyMapLayerVisibility,
+    applyDomMarkerScale,
+  ]);
+
+  /** Countdown pills belong to the map instance; drop them when it goes away. */
+  useEffect(
+    () => () => {
       const existing = venueCountdownEntriesRef.current;
       const entries = [...existing.values()];
       existing.clear();
@@ -2339,15 +2490,9 @@ export function MapboxMap(props: MapboxMapProps) {
           } catch (_) {}
         }
       }, 0);
-    };
-  }, [
-    mapLoaded,
-    games,
-    mapMinuteEpoch,
-    absorbedGameIds,
-    applyMapLayerVisibility,
-    applyDomMarkerScale,
-  ]);
+    },
+    []
+  );
 
   /** Selected / bump / hover: game sport icon layout + halo. */
   // Re-run the icon layout immediately when selection or the tap-pulse changes (the rAF loop
@@ -2358,27 +2503,32 @@ export function MapboxMap(props: MapboxMapProps) {
   }, [mapLoaded, selectedGameId, bumpGameId, applyGameIconLayout]);
 
   /**
-   * Single rAF loop: hover smoothing + applyGameIconLayout (icon-size, halo, icon-rotate).
-   * Keeps rotation in sync with layout updates so Mapbox doesn’t drop icon-rotate.
+   * Hover easing + tap bump for the GL game icons.
+   *
+   * This used to be an unconditional rAF loop for the life of the map, because it
+   * also drove the ambient wobble. With the wobble gone, everything left here is
+   * transient: it runs while a hover is easing or a tap bump is playing, writes
+   * the settled frame, and stops — so the map stops redrawing. Whatever starts an
+   * animation (the hover handlers, `bumpGameIcon`) calls `startGameIconMotionRef`.
    */
   useEffect(() => {
     if (!mapLoaded) return;
     let cancelled = false;
     let raf = 0;
+    let running = false;
+
+    /** Nothing left to move: the hover has reached its target and no bump is playing. */
+    const settled = () =>
+      bumpAnimationRef.current == null &&
+      gameIconHoverTRef.current === gameIconHoverTargetRef.current;
+
     const tick = (now: number) => {
       if (cancelled) return;
       const m = mapRef.current;
       if (!m?.getLayer(L_GAME_ICON)) {
-        raf = requestAnimationFrame(tick);
-        return;
-      }
-      try {
-        if (m.getLayoutProperty(L_GAME_ICON, "visibility") === "none") {
-          raf = requestAnimationFrame(tick);
-          return;
-        }
-      } catch (_) {
-        raf = requestAnimationFrame(tick);
+        // Layer not built yet (or rebuilt under us): stop rather than spin. The
+        // effects that create the layers call applyGameIconLayout themselves.
+        running = false;
         return;
       }
 
@@ -2397,13 +2547,33 @@ export function MapboxMap(props: MapboxMapProps) {
         if (target === 0) gameIconHoverIdRef.current = null;
       }
 
-      applyGameIconLayout();
+      applyGameIconLayout(); // also clears bumpAnimationRef when the pulse is over
+
+      if (settled()) {
+        // One last write already happened above with the settled values.
+        running = false;
+        gameIconHoverLastTsRef.current = null;
+        return;
+      }
       raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
+
+    const start = () => {
+      if (cancelled || running) return;
+      running = true;
+      gameIconHoverLastTsRef.current = null;
+      raf = requestAnimationFrame(tick);
+    };
+    startGameIconMotionRef.current = start;
+    // Settle whatever state the layer was rebuilt with (selection, an in-flight bump).
+    applyGameIconLayout();
+    if (!settled()) start();
+
     return () => {
       cancelled = true;
+      running = false;
       cancelAnimationFrame(raf);
+      if (startGameIconMotionRef.current === start) startGameIconMotionRef.current = null;
       gameIconHoverLastTsRef.current = null;
     };
   }, [mapLoaded, applyGameIconLayout]);
@@ -2891,8 +3061,8 @@ export function MapboxMap(props: MapboxMapProps) {
         // missing icon over a basemap pitch. `setStyle` can drop the image registry while
         // leaving the layers in place, so registering only on layer creation was a
         // standing way for every venue icon to silently disappear. It's a no-op when the
-        // images are already there.
-        registerGameSportImages(mapInstance);
+        // images are already there, and the pixels are cached across style swaps.
+        registerGameSportImages(mapInstance, sportIconIdsInFeatures(enriched.features));
 
         if (venueGlLayersReady(mapInstance)) {
           (mapInstance.getSource(SRC_VENUE_POINTS) as import("mapbox-gl").GeoJSONSource).setData(enriched);
@@ -2958,6 +3128,18 @@ export function MapboxMap(props: MapboxMapProps) {
                 "circle-stroke-width": MapCfg.VENUE_DOT_PULSE_STROKE_WIDTH_MIN_PX,
                 "circle-stroke-color": `rgb(${MapCfg.VENUE_PULSE_STROKE_RGB_DARK.r},${MapCfg.VENUE_PULSE_STROKE_RGB_DARK.g},${MapCfg.VENUE_PULSE_STROKE_RGB_DARK.b})`,
                 "circle-pitch-alignment": "map",
+                // Zero transitions on every property the halo loop writes. A
+                // mapbox paint write with the default 300ms transition keeps the
+                // style dirty for 300ms — re-marked every frame — so the map
+                // cannot idle until the last transition ends, and during a burst
+                // every write would also be interpolated. The loop already eases
+                // these values itself.
+                "circle-radius-transition": ZERO_TRANSITION,
+                "circle-opacity-transition": ZERO_TRANSITION,
+                "circle-blur-transition": ZERO_TRANSITION,
+                "circle-color-transition": ZERO_TRANSITION,
+                "circle-stroke-width-transition": ZERO_TRANSITION,
+                "circle-stroke-color-transition": ZERO_TRANSITION,
               },
             },
             beforeGames
@@ -2975,6 +3157,11 @@ export function MapboxMap(props: MapboxMapProps) {
                 "circle-opacity": MapCfg.VENUE_DOT_PULSE_OPACITY_MIN,
                 "circle-blur": MapCfg.VENUE_DOT_PULSE_INNER_BLUR_MIN,
                 "circle-pitch-alignment": "map",
+                // Same reason as the outer halo above.
+                "circle-radius-transition": ZERO_TRANSITION,
+                "circle-opacity-transition": ZERO_TRANSITION,
+                "circle-blur-transition": ZERO_TRANSITION,
+                "circle-color-transition": ZERO_TRANSITION,
               },
             },
             beforeGames
@@ -3074,6 +3261,7 @@ export function MapboxMap(props: MapboxMapProps) {
             venueHoverPointerId = id;
             venueHoverIdRef.current = id;
             venueHoverTargetRef.current = 1;
+            startVenuePulseRef.current?.(); // hover easing needs the loop awake
             try {
               mapInstance.setFeatureState({ source: SRC_VENUE_POINTS, id }, { hover: true });
             } catch (_) {}
@@ -3086,6 +3274,7 @@ export function MapboxMap(props: MapboxMapProps) {
               const hid = venueHoverPointerId;
               venueHoverPointerId = null;
               venueHoverTargetRef.current = 0;
+              startVenuePulseRef.current?.(); // ease back out, then settle
               try {
                 mapInstance.setFeatureState({ source: SRC_VENUE_POINTS, id: hid }, { hover: false });
               } catch (_) {}
@@ -3413,7 +3602,7 @@ export function MapboxMap(props: MapboxMapProps) {
   // Error/empty state: no token or the map failed to load.
   if (!MAPBOX_TOKEN || mapError) {
     return (
-      <div className="absolute inset-0 bg-[#0A0F1C] flex flex-col items-center justify-center gap-2 px-4 text-slate-400 text-sm text-center">
+      <div className="absolute inset-0 bg-background flex flex-col items-center justify-center gap-2 px-4 text-slate-400 text-sm text-center">
         {!MAPBOX_TOKEN ? (
           <>Add VITE_MAPBOX_ACCESS_TOKEN to .env (or Vercel env vars) to show the map.</>
         ) : (
@@ -3480,6 +3669,8 @@ export function MapboxMap(props: MapboxMapProps) {
                   eventPopup.game.created_by === currentUserId)
               }
               isSubstitute={substituteSet.has(eventPopup.game.id)}
+              isGuest={!currentUserId}
+              onRequestSignIn={() => void props.ensureSession?.("players")}
               onDeleteHostedGame={onDeleteHostedGame}
               onStartHostedGame={onStartHostedGame}
               onEndHostedGame={onEndHostedGame}

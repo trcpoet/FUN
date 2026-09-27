@@ -63,16 +63,19 @@ async function fetchMyGameInboxFromTables(): Promise<{
   const gameIds = [...new Set((mine ?? []).map((r) => r.game_id))];
   if (gameIds.length === 0) return { data: [], error: null };
 
-  // Try the rich select first (post-migration: includes visibility / invite_token / ends_at / location).
+  // Try the rich select first (post-migration: includes visibility / ends_at / location).
   // If those columns don't exist yet (older schema), retry with the minimal set.
+  // `invite_token` is deliberately absent: client roles hold no privilege on that
+  // column, and selecting it fails the whole query. InviteAdminPanel asks for it
+  // through `getGameInviteToken` when a host actually wants the share link.
   let games: Array<Record<string, unknown>> | null = null;
   let e2: { message?: string; code?: string } | null = null;
   {
     const richSelect =
-      "id, title, sport, starts_at, spots_needed, created_at, ends_at, duration_minutes, visibility, invite_token, created_by, status, location_label, lat, lng";
+      "id, title, sport, starts_at, spots_needed, created_at, ends_at, ended_at, live_started_at, duration_minutes, visibility, created_by, status, location_label, lat, lng";
     const res = await supabase.from("games").select(richSelect).in("id", gameIds);
     if (res.error) {
-      // Probe legacy schemas (missing duration_minutes / visibility / invite_token / lat / lng / etc.).
+      // Probe legacy schemas (missing duration_minutes / visibility / lat / lng / etc.).
       const m = (res.error.message ?? "").toLowerCase();
       const isLegacyColumnMissing =
         res.error.code === "42703" || (m.includes("column") && m.includes("does not exist"));
@@ -150,9 +153,10 @@ async function fetchMyGameInboxFromTables(): Promise<{
       spots_needed: number;
       created_at: string;
       ends_at?: string | null;
+      ended_at?: string | null;
+      live_started_at?: string | null;
       duration_minutes?: number | null;
       visibility?: "public" | "friends_only" | "invite_only" | null;
-      invite_token?: string | null;
       created_by?: string | null;
       status?: GameInboxRow["status"];
       location_label?: string | null;
@@ -168,9 +172,10 @@ async function fetchMyGameInboxFromTables(): Promise<{
       sport: g.sport,
       starts_at: g.starts_at,
       ends_at: g.ends_at ?? null,
+      ended_at: g.ended_at ?? null,
+      live_started_at: g.live_started_at ?? null,
       duration_minutes: g.duration_minutes ?? null,
       visibility: g.visibility ?? null,
-      invite_token: g.invite_token ?? null,
       created_by: g.created_by ?? null,
       status: g.status,
       location_label: g.location_label ?? null,

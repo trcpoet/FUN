@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase";
 import type { GameRow, ProfileNearbyRow } from "../lib/supabase";
 import { planNearbyQueries } from "../lib/nearbyQueryPlan";
 import { retryTransient } from "../lib/retryTransient";
-import { isTransientRpcError } from "../lib/rpcErrors";
+import { isMissingRpc, isTransientRpcError } from "../lib/rpcErrors";
 
 const PROFILES_LIMIT = 50;
 
@@ -21,6 +21,8 @@ function cacheKey(p: {
   profilesLng: number | null;
   athletesRadiusKm: number;
   includeProfiles: boolean;
+  /** Who asked. Two accounts on one device do not see the same games. */
+  viewerId: string | null;
 }): string {
   return [
     p.gamesLat ?? "x",
@@ -31,6 +33,10 @@ function cacheKey(p: {
     p.athletesRadiusKm,
     // A guest's games-only entry must not be served to a signed-in user (and vice versa).
     p.includeProfiles ? "p1" : "p0",
+    // ...and one member's entry must not be served to another. The gender gate
+    // means two accounts on the same device legitimately get different games,
+    // and this cache outlives a sign-out by up to 75 seconds.
+    p.viewerId ?? "guest",
   ].join(":");
 }
 
@@ -64,8 +70,12 @@ export function useNearbyMapQueries(params: {
   profilesLat: number | null;
   profilesLng: number | null;
   athletesRadiusKm: number;
-  /** Player profiles/locations are signed-in only (privacy). Defaults to true. */
-  includeProfiles?: boolean;
+  /**
+   * Who is asking, or null for a guest. Decides three things at once: whether
+   * player locations are fetched at all (signed-in only, privacy), which games
+   * function may be called, and who the cached answer belongs to.
+   */
+  viewerId: string | null;
 }) {
   const {
     gamesLat,
@@ -74,8 +84,9 @@ export function useNearbyMapQueries(params: {
     profilesLat,
     profilesLng,
     athletesRadiusKm,
-    includeProfiles = true,
+    viewerId,
   } = params;
+  const includeProfiles = viewerId != null;
 
   const [games, setGames] = useState<GameRow[]>([]);
   const [profiles, setProfiles] = useState<ProfileNearbyRow[]>([]);
@@ -114,6 +125,7 @@ export function useNearbyMapQueries(params: {
       profilesLng,
       athletesRadiusKm,
       includeProfiles,
+      viewerId,
     });
 
     if (refreshTrigger === 0) {
@@ -137,16 +149,22 @@ export function useNearbyMapQueries(params: {
     // map doesn't leave a queue of doomed requests waiting out their backoff.
     const alive = () => !cancelled;
 
+    // Guests are not allowed to execute `get_games_nearby` at all; they read the
+    // wrapper that returns public Co-ed games with no host id attached.
+    const gamesArgs = { lat: gamesLat, lng: gamesLng, radius_km: gamesRadiusKm };
+    const readGames = async () => {
+      const fn = viewerId ? "get_games_nearby" : "get_guest_games_nearby";
+      const res = await retryTransient(() => supabase!.rpc(fn, gamesArgs), { shouldContinue: alive });
+      if (!res.error || viewerId || !isMissingRpc(res.error)) return res;
+      // The guest wrapper is not deployed yet (client shipped ahead of its
+      // migration). Fall back to the member function, which answers a guest with
+      // an empty list rather than an error — today's behaviour, not a broken map.
+      return retryTransient(() => supabase!.rpc("get_games_nearby", gamesArgs), {
+        shouldContinue: alive,
+      });
+    };
     const gamesRpc = needGames
-      ? retryTransient(
-          () =>
-            supabase!.rpc("get_games_nearby", {
-              lat: gamesLat,
-              lng: gamesLng,
-              radius_km: gamesRadiusKm,
-            }),
-          { shouldContinue: alive },
-        )
+      ? readGames()
       : Promise.resolve({ data: null, error: null });
 
     const profilesRpc = needProfiles
@@ -230,6 +248,7 @@ export function useNearbyMapQueries(params: {
     profilesLat,
     profilesLng,
     athletesRadiusKm,
+    viewerId,
     includeProfiles,
     refreshTrigger,
   ]);

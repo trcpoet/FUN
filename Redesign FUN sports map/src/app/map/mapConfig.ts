@@ -277,39 +277,141 @@ export const MAP_DOUBLE_TAP_SUPPRESS_AFTER_LONG_PRESS_MS = 300;
 
 export type CinematicTier = "off" | "lite" | "full";
 
-/** Device tier: same cinematic stack on mobile + desktop; off only for reduced motion. */
-export function getCinematicTier(_isMobile: boolean): CinematicTier {
-  if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    return "off";
-  }
+/**
+ * What this device can afford, from the inputs a browser will actually tell us.
+ *
+ * Pure so it can be tested; `getCinematicTier` reads the live values and calls it.
+ * `deviceMemory` and `hardwareConcurrency` are undefined on Safari and Firefox, and
+ * "undefined" must never be read as "weak" — an iPhone reports neither and renders
+ * this map comfortably. Only a stated-and-low number, or a renderer we know is
+ * unaccelerated, drops a device to `lite`.
+ */
+export function classifyCinematicTier(input: {
+  reducedMotion: boolean;
+  /** True when the WebGL renderer string names a software rasterizer. */
+  softwareRenderer: boolean;
+  /** navigator.deviceMemory — Chromium only, in GB, and coarse (0.5/1/2/4/8). */
+  deviceMemory?: number;
+}): CinematicTier {
+  if (input.reducedMotion) return "off";
+  // No GPU: every frame is drawn on the CPU (headless Chrome, a VM, a browser with
+  // hardware acceleration switched off). Terrain and antialias are unaffordable there,
+  // and an ambient animation would hold the main thread for the life of the page.
+  if (input.softwareRenderer) return "lite";
+  // Deliberately NOT hardwareConcurrency: an iPhone reports 4 and out-renders an
+  // eight-core budget Android. Memory is the signal that tracks GPU class on the
+  // devices that actually struggle, and Safari not reporting it means Apple
+  // hardware stays on `full` — which is the right answer there anyway.
+  if (input.deviceMemory != null && input.deviceMemory <= 4) return "lite";
   return "full";
+}
+
+/** True when this browser's WebGL renderer is a software rasterizer. */
+export function isSoftwareRendererName(renderer: string | null | undefined): boolean {
+  if (!renderer) return false;
+  return /swiftshader|llvmpipe|software|softpipe|basic render|microsoft basic/i.test(renderer);
+}
+
+/**
+ * Reads the WebGL renderer once per page, through a throwaway context that is
+ * released immediately (browsers cap how many may be live at a time).
+ */
+let softwareRendererCache: boolean | null = null;
+export function detectSoftwareRenderer(): boolean {
+  if (softwareRendererCache != null) return softwareRendererCache;
+  if (typeof document === "undefined") return false;
+  let result = false;
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = (canvas.getContext("webgl2") ?? canvas.getContext("webgl")) as WebGLRenderingContext | null;
+    if (!gl) {
+      // No WebGL at all — mapbox will fall back or fail; either way, promise it nothing.
+      result = true;
+    } else {
+      const dbg = gl.getExtension("WEBGL_debug_renderer_info") as { UNMASKED_RENDERER_WEBGL: number } | null;
+      const name = String(gl.getParameter(dbg ? dbg.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? "");
+      result = isSoftwareRendererName(name);
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+  } catch (_) {
+    result = false;
+  }
+  softwareRendererCache = result;
+  return result;
+}
+
+/**
+ * Device tier: reduced motion is `off`, an unaccelerated or small device is `lite`.
+ *
+ * `_isMobile` is kept in the signature (callers pass it) but unused: phone-ness
+ * says nothing useful about rendering budget on its own — see classifyCinematicTier.
+ */
+export function getCinematicTier(_isMobile: boolean): CinematicTier {
+  if (typeof window === "undefined") return "full";
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  return classifyCinematicTier({
+    reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    softwareRenderer: detectSoftwareRenderer(),
+    deviceMemory: nav.deviceMemory,
+  });
+}
+
+/**
+ * How long an ambient animation runs before settling.
+ *
+ * Ambient motion used to be unconditional and endless, which is the single most
+ * expensive thing this app did: EVERY mapbox style write calls `_update(true)` →
+ * `triggerRepaint()` (mapbox-gl 3.22.0, Map.setPaintProperty), and the default
+ * property transition is 300ms, during which the style is re-marked dirty every
+ * frame — so a write landing every 50ms kept the whole map redrawing at display
+ * rate, forever, and `idle` never fired. Lighthouse measured 27–35s of Total
+ * Blocking Time against a 200ms target.
+ *
+ * A burst keeps the design — the halo still breathes when venues arrive or a pin
+ * is selected — but the map then goes quiet, which is also what lets a phone stop
+ * rendering. Attention is the point of the animation, and attention is finite.
+ */
+export const AMBIENT_BURST_MS = 4200;
+/** Amplitude ramp-down at the end of a burst, so the halo settles instead of snapping. */
+export const AMBIENT_FADE_MS = 700;
+
+/**
+ * Amplitude multiplier for an ambient animation: 1 during the burst, easing to 0
+ * across `AMBIENT_FADE_MS`, then 0 — at which point the caller stops its loop.
+ */
+export function ambientGain(nowMs: number, burstUntilMs: number, fadeMs = AMBIENT_FADE_MS): number {
+  if (nowMs <= burstUntilMs) return 1;
+  if (fadeMs <= 0) return 0;
+  const t = (nowMs - burstUntilMs) / fadeMs;
+  if (t >= 1) return 0;
+  // smoothstep out, so the last visible frames are the slowest.
+  const x = 1 - t;
+  return x * x * (3 - 2 * x);
 }
 
 /**
  * Per-frame budget for the venue halo pulse, in ms between ticks.
  *
- * `Infinity` means "do not run the loop at all" — the caller writes the
- * resting values once and stops. Reduced-motion users land there via
- * `getCinematicTier`, which is also why this reuses that tier rather than
- * introducing a second motion switch. `lite` exists so the pulse can be
- * halved without being removed.
+ * `Infinity` means "do not animate at all" — the caller writes the resting values
+ * once and stops. Reduced motion lands there via `getCinematicTier`, and so does
+ * any device without GPU acceleration: there, one map frame can cost hundreds of
+ * milliseconds, so the pulse would be the whole main thread.
  */
 export function getPulseTickMs(tier: CinematicTier): number {
   if (tier === "full") return 50; // 20Hz
-  if (tier === "lite") return 100; // 10Hz
   return Number.POSITIVE_INFINITY;
 }
 
-/** Whether the ambient game-icon wobble runs at all. Off below `full`. */
-export function getWobbleEnabled(tier: CinematicTier): boolean {
-  return tier === "full";
-}
-
-/** Intro camera tilt after first tiles paint (idle). */
+/**
+ * Intro camera tilt after first tiles paint (idle).
+ *
+ * `lite` gets none. A tilt is the single most expensive camera state on a device
+ * without GPU acceleration: it multiplies the visible tile count, turns on the
+ * 3D building extrusions, and makes terrain matter. The map still arrives with
+ * its palette, pins and data — it just arrives flat.
+ */
 export function getCinematicIntroPitch(tier: CinematicTier): number {
-  if (tier === "full") return 62;
-  if (tier === "lite") return 45;
-  return 0;
+  return tier === "full" ? 62 : 0;
 }
 
 /** Venue tap: “land on the court” pitch. */

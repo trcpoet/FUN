@@ -63,6 +63,33 @@ function supabasePreconnect(env: Record<string, string>): Plugin {
   }
 }
 
+/**
+ * Absolute URLs for the share card.
+ *
+ * `og:image` and `og:url` have to be absolute — a relative one is resolved by
+ * some crawlers and dropped by others, which is why the card never showed. The
+ * origin is not knowable at author time, so it is substituted at build: set
+ * `VITE_PUBLIC_ORIGIN` for the custom domain, and Vercel's own
+ * `VERCEL_PROJECT_PRODUCTION_URL` covers a preview or a default deployment.
+ * With neither, the placeholder collapses to a root-relative path — the same
+ * behaviour as before, rather than a URL that is confidently wrong.
+ */
+function ogOrigin(env: Record<string, string>): Plugin {
+  const fromEnv = (env.VITE_PUBLIC_ORIGIN || '').trim().replace(/\/+$/, '')
+  const vercel = (
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    process.env.VERCEL_URL ||
+    ''
+  ).trim()
+  const origin = fromEnv || (vercel ? `https://${vercel.replace(/^https?:\/\//, '')}` : '')
+  return {
+    name: 'fun-og-origin',
+    transformIndexHtml(html) {
+      return html.replaceAll('%OG_ORIGIN%', origin)
+    },
+  }
+}
+
 // FCP fix: Vite emits the app + mapbox stylesheets as render-blocking
 // `<link rel="stylesheet">` in <head>. The browser refuses to paint ANYTHING —
 // including our fully inline-styled #root orbit loader — until those sheets
@@ -96,6 +123,7 @@ export default defineConfig(({ mode }) => {
   plugins: [
     phantomRestartGuard(),
     supabasePreconnect(env),
+    ogOrigin(env),
     // Dev-only: same behavior as `api/overpass.ts` (multi-mirror). Vite `server.proxy` often 504s on slow Overpass.
     overpassDevProxy(),
     // The React and Tailwind plugins are both required for Make, even if
@@ -167,6 +195,17 @@ export default defineConfig(({ mode }) => {
           // tiny standalone chunk so mapbox-gl stays purely lazy (loaded only when
           // the map mounts). No-op if the id ever stops matching.
           if (id.includes("commonjsHelpers")) return "cjs-helpers";
+          // React itself, in its own chunk. Left unassigned, Rollup folded
+          // react-dom + scheduler into `radix`, react core into `icons` and the
+          // JSX runtime into `motion` — so every profile and Lighthouse report
+          // billed React's render time to a UI library that was not running.
+          // The trailing slashes matter: `react-router` must not match here.
+          if (
+            id.includes("node_modules/react/") ||
+            id.includes("node_modules/react-dom/") ||
+            id.includes("node_modules/scheduler/")
+          )
+            return "react";
           if (id.includes("node_modules/mapbox-gl")) return "mapbox";
           if (id.includes("node_modules/three")) return "three";
 

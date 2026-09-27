@@ -55,6 +55,10 @@ type GameEventPopupProps = {
   onStartHostedGame?: (game: GameRow) => Promise<void> | void;
   /** Host-only: end the game (live -> completed; before live -> delete). */
   onEndHostedGame?: (game: GameRow) => Promise<void> | void;
+  /** Signed out: the card still says what, where, when and how full — never who. */
+  isGuest?: boolean;
+  /** Guest tapped something that needs an account. */
+  onRequestSignIn?: () => void;
   /** Viewer location for distance / directions (browser geolocation). */
   viewerCoords?: { lat: number; lng: number } | null;
   /** Draw Mapbox walking route on the map. */
@@ -73,6 +77,8 @@ export function GameEventPopup({
   onDeleteHostedGame,
   onStartHostedGame,
   onEndHostedGame,
+  isGuest = false,
+  onRequestSignIn,
   viewerCoords = null,
   onNavigateTo,
 }: GameEventPopupProps) {
@@ -262,7 +268,12 @@ export function GameEventPopup({
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -12 }}
             transition={{ duration: 0.16 }}
           >
-            <GameDetailsView game={game} nowMs={Date.now()} />
+            <GameDetailsView
+              game={game}
+              nowMs={Date.now()}
+              isGuest={isGuest}
+              onRequestSignIn={onRequestSignIn}
+            />
           </motion.div>
         ) : (
           <motion.div

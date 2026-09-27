@@ -14,12 +14,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { VenueSportMenu } from "./VenueSportMenu";
 import type { VenueSportIntent } from "../lib/venueSportIntent";
 import { useAuth } from "../contexts/AuthContext";
+import { useNavLoading } from "../../hooks/useNavLoading";
 
 /** Glass morphism for map toolbar round controls (search, filter). */
 /** Keyboard focus ring shared by the glass map buttons (invisible on hover/click). */
 const MAP_GLASS_FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 " +
-  "focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C] ";
+  "focus-visible:ring-offset-2 focus-visible:ring-offset-background ";
 
 const MAP_GLASS_ICON_BTN =
   "w-12 h-12 rounded-full shrink-0 flex items-center justify-center transition-all duration-200 " +
@@ -111,6 +112,18 @@ export type TopNavigationProps = {
   liveGamesCount?: number;
   /** Name of the searched place when map is anchored to a search result. */
   mapSearchLocationName?: string | null;
+  /** Warm the account screen's chunk on intent (pointer down / touch start). */
+  onProfilePrefetch?: () => void;
+  /** Same for the feed; awaited so the button can show the wait when there is one. */
+  onFeedPrefetch?: () => Promise<unknown>;
+  /** Awaited account-screen prefetch, for the same reason. */
+  onAccountPrefetch?: () => Promise<unknown>;
+  /**
+   * A guest reached for a members-only surface; show them the sign-up sheet.
+   * Not used for the profile button — that one opens Profile, which IS the
+   * sign-in screen when signed out.
+   */
+  onGuestGate?: (action: "feed" | "chat") => void;
   /** Clears the map search anchor and resets to user GPS. */
   onClearMapSearch?: () => void;
   /** Trip summary while a route is drawn on the map; non-null is the "route active" signal. */
@@ -178,25 +191,26 @@ export const TopNavigation = (props: TopNavigationProps) => {
     venueSportIntent = null,
     venueSportIntentReady = false,
     onVenueSportIntentChange,
+    onGuestGate,
+    onProfilePrefetch,
+    onFeedPrefetch,
+    onAccountPrefetch,
   } = props;
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const [feedToolbarHintOpen, setFeedToolbarHintOpen] = useState(false);
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { user } = useAuth();
+  /**
+   * Signed out. Controls that only describe an account — presence, alerts — are
+   * not shown at all; the ones that describe the product (Feed, Messages) stay
+   * visible and ask for an account when tapped, because hiding them would hide
+   * what signing up is for.
+   */
+  const guest = !user;
+  /** Press → (chunk still loading?) → busy on the control itself → navigate. */
+  const nav = useNavLoading();
   const reduceMotion = useReducedMotion();
-
-  const FEED_TOOLBAR_HINT_KEY = "fun_map_feed_toolbar_hint_v1";
-  useEffect(() => {
-    try {
-      if (typeof window !== "undefined" && window.localStorage.getItem(FEED_TOOLBAR_HINT_KEY) !== "1") {
-        setFeedToolbarHintOpen(true);
-      }
-    } catch {
-      setFeedToolbarHintOpen(true);
-    }
-  }, []);
 
   // Shrink search when clicking outside (e.g. on the map)
   useEffect(() => {
@@ -216,27 +230,15 @@ export const TopNavigation = (props: TopNavigationProps) => {
     // so this is one of the two that give screen readers something to jump to.
     <nav
       aria-label="Map controls"
-      className="absolute top-0 left-0 right-0 z-50 pt-12 px-4 pb-4 bg-gradient-to-b from-[#0A0F1C]/90 via-[#0A0F1C]/50 to-transparent pointer-events-none"
+      className="absolute top-0 left-0 right-0 z-50 pt-12 px-4 pb-4 bg-gradient-to-b from-background/90 via-background/50 to-transparent pointer-events-none"
     >
+      {/*
+        No auth controls here. Signing in lives in one place — the profile
+        button, bottom left — for guests and members alike. A map that greets a
+        first-time visitor with two buttons about accounts is asking for a
+        commitment before it has shown them anything worth committing to.
+      */}
       <div className="flex flex-col items-end gap-2">
-        {/* Guest auth controls — signed-in users use bottom-left avatar + settings Terminate Session */}
-        {!user && (
-          <div className="flex items-center gap-2 pointer-events-auto self-start">
-            <Link
-              to="/login"
-              className="inline-flex h-9 items-center rounded-full border border-white/20 bg-slate-900/80 px-3.5 text-sm font-medium text-slate-100 backdrop-blur-xl hover:border-emerald-400/45 hover:text-emerald-300"
-            >
-              Sign in
-            </Link>
-            <Link
-              to="/signup"
-              className="inline-flex h-9 items-center rounded-full bg-emerald-700 px-3.5 text-sm font-medium text-white hover:bg-emerald-600"
-            >
-              Sign up
-            </Link>
-          </div>
-        )}
-
         {/* Row: search, profile, filter — only this row goes full-width when search is open. */}
         <div
           ref={searchWrapRef}
@@ -492,46 +494,31 @@ export const TopNavigation = (props: TopNavigationProps) => {
         <div className="flex w-fit flex-col items-end gap-2 self-end pointer-events-auto">
           {/* Order: Feed (hero) → Live Now → Visibility (tertiary) */}
           <div className="relative flex flex-col items-end gap-2">
-            {feedToolbarHintOpen ? (
-              <div
-                className="absolute right-0 top-full z-[60] mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-primary/35 bg-[#0A0F1C]/95 px-3 py-2.5 text-left shadow-[var(--shadow-control)] backdrop-blur-xl pointer-events-auto"
-                role="status"
-              >
-                <p className="text-xs text-slate-200 leading-snug pr-6">
-                  <span className="font-semibold text-primary">Feed</span> is updates from players and games.{" "}
-                  <span className="text-slate-400">Live</span> highlights what’s on the map right now.
-                </p>
-                <button
-                  type="button"
-                  className="absolute right-2 top-2 rounded-md p-1 text-slate-500 hover:bg-white/10 hover:text-slate-200"
-                  aria-label="Dismiss"
-                  onClick={() => {
-                    try {
-                      window.localStorage.setItem(FEED_TOOLBAR_HINT_KEY, "1");
-                    } catch {
-                      /* ignore */
-                    }
-                    setFeedToolbarHintOpen(false);
-                  }}
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-            ) : null}
             <div className="inline-flex items-center p-1">
               <button
                 type="button"
-                onClick={() => navigate("/feed")}
+                onPointerEnter={() => void onFeedPrefetch?.()}
+                onClick={() => {
+                  if (guest) {
+                    onGuestGate?.("feed");
+                    return;
+                  }
+                  void nav.start("feed", onFeedPrefetch, () => navigate("/feed"));
+                }}
+                aria-busy={nav.pending === "feed"}
                 className={cn(
                   "inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold",
                   "bg-primary text-primary-foreground shadow-[0_12px_36px_rgba(34,211,238,0.28)]",
                   "transition-[transform,box-shadow,filter] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
                   "hover:brightness-110 hover:-translate-y-[0.5px] active:scale-[0.99]",
-                  "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                  "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 )}
                 aria-label="Open feed — updates from players and games"
               >
-                <Rss className="size-4 shrink-0" aria-hidden />
+                <Rss
+                  className={cn("size-4 shrink-0", nav.pending === "feed" && "fun-rss-broadcasting")}
+                  aria-hidden
+                />
                 Feed
               </button>
               <div className="mx-1 h-7 w-px shrink-0 bg-white/12" aria-hidden />
@@ -541,7 +528,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   onClick={onLiveNowToggle}
                   className={cn(
                     "inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold border transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
-                    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0F1C]",
+                    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                     liveNowOpen
                       ? "border-orange-400/55 bg-orange-500/15 text-orange-200 shadow-[inset_0_0_0_1px_rgba(251,146,60,0.25)] hover:bg-orange-500/20"
                       : "border-orange-500/35 bg-transparent text-orange-300/95 hover:border-orange-400/50 hover:bg-orange-500/10",
@@ -560,6 +547,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
               </div>
             </div>
 
+            {guest ? null : (
             <button
               type="button"
               onClick={() => {
@@ -594,11 +582,13 @@ export const TopNavigation = (props: TopNavigationProps) => {
                     : "Public"}
               </span>
             </button>
+            )}
           </div>
 
           {/* Map tools: grouped column — alerts / chats (labels clarify icon-only controls) */}
           <div className="flex flex-col items-end gap-1">
             <div className="flex flex-col items-center gap-1.5">
+              {guest ? null : (
               <div className="flex flex-col items-center gap-0.5">
                 <Popover>
                   <PopoverTrigger asChild>
@@ -610,7 +600,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                     >
                       <Bell className="w-5 h-5" />
                       {notificationsUnreadCount > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-background shadow-sm">
                           {notificationsUnreadCount > 9 ? "9+" : notificationsUnreadCount}
                         </span>
                       )}
@@ -660,6 +650,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   </PopoverContent>
                 </Popover>
               </div>
+              )}
               {onOpenMessages ? (
                 <div className="flex flex-col items-center gap-0.5">
                   <button
@@ -671,7 +662,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                   >
                     <MessageCircle className="w-5 h-5" />
                     {messagesUnreadCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-[#0A0F1C] shadow-sm">
+                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center border-2 border-background shadow-sm">
                         {messagesUnreadCount > 9 ? "9+" : messagesUnreadCount}
                       </span>
                     )}
@@ -788,7 +779,13 @@ export const TopNavigation = (props: TopNavigationProps) => {
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             type="button"
-            onClick={onOpenProfile}
+            onClick={() => {
+              if (!onOpenProfile) return;
+              void nav.start("profile", onAccountPrefetch, onOpenProfile);
+            }}
+            onPointerEnter={onProfilePrefetch}
+            onTouchStart={onProfilePrefetch}
+            aria-busy={nav.pending === "profile"}
             className={cn(
               "relative size-20 rounded-full overflow-hidden transition-all duration-300",
               "border-2 border-white/30 bg-slate-900 shadow-[0_12px_36px_rgba(0,0,0,0.5)]",
@@ -801,12 +798,25 @@ export const TopNavigation = (props: TopNavigationProps) => {
             ) : (
               <UserRound className="size-10 text-slate-400" />
             )}
-            <div className="absolute inset-0 border border-primary/10 rounded-full pointer-events-none" />
+            {/* Already here for the avatar's inner edge — it doubles as the progress arc. */}
+            <div
+              className={cn(
+                "absolute inset-0 rounded-full pointer-events-none border",
+                nav.pending === "profile"
+                  ? "border-2 fun-avatar-ring-loading"
+                  : "border-primary/10",
+              )}
+            />
           </motion.button>
           
           {/* Favorite Sport Badge Overlay - no background, just the emoji */}
           {favoriteSport && (
-            <div className="absolute -top-1 -right-1 flex items-center justify-center text-3xl drop-shadow-xl z-10 pointer-events-none">
+            <div
+              className={cn(
+                "absolute -top-1 -right-1 flex items-center justify-center text-3xl drop-shadow-xl z-10 pointer-events-none",
+                nav.pending === "profile" && "fun-sport-badge-spinning",
+              )}
+            >
               {sportEmojiFor(favoriteSport)}
             </div>
           )}

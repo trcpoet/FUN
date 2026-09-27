@@ -1,3 +1,13 @@
+// UNREFERENCED. Nothing in the app imports this: MapboxMap hands its venue GeoJSON
+// straight to a Mapbox GeoJSON source with `cluster: true` and lets GL do the
+// clustering natively, which is why `clusterVenuePoints` no longer runs anywhere.
+//
+// It is kept, tested, as the fallback for a clustering strategy GL cannot express
+// (the footprint polygons). Do not repurpose it to run `enrichVenueGeoJSON` off-thread:
+// that was measured at 0.8 ms for a thousand venues unfiltered, and the filtered
+// path's 24-48 ms was a quadratic park scan, now indexed down to ~1 ms in
+// venueClusterEngine.ts. Two structured clones and a frame of latency cost more than
+// the work they would move.
 // Thin wrapper that runs venue clustering in a Web Worker when possible,
 // and quietly falls back to running it on the main thread when not.
 import { clusterVenuePoints, DEFAULT_VENUE_CLUSTER_OPTS } from "./venueClusterEngine";

@@ -87,6 +87,8 @@ export function VenueCommentsSection({ venue, currentUserId, ensureSession }: Pr
   };
 
   const like = async (comment: VenueCommentRow) => {
+    // A guest's heart asks for an account rather than failing at the RLS layer.
+    if (ensureSession && !(await ensureSession())) return;
     const nextLiked = !comment.liked_by_me;
     // Optimistic so the heart feels instant; reconciled against the server below.
     setRows((r) =>

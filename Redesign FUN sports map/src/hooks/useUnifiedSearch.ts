@@ -35,6 +35,8 @@ export function useUnifiedSearch(opts: {
   anchorLng: number | null;
   excludeUserId: string | null;
   games: GameRow[];
+  /** People are members-only; a guest searches places and sports. Defaults to true. */
+  includePeople?: boolean;
 }) {
   const [placesLoading, setPlacesLoading] = useState(false);
   const [peopleLoading, setPeopleLoading] = useState(false);
@@ -45,7 +47,8 @@ export function useUnifiedSearch(opts: {
   const peopleReqGen = useRef(0);
 
   const q = opts.debouncedQuery.trim();
-  const playersNearMe = PLAYERS_NEAR_ME_RE.test(q);
+  const includePeople = opts.includePeople ?? true;
+  const playersNearMe = includePeople && PLAYERS_NEAR_ME_RE.test(q);
 
   const sportHits: SportSearchHitWithCount[] = useMemo(() => {
     if (playersNearMe) return [];
@@ -123,6 +126,14 @@ export function useUnifiedSearch(opts: {
   useEffect(() => {
     const gen = ++peopleReqGen.current;
 
+    if (!includePeople) {
+      // Signed out. `search_profiles` and `get_profiles_nearby` are members-only
+      // — this used to call them anyway and fail quietly on every keystroke.
+      setPeople([]);
+      setPeopleLoading(false);
+      return;
+    }
+
     if (playersNearMe) {
       if (!supabase || opts.anchorLat == null || opts.anchorLng == null) {
         setPeople([]);
@@ -171,7 +182,7 @@ export function useUnifiedSearch(opts: {
       setPeople(rows);
       setPeopleLoading(false);
     });
-  }, [q, playersNearMe, opts.anchorLat, opts.anchorLng, opts.excludeUserId]);
+  }, [q, playersNearMe, includePeople, opts.anchorLat, opts.anchorLng, opts.excludeUserId]);
 
   const anyLoading = placesLoading || peopleLoading;
   const hasAnyResults = places.length > 0 || sportHits.length > 0 || people.length > 0;

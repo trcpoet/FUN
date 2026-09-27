@@ -8,6 +8,7 @@
 import { supabase } from "./supabase";
 import { isMissingRpc } from "./rpcErrors";
 import { retryTransient } from "./retryTransient";
+import { isGuestSession, pickReadRpc } from "./guestRpc";
 import { subscribeWithRetry } from "./realtimeRetry";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
 import { parseGender, type Gender } from "./gamePreferenceOptions";
@@ -114,10 +115,12 @@ export async function fetchNotesNearby(params: {
   limit?: number;
 }): Promise<{ data: MapNoteRow[]; error: Error | null }> {
   if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  // Guests read the anonymised wrapper: public notes only, no author.
+  const fn = await pickReadRpc("get_notes_nearby", "get_guest_notes_nearby");
   // Retried for the same reason as the map's game reads: a 5xx from the API layer is not an
   // answer about which notes are nearby.
   const { data, error } = await retryTransient(() =>
-    supabase!.rpc("get_notes_nearby", {
+    supabase!.rpc(fn, {
       p_lat: params.lat,
       p_lng: params.lng,
       p_radius_km: params.radiusKm ?? 10,
@@ -169,6 +172,42 @@ export async function addNoteComment(params: {
   }
   return { data: (data as MapNoteCommentRow) ?? null, error: error ? new Error(error.message) : null };
 }
+
+// The post-game loop (did it happen / rate / run it back) lives in `./postGame.ts`.
+export {
+  fetchGameOutcomeSummary,
+  reportGameOutcome,
+  fetchRateableTeammates,
+  rateTeammate,
+  fetchRematchPoll,
+  createRematchPoll,
+  voteRematchPoll,
+  closeRematchPoll,
+} from "./postGame";
+export type {
+  GameOutcome,
+  GameOutcomeSummary,
+  RateableTeammate,
+  RematchPoll,
+} from "./postGame";
+
+// Statuses live in `./status.ts`. Re-exported so components reach them through
+// the centralized layer, per the rule in CLAUDE.md. (Profile and PublicProfile
+// still import that module directly — worth moving when they are next touched.)
+export { upsertMyStatus, getRecentStatuses, getLatestStatus } from "./status";
+export type { StatusRow } from "./status";
+
+// The public conversation on a game lives in `./gameSocial.ts` — same reason as
+// the re-exports below: components import data helpers from here only.
+export {
+  fetchGameComments,
+  addGameComment,
+  deleteGameComment,
+  toggleGameCommentLike,
+  toggleGameLike,
+  fetchGameSocialCounts,
+} from "./gameSocial";
+export type { GameCommentRow, GameSocialCounts } from "./gameSocial";
 
 // Map-notes inbox + realtime live in `./mapNotes.ts`. Re-export here so the
 // rest of the app keeps importing data helpers from the centralized API layer.
@@ -230,8 +269,17 @@ export type UnifiedFeedItem =
       visibility: GameVisibility;
       comment_count: number;
       created_by: string | null;
-      /** Always 0 — games have no like feature, so there is no `liked_by_me` either. */
       like_count: number;
+      liked_by_me: boolean;
+      /**
+       * Everything a joinable card renders, from `unified_feed_games_v2`.
+       *
+       * One jsonb column rather than nine on the union, because notes and
+       * statuses would carry eight nulls each and because it keeps "this is
+       * about a game" legible. Null when the RPC predates that migration, which
+       * is exactly the case the feed card falls back for.
+       */
+      game: FeedGameMeta | null;
     }
   | {
       kind: "status";
@@ -248,6 +296,64 @@ export type UnifiedFeedItem =
       like_count: number;
       liked_by_me: boolean;
     };
+
+/** The `game` object on a unified-feed game row. */
+export type FeedGameMeta = {
+  starts_at: string | null;
+  ends_at: string | null;
+  ended_at: string | null;
+  live_started_at: string | null;
+  duration_minutes: number | null;
+  status: "open" | "full" | "live" | "completed" | "cancelled" | null;
+  location_label: string | null;
+  spots_needed: number | null;
+  participant_count: number | null;
+  substitute_count: number | null;
+  spots_remaining: number | null;
+  distance_km: number | null;
+  requirements: Record<string, unknown> | null;
+  joined_by_me: boolean | null;
+};
+
+/**
+ * A feed game row as the `GameRow` the rest of the app reasons with.
+ *
+ * `gameViewerRole`, `GameActionBar` and every `mapGameTimer` predicate take a
+ * `GameRow`; the feed has the same facts in a different shape. Converting once
+ * here is what lets a feed card offer the identical Join/Start/End behaviour as
+ * the map popup, rather than a second implementation of the same rules.
+ */
+export function feedItemToGameRow(
+  item: Extract<UnifiedFeedItem, { kind: "game" }>,
+): GameRow {
+  const g = item.game;
+  const participants = g?.participant_count ?? 0;
+  const remaining = g?.spots_remaining ?? 0;
+  return {
+    id: item.id,
+    title: item.title?.trim() || "Pickup game",
+    sport: item.sport ?? "",
+    spots_needed: g?.spots_needed ?? participants + remaining,
+    participant_count: participants,
+    substitute_count: g?.substitute_count ?? 0,
+    spots_remaining: remaining,
+    starts_at: g?.starts_at ?? null,
+    created_by: item.created_by,
+    created_at: item.created_at,
+    status: g?.status ?? undefined,
+    live_started_at: g?.live_started_at ?? null,
+    ended_at: g?.ended_at ?? null,
+    duration_minutes: g?.duration_minutes ?? null,
+    ends_at: g?.ends_at ?? null,
+    visibility: item.visibility,
+    location_label: g?.location_label ?? null,
+    description: item.body,
+    requirements: g?.requirements ?? null,
+    distance_km: g?.distance_km ?? 0,
+    lat: item.lat,
+    lng: item.lng,
+  };
+}
 
 /** Games + map notes within a tight radius (default 25 km) for Discovery “Live”. */
 export type LiveFeedItem = Extract<UnifiedFeedItem, { kind: "game" | "note" }>;
@@ -711,6 +817,96 @@ export async function getGamesNearby(
     radius_km: radiusKm,
   });
   return { data: (data as GameRow[]) ?? null, error: error ? new Error(error.message) : null };
+}
+
+/** A game from `get_suggested_games`: a `GameRow` plus why it was suggested. */
+export type SuggestedGameRow = GameRow & {
+  /** 0-1. Sport match 40%, time-to-start 25%, distance 20%, spots 10%, host trust 5%. */
+  match_score: number;
+  /** True when the sport is one of yours — what "In your sports" is allowed to claim. */
+  sport_match: boolean;
+  host_sportsmanship: number | null;
+};
+
+/**
+ * Games near you, ranked for you.
+ *
+ * One scorer behind both the map's "For you" chip and Explore's shelf, so those
+ * two surfaces cannot disagree about what is worth showing. Returns nothing for
+ * a guest — a suggestion needs someone to suggest to — and nothing at all until
+ * `20260927150000_suggested_games` is applied, which the callers treat as "no
+ * suggestions" rather than as an error.
+ */
+export async function getSuggestedGames(params: {
+  lat: number;
+  lng: number;
+  radiusKm?: number;
+  limit?: number;
+}): Promise<{ data: SuggestedGameRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_suggested_games", {
+    p_lat: params.lat,
+    p_lng: params.lng,
+    p_radius_km: params.radiusKm ?? 25,
+    p_limit: params.limit ?? 20,
+  });
+  if (error) {
+    if (isMissingRpc(error)) return { data: [], error: null };
+    return { data: [], error: new Error(error.message) };
+  }
+  return { data: (data as SuggestedGameRow[]) ?? [], error: null };
+}
+
+/** A game hosted at (or very near) a venue. The "played here" history. */
+export type VenueGameRow = {
+  id: string;
+  title: string | null;
+  sport: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  ended_at: string | null;
+  status: string | null;
+  spots_needed: number | null;
+  participant_count: number;
+  distance_m: number;
+  is_past: boolean;
+};
+
+/**
+ * What people have actually played at this place.
+ *
+ * OSM records what a venue is tagged as, not what happens there — a park tagged
+ * `leisure=park` may have three hoops, a `pitch` may be locked every evening.
+ * The games hosted at these coordinates are the only first-hand evidence.
+ */
+export async function getGamesAtVenue(params: {
+  lat: number;
+  lng: number;
+  radiusM?: number;
+  includeCompleted?: boolean;
+  limit?: number;
+}): Promise<{ data: VenueGameRow[]; error: Error | null }> {
+  if (!supabase) return { data: [], error: new Error("Supabase not configured") };
+  const guest = await isGuestSession();
+  const { data, error } = guest
+    ? await supabase.rpc("get_guest_games_at_venue", {
+        p_lat: params.lat,
+        p_lng: params.lng,
+        p_radius_m: params.radiusM ?? 150,
+        p_limit: params.limit ?? 30,
+      })
+    : await supabase.rpc("get_games_at_venue", {
+        p_lat: params.lat,
+        p_lng: params.lng,
+        p_radius_m: params.radiusM ?? 150,
+        p_include_completed: params.includeCompleted ?? true,
+        p_limit: params.limit ?? 30,
+      });
+  if (error) {
+    if (isMissingRpc(error)) return { data: [], error: null };
+    return { data: [], error: new Error(error.message) };
+  }
+  return { data: (data as VenueGameRow[]) ?? [], error: null };
 }
 
 export async function createGame(params: {

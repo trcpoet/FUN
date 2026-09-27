@@ -61,7 +61,8 @@ import { useChatTrust, type ChatTrust, trustBadgeLabel } from "../../hooks/useCh
 import { NoteCommentLikeButton } from "./feed/NoteCommentLikeButton";
 import { GameActionBar } from "./game/GameActionBar";
 import { gameViewerRole } from "../lib/gameViewerRole";
-import { threadGameRow } from "../lib/threadGameRow";
+import { inboxGameRow, threadGameRow } from "../lib/threadGameRow";
+import { PostGamePanel } from "./chat/PostGamePanel";
 import { toast } from "sonner";
 
 export type GameThreadFocus = {
@@ -73,6 +74,12 @@ export type GameThreadFocus = {
   startsAt?: string | null;
   /** Scheduled end (`starts_at + duration_minutes`, ISO). */
   endsAt?: string | null;
+  /** When the host pressed End (ISO). Beats every scheduled window. */
+  endedAt?: string | null;
+  /** When the host pressed Start (ISO). The only end anchor an untimed game has. */
+  liveStartedAt?: string | null;
+  /** Lifecycle status, when the opener knew it. Falls back to the inbox row. */
+  status?: GameRow["status"];
   durationMinutes?: number | null;
   /** For untimed games: map TTL countdown (from `games.created_at`). */
   createdAt?: string | null;
@@ -83,7 +90,6 @@ export type GameThreadFocus = {
   /** Drives chat membership UX (stranger badges, invite panel, etc.). */
   visibility?: GameVisibility | null;
   /** Sharable token for invite-only games (`/g/<token>`). */
-  inviteToken?: string | null;
   /** Coords + label so "Plan rematch" pre-fills location without an extra fetch. */
   lat?: number | null;
   lng?: number | null;
@@ -152,19 +158,26 @@ type GameMessengerSheetProps = {
   onDeleteHostedGame?: (game: GameRow) => Promise<boolean> | void;
   /** Idle-prefetched rows so the list can paint before network round-trips. */
   inboxBootstrap?: GameInboxRow[] | null;
+  /**
+   * Bump to force an inbox reload. The app owns the lifecycle RPCs (start, end),
+   * and their result lands in the row this sheet reasons with.
+   */
+  inboxRefreshKey?: number;
   dmInboxBootstrap?: DmInboxRow[] | null;
   /** Caller opens CreateGameModal pre-filled from the ended game's metadata. */
   onPlanRematch?: (payload: PlanRematchPayload) => void;
 };
 
-/** Decide whether an inbox row should be in the "Past games" section. */
+/**
+ * Decide whether an inbox row should be in the "Past games" section.
+ *
+ * This used to be a private copy of the rules that checked `status` and `ends_at`
+ * only, so a game the host ended early — `ended_at` set, `ends_at` still an hour
+ * out — stayed in the active list while its own thread header called it over.
+ * One predicate now answers for both.
+ */
 function isInboxRowEnded(row: GameInboxRow, nowMs: number): boolean {
-  if (row.status === "completed" || row.status === "cancelled") return true;
-  if (row.ends_at) {
-    const t = Date.parse(row.ends_at);
-    if (!Number.isNaN(t) && t <= nowMs) return true;
-  }
-  return false;
+  return isGameEnded(inboxGameRow(row), nowMs);
 }
 
 /** Split inbox rows into "still active" and "ended" buckets, preserving sort order. */
@@ -398,6 +411,7 @@ export function GameMessengerSheet({
   onEndHostedGame,
   onDeleteHostedGame,
   inboxBootstrap = null,
+  inboxRefreshKey = 0,
   dmInboxBootstrap = null,
   onPlanRematch,
 }: GameMessengerSheetProps) {
@@ -559,6 +573,21 @@ export function GameMessengerSheet({
     }
     loadInbox();
   }, [open, focusThread, mode, loadInbox, inboxBootstrap, joinedGameIds]);
+
+  /**
+   * A lifecycle change elsewhere in the app invalidates the inbox.
+   *
+   * Unlike the effect above, this deliberately ignores `focusThread` and `mode`:
+   * the thread you are looking at is exactly the one whose row went stale when
+   * you pressed End on it.
+   */
+  const seenRefreshKey = useRef(inboxRefreshKey);
+  useEffect(() => {
+    if (seenRefreshKey.current === inboxRefreshKey) return;
+    seenRefreshKey.current = inboxRefreshKey;
+    if (!open) return;
+    loadInbox();
+  }, [inboxRefreshKey, open, loadInbox]);
 
   const loadDmInbox = useCallback(() => {
     setDmInboxLoading(true);
@@ -1423,12 +1452,14 @@ export function GameMessengerSheet({
                         sport: row.sport,
                         startsAt: row.starts_at,
                         endsAt: row.ends_at ?? null,
+                        endedAt: row.ended_at ?? null,
+                        liveStartedAt: row.live_started_at ?? null,
+                        status: row.status,
                         durationMinutes: row.duration_minutes ?? null,
                         participantCount: row.participant_count,
                         spotsRemaining: row.spots_remaining,
                         createdBy: row.created_by ?? null,
                         visibility: row.visibility ?? null,
-                        inviteToken: row.invite_token ?? null,
                         lat: row.lat ?? null,
                         lng: row.lng ?? null,
                         locationLabel: row.location_label ?? null,
@@ -1820,7 +1851,6 @@ export function GameMessengerSheet({
                 <InviteAdminPanel
                   gameId={focusThread.gameId}
                   visibility={focusThread.visibility ?? inboxRow?.visibility ?? null}
-                  inviteToken={focusThread.inviteToken ?? inboxRow?.invite_token ?? null}
                   isHost={
                     currentUserId != null &&
                     (focusThread.createdBy ?? inboxRow?.created_by ?? null) === currentUserId
@@ -2010,6 +2040,19 @@ export function GameMessengerSheet({
                     );
                   })
                 )}
+                {/* The post-game loop, at the bottom of the thread where the
+                    conversation ends: did it happen, how were they, run it back.
+                    Renders nothing until the game is over, and nothing at all
+                    without 20260927160000_post_game_loop applied. */}
+                {focusThread?.kind === "game" && schedule.ended && currentUserId ? (
+                  <PostGamePanel
+                    gameId={focusThread.gameId}
+                    hostId={threadHostId}
+                    currentUserId={currentUserId}
+                    onPlanRematch={onPlanRematch ? handlePlanRematch : undefined}
+                    className="mt-2"
+                  />
+                ) : null}
                 <div ref={listEndRef} />
                 </div>
               </div>

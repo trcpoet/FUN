@@ -4,8 +4,13 @@ import {
   circlePolygon,
   enrichVenueGeoJSON,
   clusterVenuePoints,
+  buildFilteredPitchIndex,
+  nearestFilteredPitchIconId,
+  PARK_FILTER_ICON_RADIUS_M,
   DEFAULT_VENUE_CLUSTER_OPTS,
 } from "./venueClusterEngine";
+import { primaryVenueSportSuffix } from "./venueSportIcon";
+import { getGameMapboxIconId, resolveSportMapboxSuffix } from "../map/gameSportIcons";
 import type { SportsVenueFeature, SportsVenueGeoJSON } from "./sportsVenueTypes";
 import { VENUE_AREA_RADIUS_METERS } from "../map/mapConfig";
 
@@ -324,5 +329,139 @@ describe("DEFAULT_VENUE_CLUSTER_OPTS", () => {
     expect(DEFAULT_VENUE_CLUSTER_OPTS.maxDistanceMeters).toBe(80);
     expect(DEFAULT_VENUE_CLUSTER_OPTS.venueAreaRadiusMeters).toBe(VENUE_AREA_RADIUS_METERS);
     expect(DEFAULT_VENUE_CLUSTER_OPTS.venueAreaRadiusMeters).toBe(42);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The indexed park scan
+// ---------------------------------------------------------------------------
+
+/**
+ * The scan exactly as it read before it was indexed, kept as the oracle.
+ *
+ * The rule it encodes is a product decision — a filtered park shows the icon of the
+ * nearest matching pitch inside PARK_FILTER_ICON_RADIUS_M — and the index is only
+ * ever allowed to be a faster way to arrive at the same answer.
+ */
+function naiveParkIcon(
+  parkLng: number,
+  parkLat: number,
+  allPoints: SportsVenueFeature[],
+  filterSuffixes: Set<string>,
+): string | null {
+  const R = 6378137;
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const dist = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const dLat = rad(lat2 - lat1);
+    const dLng = rad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+  let bestSuffix: string | null = null;
+  let bestDist = Infinity;
+  for (const p of allPoints) {
+    if (p.properties.leisure === "park") continue;
+    const suffix = primaryVenueSportSuffix(p.properties.sport, p.properties.leisure);
+    if (!filterSuffixes.has(suffix)) continue;
+    const [lng, lat] = p.geometry.coordinates;
+    const d = dist(parkLat, parkLng, lat, lng);
+    if (d <= PARK_FILTER_ICON_RADIUS_M && d < bestDist) {
+      bestDist = d;
+      bestSuffix = suffix;
+    }
+  }
+  return bestSuffix ? getGameMapboxIconId(bestSuffix) : null;
+}
+
+const BENCH_LEISURES = ["pitch", "park", "sports_centre", "swimming_pool", "track", "fitness_centre"];
+const BENCH_SPORTS = ["basketball", "soccer", "tennis", "swimming", "running", "volleyball", undefined];
+
+/** A viewport's worth of venues, deterministic so a failure is reproducible. */
+function synthViewport(n: number, latBase: number): SportsVenueGeoJSON {
+  let seed = 12345;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const features: SportsVenueFeature[] = [];
+  for (let i = 0; i < n; i++) {
+    features.push(
+      mkVenue({
+        id: `n/${i}`,
+        lng: -97.1 + (rnd() - 0.5) * 0.25,
+        lat: latBase + (rnd() - 0.5) * 0.25,
+        sport: BENCH_SPORTS[i % BENCH_SPORTS.length],
+        leisure: BENCH_LEISURES[i % BENCH_LEISURES.length],
+      }),
+    );
+  }
+  return fc(features);
+}
+
+describe("nearestFilteredPitchIconId", () => {
+  // Cells are sized in degrees, and a degree of longitude shrinks towards the poles,
+  // so the equator / mid-latitude / high-latitude spread is the case that matters.
+  it.each([
+    ["the equator", 2.5],
+    ["mid latitudes", 32.7],
+    ["high latitudes", 64.1],
+  ])("gives every park the same icon as the unindexed scan at %s", (_label, latBase) => {
+    const points = synthViewport(1200, latBase as number).features;
+    for (const filters of [["Basketball"], ["Basketball", "Soccer", "Tennis"], ["Swimming"]]) {
+      const suffixes = new Set(filters.map(resolveSportMapboxSuffix));
+      const index = buildFilteredPitchIndex(points, suffixes);
+      let parksChecked = 0;
+      for (const f of points) {
+        if (f.properties.leisure !== "park") continue;
+        const [lng, lat] = f.geometry.coordinates;
+        expect(nearestFilteredPitchIconId(index, lng, lat)).toBe(
+          naiveParkIcon(lng, lat, points, suffixes),
+        );
+        parksChecked++;
+      }
+      expect(parksChecked).toBeGreaterThan(100);
+    }
+  });
+
+  it("finds nothing when no pitch is in range", () => {
+    const points = [
+      mkVenue({ id: "far", lng: 0.1, lat: 0.1, sport: "basketball", leisure: "pitch" }),
+    ];
+    const index = buildFilteredPitchIndex(points, new Set([resolveSportMapboxSuffix("Basketball")]));
+    // ~15 km away: well outside the 300 m radius, and outside the 3x3 neighbourhood.
+    expect(nearestFilteredPitchIconId(index, 0, 0)).toBeNull();
+  });
+
+  it("finds a pitch that sits in a neighbouring cell", () => {
+    // ~200 m north of the park: inside the radius, but on the other side of a cell edge
+    // for most cell alignments. This is the case a naive same-cell lookup gets wrong.
+    const points = [
+      mkVenue({ id: "near", lng: 0, lat: 0.0018, sport: "basketball", leisure: "pitch" }),
+    ];
+    const index = buildFilteredPitchIndex(points, new Set([resolveSportMapboxSuffix("Basketball")]));
+    expect(nearestFilteredPitchIconId(index, 0, 0)).toBe("fun-game-sport-basketball");
+  });
+
+  it("does not cost meaningfully more than enriching without a filter", () => {
+    // The guard is a ratio, not a clock: an absolute ceiling either fails on a
+    // loaded CI box or is too loose to catch anything. Filtering adds the park
+    // scan and nothing else, so the two paths walk the same points once each.
+    // Quadratic, this ratio was ~170x at 3000 venues (446 ms against 2.6 ms);
+    // indexed it is ~2x. Ten leaves room for a slow machine and still fails
+    // loudly the moment the scan goes back to comparing every pair.
+    const gj = synthViewport(3000, 32.7);
+    const median = (fn: () => void) => {
+      fn();
+      const ts: number[] = [];
+      for (let i = 0; i < 7; i++) {
+        const t0 = performance.now();
+        fn();
+        ts.push(performance.now() - t0);
+      }
+      return ts.sort((a, b) => a - b)[3]!;
+    };
+    const unfiltered = median(() => void enrichVenueGeoJSON(gj, []));
+    const filtered = median(() => void enrichVenueGeoJSON(gj, ["Basketball", "Soccer", "Tennis"]));
+    // Guard against a sub-millisecond denominator turning noise into a ratio.
+    expect(filtered / Math.max(unfiltered, 0.5)).toBeLessThan(10);
   });
 });

@@ -14,6 +14,7 @@
  *    "not deployed" — that mix-up previously blanked the notes layer.
  */
 import { supabase } from "./supabase";
+import { isGuestSession, pickReadRpc } from "./guestRpc";
 import type { VenueSelection } from "../app/components/mapboxMapTypes";
 import { isMissingRpc } from "./rpcErrors";
 
@@ -103,6 +104,11 @@ async function hydrateAuthors<T extends { user_id: string }>(
   if (!supabase || rows.length === 0) {
     return rows.map((r) => ({ ...r, authorName: null, authorAvatarUrl: null }));
   }
+  // Guests are shown what was written, never who wrote it — and `profiles` is
+  // not readable signed out, so this would be a round-trip for an empty result.
+  if (await isGuestSession()) {
+    return rows.map((r) => ({ ...r, authorName: null, authorAvatarUrl: null }));
+  }
   const ids = [...new Set(rows.map((r) => r.user_id))];
   const { data: profs } = await supabase
     .from("profiles")
@@ -133,7 +139,8 @@ export async function fetchVenueReviews(params: {
   offset?: number;
 }): Promise<{ data: VenueReviewRow[]; summary: VenueReviewSummary; error: Error | null }> {
   if (!supabase) return { data: [], summary: EMPTY_SUMMARY, error: NOT_CONFIGURED() };
-  const { data, error } = await supabase.rpc("get_venue_reviews", {
+  const fn = await pickReadRpc("get_venue_reviews", "get_guest_venue_reviews");
+  const { data, error } = await supabase.rpc(fn, {
     p_venue_id: params.venueId,
     p_limit: params.limit ?? 20,
     p_offset: params.offset ?? 0,
@@ -195,7 +202,8 @@ export async function fetchVenueComments(params: {
   offset?: number;
 }): Promise<{ data: VenueCommentRow[]; error: Error | null }> {
   if (!supabase) return { data: [], error: NOT_CONFIGURED() };
-  const { data, error } = await supabase.rpc("get_venue_comments_with_likes", {
+  const fn = await pickReadRpc("get_venue_comments_with_likes", "get_guest_venue_comments");
+  const { data, error } = await supabase.rpc(fn, {
     p_venue_id: params.venueId,
     p_limit: params.limit ?? 50,
     p_offset: params.offset ?? 0,
@@ -260,7 +268,8 @@ export async function fetchVenuePhotos(
   venueId: string
 ): Promise<{ data: VenuePhotoRow[]; error: Error | null }> {
   if (!supabase) return { data: [], error: NOT_CONFIGURED() };
-  const { data, error } = await supabase.rpc("get_venue_photos", {
+  const fn = await pickReadRpc("get_venue_photos", "get_guest_venue_photos");
+  const { data, error } = await supabase.rpc(fn, {
     p_venue_id: venueId,
     p_limit: 30,
   });

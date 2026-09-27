@@ -12,6 +12,7 @@ import {
 import { visibilityEnumToLabel } from "../../../lib/gamePreferenceOptions";
 import { parseRequirements } from "../../lib/gameFilters";
 import { formatCoords } from "../../lib/venueInfoHelpers";
+import { squadCountLabel } from "../../../lib/guestAccess";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { cn } from "../ui/utils";
 
@@ -25,11 +26,29 @@ import { cn } from "../ui/utils";
  * The roster fetch is lazy by construction — this component only mounts once the details view
  * is opened, so a viewer who never taps ℹ️ never pays for it.
  */
-export function GameDetailsView({ game, nowMs }: { game: GameRow; nowMs: number }) {
+export function GameDetailsView({
+  game,
+  nowMs,
+  isGuest = false,
+  onRequestSignIn,
+}: {
+  game: GameRow;
+  nowMs: number;
+  /** Signed out: counts yes, names no. */
+  isGuest?: boolean;
+  onRequestSignIn?: () => void;
+}) {
   const [members, setMembers] = useState<GameChatMember[] | null>(null);
   const [rosterFailed, setRosterFailed] = useState(false);
 
   useEffect(() => {
+    if (isGuest) {
+      // Not attempted rather than attempted-and-empty: the roster read is closed
+      // to guests server-side, and a request that can only fail is noise.
+      setMembers(null);
+      setRosterFailed(false);
+      return;
+    }
     let cancelled = false;
     setMembers(null);
     setRosterFailed(false);
@@ -41,7 +60,7 @@ export function GameDetailsView({ game, nowMs }: { game: GameRow; nowMs: number 
     return () => {
       cancelled = true;
     };
-  }, [game.id]);
+  }, [game.id, isGuest]);
 
   const rules = parseRequirements(game.requirements);
   const ruleChips = [
@@ -69,7 +88,13 @@ export function GameDetailsView({ game, nowMs }: { game: GameRow; nowMs: number 
       </Fact>
 
       <Fact icon={<Users2 className="size-3.5" aria-hidden />} label="Squad">
-        <Squad game={game} members={members} failed={rosterFailed} />
+        <Squad
+          game={game}
+          members={members}
+          failed={rosterFailed}
+          isGuest={isGuest}
+          onRequestSignIn={onRequestSignIn}
+        />
       </Fact>
 
       <Fact icon={<ShieldCheck className="size-3.5" aria-hidden />} label="Who can play">
@@ -185,17 +210,40 @@ function Squad({
   game,
   members,
   failed,
+  isGuest = false,
+  onRequestSignIn,
 }: {
   game: GameRow;
   members: GameChatMember[] | null;
   failed: boolean;
+  isGuest?: boolean;
+  onRequestSignIn?: () => void;
 }) {
   const filled = game.participant_count ?? 0;
   const countLine =
-    `${filled} of ${game.spots_needed} in` +
+    squadCountLabel(filled, game.spots_needed) +
     (game.substitute_count ? ` · ${game.substitute_count} on the waitlist` : "");
 
-  // Names may be unreadable (profile visibility, a signed-out viewer) — the count still is.
+  // A guest sees how full it is, which is what decides whether to turn up, and is
+  // offered the roster as a reason to join rather than told off for not having one.
+  if (isGuest) {
+    return (
+      <>
+        <p className="text-xs text-slate-200">{countLine}</p>
+        {onRequestSignIn ? (
+          <button
+            type="button"
+            onClick={onRequestSignIn}
+            className="mt-1 rounded text-[11px] font-medium text-emerald-300 underline-offset-4 transition hover:text-emerald-200 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+          >
+            Sign up to see who's playing
+          </button>
+        ) : null}
+      </>
+    );
+  }
+
+  // Names may be unreadable (profile visibility) — the count still is.
   if (failed || (members && members.length === 0)) {
     return <p className="text-xs text-slate-200">{countLine}</p>;
   }

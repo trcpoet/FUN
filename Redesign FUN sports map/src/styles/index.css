@@ -196,3 +196,162 @@ button.header-map-btn:active {
     animation: none;
   }
 }
+
+/* —— Navigation busy states ————————————————————————————————————————————
+ *
+ * Feedback on the control that was pressed, for the moment between the tap and
+ * a lazy route's chunk arriving. Both are driven by `useNavLoading`, which does
+ * not show them at all unless the wait is real (>110ms).
+ */
+
+/* Feed: the Rss arcs broadcast outward from their dot, like a signal going out.
+   Lucide's Rss is two <path> arcs plus the <circle> dot, so the dot holds still
+   and only the arcs move. */
+@keyframes fun-rss-wave {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.88);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.fun-rss-broadcasting path {
+  transform-origin: 5px 19px; /* the dot, in the icon's 24×24 viewBox */
+  animation: fun-rss-wave 880ms var(--ease-in-out, ease-in-out) infinite;
+}
+.fun-rss-broadcasting path:nth-of-type(2) {
+  animation-delay: 150ms;
+}
+
+/* Profile: the favourite-sport badge spins, and the ring already inside the
+   avatar becomes the progress arc rather than adding a second spinner on top. */
+@keyframes fun-sport-badge-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.fun-sport-badge-spinning {
+  animation: fun-sport-badge-spin 900ms linear infinite;
+}
+.fun-avatar-ring-loading {
+  border-color: rgba(34, 211, 238, 0.18);
+  border-top-color: var(--primary, #22d3ee);
+  animation: fun-sport-badge-spin 900ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fun-rss-broadcasting path,
+  .fun-sport-badge-spinning,
+  .fun-avatar-ring-loading {
+    animation: none;
+  }
+  /* Still say "working" without moving: hold the lit state. */
+  .fun-rss-broadcasting path {
+    opacity: 0.6;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Range slider (ui/RangeSlider.tsx) — black track, grey fill.
+ *
+ * The two vendor track pseudo-elements cannot be combined into one selector:
+ * a rule list containing an unknown pseudo-element is dropped whole, so
+ * WebKit and Gecko get their own copies of the same declarations.
+ * ------------------------------------------------------------------------ */
+
+.fun-range {
+  --fun-range-track-h: 6px;
+  --fun-range-thumb-d: 20px;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  /* Enough room for the thumb; the input's own box is otherwise track-height. */
+  height: var(--fun-range-thumb-d);
+  background: transparent;
+  cursor: pointer;
+  touch-action: pan-y; /* let a vertical drag scroll the sheet, horizontal is ours */
+}
+
+.fun-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.fun-range:focus {
+  outline: none;
+}
+
+/* The fill is a hard-stop gradient at the current value: one paint, no extra
+   element, and it looks identical in every engine. */
+.fun-range::-webkit-slider-runnable-track {
+  height: var(--fun-range-track-h);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--fun-range-fill) 0 var(--fun-range-pct),
+    var(--fun-range-track) var(--fun-range-pct) 100%
+  );
+}
+
+.fun-range::-moz-range-track {
+  height: var(--fun-range-track-h);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--fun-range-fill) 0 var(--fun-range-pct),
+    var(--fun-range-track) var(--fun-range-pct) 100%
+  );
+}
+
+.fun-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--fun-range-thumb-d);
+  height: var(--fun-range-thumb-d);
+  border-radius: 999px;
+  border: none;
+  background: var(--fun-range-thumb);
+  /* WebKit centres the thumb on the input box, not the track. */
+  margin-top: calc((var(--fun-range-track-h) - var(--fun-range-thumb-d)) / 2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+  transition: box-shadow var(--dur-press) var(--ease-out), transform var(--dur-press) var(--ease-out);
+}
+
+.fun-range::-moz-range-thumb {
+  width: var(--fun-range-thumb-d);
+  height: var(--fun-range-thumb-d);
+  border-radius: 999px;
+  border: none;
+  background: var(--fun-range-thumb);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+  transition: box-shadow var(--dur-press) var(--ease-out), transform var(--dur-press) var(--ease-out);
+}
+
+/* Teal only where it means "you are acting on this". */
+.fun-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(0, 242, 254, 0.45), 0 2px 8px rgba(0, 0, 0, 0.55);
+}
+.fun-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px rgba(0, 242, 254, 0.45), 0 2px 8px rgba(0, 0, 0, 0.55);
+}
+
+.fun-range:active:not(:disabled)::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+.fun-range:active:not(:disabled)::-moz-range-thumb {
+  transform: scale(1.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fun-range::-webkit-slider-thumb,
+  .fun-range::-moz-range-thumb {
+    transition: none;
+  }
+  .fun-range:active:not(:disabled)::-webkit-slider-thumb,
+  .fun-range:active:not(:disabled)::-moz-range-thumb {
+    transform: none;
+  }
+}

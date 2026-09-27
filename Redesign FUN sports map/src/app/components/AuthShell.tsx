@@ -202,21 +202,21 @@ export function AuthShell({ mode, children, panelHeading }: AuthShellProps) {
               {isSignUp ? (
                 <>
                   Already have an account?{" "}
-                  <Link to="/login" className="font-semibold text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline">
+                  <Link to="/profile?auth=signin" className="font-semibold text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline">
                     Log in
                   </Link>
                 </>
               ) : isSignIn ? (
                 <>
                   New player?{" "}
-                  <Link to="/signup" className="font-semibold text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline">
+                  <Link to="/profile?auth=signup" className="font-semibold text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline">
                     Create account
                   </Link>
                 </>
               ) : (
                 <>
                   Remembered your password?{" "}
-                  <Link to="/login" className="font-semibold text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline">
+                  <Link to="/profile?auth=signin" className="font-semibold text-cyan-300 underline-offset-4 hover:text-cyan-200 hover:underline">
                     Log in
                   </Link>
                 </>

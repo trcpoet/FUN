@@ -14,7 +14,16 @@
  *    heavy columns.
  */
 
-const OSM_VENUE_BASE_COLUMNS = [
+/**
+ * What a pin needs: where it is, what to call it, what to draw, and whether it
+ * may be drawn at all (`access` — see venueAccess.ts).
+ *
+ * Nothing else belongs here. Measured on production: the previous list cost
+ * 416 KB for 1000 venues, 303 KB of which was enrichment text the map never
+ * renders — it was downloaded, parsed, written into a GeoJSON feature property
+ * per pin, and then re-read from the database anyway the moment a card opened.
+ */
+const OSM_VENUE_MAP_COLUMNS = [
   "id",
   "lat",
   "lng",
@@ -23,9 +32,14 @@ const OSM_VENUE_BASE_COLUMNS = [
   "leisure",
   "osm_type",
   "osm_id",
+  "access",
+] as const;
+
+/** Everything the venue card shows, read one row at a time. */
+const OSM_VENUE_DETAIL_COLUMNS = [
+  ...OSM_VENUE_MAP_COLUMNS,
   "surface",
   "lit",
-  "access",
   "opening_hours",
   "website",
   "operator",
@@ -38,11 +52,11 @@ const OSM_VENUE_BASE_COLUMNS = [
 ] as const;
 
 /** Map/pin reads (bbox, up to 8000 rows). Keep this list free of jsonb. */
-export const OSM_VENUE_MAP_SELECT = OSM_VENUE_BASE_COLUMNS.join(", ");
+export const OSM_VENUE_MAP_SELECT = OSM_VENUE_MAP_COLUMNS.join(", ");
 
 /** Single-venue reads for the details modal. */
 export const OSM_VENUE_DETAIL_SELECT = [
-  ...OSM_VENUE_BASE_COLUMNS,
+  ...OSM_VENUE_DETAIL_COLUMNS,
   "tags",
   "photos",
   "google_details",

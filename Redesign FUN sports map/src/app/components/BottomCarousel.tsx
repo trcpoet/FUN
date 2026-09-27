@@ -119,7 +119,7 @@ export const BottomCarousel = ({
   };
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-40 pb-6 pt-12 bg-gradient-to-t from-[#0A0F1C] via-[#0A0F1C]/80 to-transparent pointer-events-none flex flex-col justify-end">
+    <div className="absolute bottom-0 left-0 right-0 z-40 pb-6 pt-12 bg-gradient-to-t from-background via-background/80 to-transparent pointer-events-none flex flex-col justify-end">
       {/* Live Now carousel: only when Live Now button is pressed */}
       {liveNowOpen && (
         <>

@@ -12,6 +12,7 @@ const MapboxMap = React.lazy(() =>
 );
 import { TopNavigation } from "./components/TopUI";
 import { BottomCarousel } from "./components/BottomCarousel";
+import { SuggestedGamePrompt } from "./components/SuggestedGamePrompt";
 const GameMessengerSheet = React.lazy(() =>
   import("./components/GameMessengerSheet").then((m) => ({ default: m.GameMessengerSheet }))
 );
@@ -55,9 +56,11 @@ import { visibilityEnumToLabel } from "../lib/gamePreferenceOptions";
 import { sportEmoji } from "../lib/sportVisuals";
 import type { GameRow, MapNoteRow } from "../lib/supabase";
 import { filterGamesVisibleOnMap, isGameInLiveWindow } from "../lib/mapGameTimer";
+import { useStableItems } from "../lib/stableItems";
 import { gameMatchesFilters, countMatchingGames, deriveDefaultFiltersFromProfile, gameVisibleToViewer } from "./lib/gameFilters";
 import { readLocationVisibility, writeLocationVisibility, type LocationVisibilityMode } from "../lib/locationVisibility";
 import { readFollowedIds, writeFollowedIds } from "../lib/localFollows";
+import { profileAuthPath, returnToForGame, returnToForNote, returnToForVenue } from "../lib/guestAccess";
 import { updateMyPresence, migrateLocalFollowsToDb } from "../lib/api";
 import { StarRating } from "./components/ui/StarRating";
 import { NoteThreadDialog } from "./components/feed/NoteThreadDialog";
@@ -179,11 +182,8 @@ export default function App() {
 
   const notesErrorToastedRef = useRef(false);
   const refetchNotes = useCallback(async () => {
-    // Map notes are signed-in only (privacy); guests browse games + venues only.
-    if (!currentUserId) {
-      setMapNotes([]);
-      return;
-    }
+    // Guests get notes too, through the wrapper that returns public ones with no
+    // author attached — a note about a court is about the court.
     const { data, error } = await fetchNotesNearby({
       lat: gamesFetchLat,
       lng: gamesFetchLng,
@@ -214,8 +214,9 @@ export default function App() {
     profilesLat: userCoords?.lat ?? effectiveUserCoords.lat,
     profilesLng: userCoords?.lng ?? effectiveUserCoords.lng,
     athletesRadiusKm: appliedFilters.athletesRadiusKm,
-    // Player locations are signed-in only (privacy); guests see games only.
-    includeProfiles: !!currentUserId,
+    // Player locations are signed-in only (privacy); a guest's games come from
+    // the anonymised wrapper, and neither viewer's results are cached for the other.
+    viewerId: currentUserId,
   });
   const [venuesFetchLoading, setVenuesFetchLoading] = useState(false);
   const [filterApplySync, setFilterApplySync] = useState(false);
@@ -253,11 +254,15 @@ export default function App() {
     avatarUrl,
     athleteProfile,
     gender: viewerGender,
-    loading: profileLoading,
   } = useMyProfile();
 
-  /** Auth must be settled first, or the prompt flashes on every cold load. */
-  const showGenderGatePrompt = !authLoading && !profileLoading && viewerGender == null;
+  /*
+   * The "Games are hidden" card is gone with the rule it explained. Co-ed games
+   * are visible to every viewer now — guests included — and only same-gender
+   * games still need a gender on file (see
+   * `20260922130000_guest_browse_read_paths.sql`). A map that shows games needs
+   * no card apologising for showing none.
+   */
 
   // Seed filter defaults from the user's profile prefs once (skill/age/matchType), filling only unset
   // fields. Guarded by localStorage so user Apply / persisted filters always win afterwards.
@@ -351,6 +356,20 @@ export default function App() {
   const [hostGameIds, setHostGameIds] = useState<Set<string>>(new Set());
   const [substituteGameIds, setSubstituteGameIds] = useState<Set<string>>(new Set());
   const [messagesOpen, setMessagesOpen] = useState(false);
+  /**
+   * Both sheets are code-split, but rendering them closed still downloads and
+   * mounts them (107KB together) while the map is fetching mapbox-gl and its
+   * tiles. Mount on first open instead, and keep them mounted afterwards so the
+   * close animation and their internal state survive.
+   */
+  const [messengerMounted, setMessengerMounted] = useState(false);
+  const [createGameMounted, setCreateGameMounted] = useState(false);
+  useEffect(() => {
+    if (messagesOpen) setMessengerMounted(true);
+  }, [messagesOpen]);
+  useEffect(() => {
+    if (createGameOpen) setCreateGameMounted(true);
+  }, [createGameOpen]);
   const [messengerFocus, setMessengerFocus] = useState<MessengerThreadFocus | null>(null);
   const [mapNotes, setMapNotes] = useState<MapNoteRow[]>([]);
   const [activeMapNote, setActiveMapNote] = useState<MapNoteRow | null>(null);
@@ -362,6 +381,15 @@ export default function App() {
   const handleOpenNoteThread = useCallback((note: MapNoteRow) => setActiveMapNote(note), []);
   /** Idle prefetch so opening Messages isn't blocked by cold RPCs. */
   const [gameInboxBootstrap, setGameInboxBootstrap] = useState<GameInboxRow[] | null>(null);
+  /**
+   * Bumped whenever a game's lifecycle changes under us (started, ended).
+   *
+   * The messenger only reloads its inbox when the sheet opens on the list, so a
+   * host who ended a game from inside its own thread kept reading a cached row
+   * that still said `live`. The inbox row is what the thread header reasons with,
+   * so invalidating it is the whole fix.
+   */
+  const [gameLifecycleEpoch, setGameLifecycleEpoch] = useState(0);
   const [dmInboxBootstrap, setDmInboxBootstrap] = useState<DmInboxRow[] | null>(null);
   const [satelliteOn, setSatelliteOn] = useState(false);
   const [liveNowOpen, setLiveNowOpen] = useState(false);
@@ -386,6 +414,32 @@ export default function App() {
     handleCenterOnCoords({ lat: game.lat, lng: game.lng });
     openGamePopupNonceRef.current += 1;
     setGamePopupRequest({ nonce: openGamePopupNonceRef.current, gameId: game.id });
+    // `&chat=1` from a feed card's Chat button: the messenger lives here, not in
+    // the feed, so the link has to be able to ask for the thread as well as the pin.
+    if (params.get("chat") === "1") {
+      setMessengerFocus({
+        kind: "game",
+        gameId: game.id,
+        title: game.title,
+        sport: game.sport,
+        startsAt: game.starts_at,
+        endsAt: game.ends_at ?? null,
+        endedAt: game.ended_at ?? null,
+        liveStartedAt: game.live_started_at ?? null,
+        status: game.status,
+        durationMinutes: game.duration_minutes ?? null,
+        createdAt: game.created_at,
+        participantCount: game.participant_count,
+        spotsRemaining: game.spots_remaining,
+        createdBy: game.created_by,
+        visibility: game.visibility ?? null,
+        lat: game.lat,
+        lng: game.lng,
+        locationLabel: game.location_label ?? null,
+      });
+      setMessagesOpen(true);
+      params.delete("chat");
+    }
     params.delete("focusGameId");
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
   }, [games, location.pathname, location.search, navigate]);
@@ -465,7 +519,7 @@ export default function App() {
     if (authLoading) return;
 
     if (!currentUserId) {
-      navigate("/login", { replace: true });
+      navigate(profileAuthPath("signin"), { replace: true, state: { from: location } });
       return;
     }
 
@@ -549,15 +603,76 @@ export default function App() {
     prefetchMapboxGl();
   }, []);
 
+  /**
+   * Have the account screen ready before anyone reaches for it.
+   *
+   * React Router wraps navigation in `startTransition`, so a route whose chunk
+   * has not been fetched leaves the current screen up with no feedback at all —
+   * which is exactly what "tapping Sign up does nothing" was. Fetching it while
+   * the map is idle costs a few KB and removes the wait entirely.
+   */
+  const prefetchAccountScreen = useCallback(() => {
+    return currentUserId ? import("./pages/Profile") : import("./pages/GuestProfile");
+  }, [currentUserId]);
+  /** The feed is the other route reachable in one tap from the map. */
+  const prefetchFeed = useCallback(() => import("./pages/Feed"), []);
+  useEffect(() => {
+    if (!secondaryReady) return;
+    void prefetchAccountScreen();
+    if (currentUserId) void prefetchFeed(); // guests get the sign-up sheet, not the route
+  }, [secondaryReady, prefetchAccountScreen, prefetchFeed, currentUserId]);
+
   // Guests get a friendly "sign in to continue" sheet instead of a hard redirect.
   const [signInGate, setSignInGate] = useState<SignInGateAction | null>(null);
-  const ensureSession = async (action: SignInGateAction = "join"): Promise<boolean> => {
-    if (currentUserId) return true;
-    const { data: { session } } = await supabase!.auth.getSession();
-    if (session?.user) return true;
-    setSignInGate(action);
-    return false;
-  };
+  const [signInGateReturnTo, setSignInGateReturnTo] = useState<string | null>(null);
+  const ensureSession = useCallback(
+    async (action: SignInGateAction = "join", returnTo?: string | null): Promise<boolean> => {
+      if (currentUserId) return true;
+      const { data: { session } } = await supabase!.auth.getSession();
+      if (session?.user) return true;
+      setSignInGateReturnTo(returnTo ?? null);
+      setSignInGate(action);
+      return false;
+    },
+    [currentUserId]
+  );
+
+  /**
+   * `?host=1` — "Host one", from the feed's empty state.
+   *
+   * The useful reply to "nobody is playing your sport near you" is the button
+   * that fixes it, and the button has to land on a create sheet rather than on
+   * the map with a hint. Uses the viewer's own position, which is the only spot
+   * this link can mean.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("host") !== "1") return;
+    const strip = () => {
+      params.delete("host");
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" },
+        { replace: true },
+      );
+    };
+    const here = realUserCoordsRef.current;
+    if (!here) {
+      strip();
+      return;
+    }
+    void (async () => {
+      if (!(await ensureSession("create"))) {
+        strip();
+        return;
+      }
+      setCreateGameCoords({ lat: here.lat, lng: here.lng });
+      setCreateGameAnchorPoint(null);
+      setCreateGameLocationLabel(null);
+      setCreateGameOpen(true);
+      strip();
+    })();
+  }, [location.pathname, location.search, navigate, ensureSession]);
+
 
   const reloadJoinedGameIds = useCallback(async () => {
     if (!supabase || !currentUserId) return;
@@ -633,7 +748,7 @@ export default function App() {
   };
 
   const handleJoinGame = async (gameId: string) => {
-    const ok = await ensureSession();
+    const ok = await ensureSession("join", returnToForGame(gameId));
     if (!ok) return;
     const result = await joinGame(gameId);
     if (result.error) {
@@ -645,7 +760,7 @@ export default function App() {
   };
 
   const handleLeaveGame = async (gameId: string): Promise<Error | null> => {
-    const ok = await ensureSession();
+    const ok = await ensureSession("join", returnToForGame(gameId));
     if (!ok) return new Error("Sign in to leave this game.");
 
     const err = await leaveGame(gameId);
@@ -684,9 +799,14 @@ export default function App() {
     if (!ok) return;
     const err = await startGame(game.id);
     if (err) {
+      // Silence here was the bug: the button stopped spinning, the game never
+      // went live, and nothing said why — including when the RPC is simply not
+      // deployed, which is a message the host can act on.
+      toast.error("Couldn't start the game", { description: err.message });
       return;
     }
     refetchGames();
+    setGameLifecycleEpoch((n) => n + 1);
   };
 
   const handleEndHostedGame = async (game: GameRow) => {
@@ -694,13 +814,20 @@ export default function App() {
     if (!ok) return;
     const err = await endGame(game.id);
     if (err) {
+      // Same hole as Start, and worse: a swallowed failure here leaves a game
+      // that everyone still sees as live, with no sign anything went wrong.
+      toast.error("Couldn't end the game", { description: err.message });
       return;
     }
     await reloadJoinedGameIds();
     refetchGames();
+    setGameLifecycleEpoch((n) => n + 1);
     if (selectedGame?.id === game.id) setSelectedGame(null);
-    if (messagesOpen && messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
-      setMessagesOpen(false);
+    // Ending your own game used to shut the whole messenger, which is the one place
+    // the game still has anything to say: this is where the squad agrees it happened
+    // and where a rematch gets organised. Return to the inbox, the way leaving and
+    // deleting already do, and let the refreshed row move the thread to Past games.
+    if (messengerFocus?.kind === "game" && messengerFocus.gameId === game.id) {
       setMessengerFocus(null);
     }
   };
@@ -758,6 +885,7 @@ export default function App() {
     anchorLng: searchAnchorLng,
     excludeUserId: currentUserId,
     games: mapCountableGames,
+    includePeople: !!currentUserId,
   });
 
   useEffect(() => {
@@ -856,9 +984,15 @@ export default function App() {
     return displayGames.filter((g) => isGameInLiveWindow(g, now));
   }, [displayGames, mapMinuteEpoch]);
 
-  const mapGames = useMemo(
-    () => (liveNowOpen ? liveStripGames : displayGames),
-    [liveNowOpen, liveStripGames, displayGames]
+  // Stable identity while the contents are unchanged. Every list above is
+  // re-derived on the 60s tick, and this array is a dependency of MapboxMap's
+  // marker effects — so without this, a minute passing rebuilt every DOM marker
+  // and its React root to redraw exactly what was already on screen.
+  const mapGames = useStableItems(
+    useMemo(
+      () => (liveNowOpen ? liveStripGames : displayGames),
+      [liveNowOpen, liveStripGames, displayGames]
+    )
   );
 
   // Venue layer follows ONLY the dedicated venue sport menu — NOT the game sport
@@ -885,7 +1019,7 @@ export default function App() {
     // heading is visually hidden because the map itself is the page's title
     // treatment, and it also gives BottomCarousel's per-card `h3` a level to
     // descend from instead of starting the document at h3.
-    <main className="relative h-screen w-full overflow-hidden bg-[#0A0F1C] font-sans selection:bg-emerald-500/30">
+    <main className="relative h-screen w-full overflow-hidden bg-background font-sans selection:bg-primary/30">
       <h1 className="sr-only">FUN — find and join pickup sports games near you</h1>
       {activeMapNote ? (
           <NoteThreadDialog
@@ -895,6 +1029,8 @@ export default function App() {
             }}
             note={activeMapNote}
             currentUserId={currentUserId}
+            isGuest={!currentUserId}
+            onRequestSignIn={() => void ensureSession("comment", returnToForNote(activeMapNote.id))}
             onCenterOnMap={() => {
               handleCenterOnCoords({ lat: activeMapNote.lat, lng: activeMapNote.lng });
               setActiveMapNote(null);
@@ -981,6 +1117,11 @@ export default function App() {
               title: game.title,
               sport: game.sport,
               startsAt: game.starts_at,
+              endsAt: game.ends_at ?? null,
+              endedAt: game.ended_at ?? null,
+              liveStartedAt: game.live_started_at ?? null,
+              status: game.status,
+              durationMinutes: game.duration_minutes ?? null,
               createdAt: game.created_at,
               participantCount: game.participant_count,
               spotsRemaining: game.spots_remaining,
@@ -1009,38 +1150,13 @@ export default function App() {
           aria-busy="true"
           aria-label="Map updating"
         >
-          <Loader2 className="size-5 shrink-0 animate-spin text-emerald-400" aria-hidden />
-        </div>
-      )}
-
-      {/* Games are gender-gated server-side, so a viewer with no gender on file
-          gets an empty map. Say why instead of looking broken. */}
-      {showGenderGatePrompt && (
-        <div className="pointer-events-none absolute inset-x-0 top-24 z-[54] flex justify-center px-4">
-          <div className="pointer-events-auto max-w-sm rounded-2xl border border-white/12 bg-slate-950/92 px-4 py-3 text-center shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-md">
-            <p className="text-sm font-semibold text-slate-100">Games are hidden</p>
-            <p className="mt-1 text-[13px] leading-snug text-slate-400">
-              {currentUserId
-                ? "Add your gender to see games. Games open to one gender are only shown to matching players."
-                : "Sign in and add your gender to see games near you."}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                if (currentUserId) navigate("/profile?settings=1");
-                else setSignInGate("join");
-              }}
-              className="mt-3 inline-flex min-h-9 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
-            >
-              {currentUserId ? "Set my gender" : "Sign in"}
-            </button>
-          </div>
+          <Loader2 className="size-5 shrink-0 animate-spin text-primary" aria-hidden />
         </div>
       )}
 
       {satelliteOn && (
         <div
-          className="pointer-events-none absolute left-1/2 top-[72px] z-40 -translate-x-1/2 rounded-full border border-white/12 bg-[#0A0F1C]/85 px-3 py-1 text-[11px] font-medium text-slate-200 shadow-[var(--shadow-control)] backdrop-blur-md"
+          className="pointer-events-none absolute left-1/2 top-[72px] z-40 -translate-x-1/2 rounded-full border border-white/12 bg-background/85 px-3 py-1 text-[11px] font-medium text-slate-200 shadow-[var(--shadow-control)] backdrop-blur-md"
           role="status"
           aria-live="polite"
         >
@@ -1063,9 +1179,14 @@ export default function App() {
           filterApplyStartedAtRef.current = Date.now();
         }}
         onOpenMessages={() => {
+          if (!currentUserId) {
+            setSignInGate("chat");
+            return;
+          }
           setMessengerFocus(null);
           setMessagesOpen(true);
         }}
+        onGuestGate={(action) => setSignInGate(action)}
         satelliteOn={satelliteOn}
         onToggleSatellite={() => setSatelliteOn((v) => !v)}
         notifications={notifications}
@@ -1076,6 +1197,9 @@ export default function App() {
         locationVisibility={locationVisibility}
         onLocationVisibilityChange={applyVisibilityMode}
         onOpenProfile={() => navigate("/profile")}
+        onProfilePrefetch={prefetchAccountScreen}
+        onAccountPrefetch={prefetchAccountScreen}
+        onFeedPrefetch={prefetchFeed}
         userAvatarUrl={avatarUrl ?? null}
         favoriteSport={favoriteSport}
         mapSearch={{
@@ -1108,6 +1232,20 @@ export default function App() {
       />
 
       <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-none flex flex-col justify-end">
+        {/* One nudge, above everything else on the map: the best game in a sport
+            you actually play, close enough in time to reach. Silent otherwise. */}
+        {!messagesOpen && !selectedGame ? (
+          <div className="pointer-events-none absolute bottom-[104px] left-0 right-0 z-40">
+            <SuggestedGamePrompt
+              lat={gamesFetchLat}
+              lng={gamesFetchLng}
+              currentUserId={currentUserId}
+              radiusKm={effectiveGamesRadiusKm}
+              onOpenGame={(g) => handleOpenGameFromCard(g)}
+            />
+          </div>
+        ) : null}
+
         <BottomCarousel
           games={liveNowOpen ? liveStripGames : displayGames}
           selectedGame={selectedGame}
@@ -1121,6 +1259,10 @@ export default function App() {
           liveNowOpen={liveNowOpen}
           mapMinuteEpoch={mapMinuteEpoch}
           onOpenMessages={() => {
+            if (!currentUserId) {
+              setSignInGate("chat");
+              return;
+            }
             setMessengerFocus(null);
             setMessagesOpen(true);
           }}
@@ -1136,6 +1278,7 @@ export default function App() {
         scope by readPersistedFilters, so its module loads eagerly regardless.
       */}
       <Suspense fallback={null}>
+      {messengerMounted ? (
       <GameMessengerSheet
         open={messagesOpen}
         onOpenChange={setMessagesOpen}
@@ -1149,6 +1292,7 @@ export default function App() {
         onEndHostedGame={handleEndHostedGame}
         onDeleteHostedGame={handleDeleteHostedGame}
         inboxBootstrap={gameInboxBootstrap}
+        inboxRefreshKey={gameLifecycleEpoch}
         dmInboxBootstrap={dmInboxBootstrap}
         onPlanRematch={(payload: PlanRematchPayload) => {
           if (payload.lat == null || payload.lng == null) {
@@ -1191,6 +1335,7 @@ export default function App() {
         }}
 
       />
+      ) : null}
 
       <FiltersModal
         open={filtersOpen}
@@ -1218,6 +1363,7 @@ export default function App() {
         }}
       />
 
+      {createGameMounted ? (
       <CreateGameModal
         open={createGameOpen}
         onOpenChange={(next) => {
@@ -1246,10 +1392,44 @@ export default function App() {
           refetchGames();
           void refetchNotes();
           void reloadJoinedGameIds();
+
+          // Put the host on the thing they just made. Creating a game used to
+          // close the sheet and leave them on the same map, hunting for their own
+          // pin among everyone else's. The popup request waits for the refetch to
+          // land, so this opens the card the moment the row arrives.
+          if (gameId) {
+            openGamePopupNonceRef.current += 1;
+            setGamePopupRequest({ nonce: openGamePopupNonceRef.current, gameId });
+            toast.success("Game created", {
+              description: "Share the invite, or wait for players to find it on the map.",
+            });
+          }
         }}
       />
+      ) : null}
 
-      <SignInGate action={signInGate} onClose={() => setSignInGate(null)} />
+      <SignInGate
+        action={signInGate}
+        /*
+         * Where to come back to. Callers that know the subject pass it; otherwise
+         * the card standing open behind the sheet IS the subject, and App already
+         * reopens any of the three from a `/?focus…` link.
+         */
+        returnTo={
+          signInGateReturnTo ??
+          (selectedGame
+            ? returnToForGame(selectedGame.id)
+            : selectedVenue
+              ? returnToForVenue(selectedVenue.id)
+              : activeMapNote
+                ? returnToForNote(activeMapNote.id)
+                : null)
+        }
+        onClose={() => {
+          setSignInGate(null);
+          setSignInGateReturnTo(null);
+        }}
+      />
       </Suspense>
     </main>
   );

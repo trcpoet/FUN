@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   MessageCircle,
   MapPin,
@@ -15,21 +15,31 @@ import { Badge } from "../ui/badge";
 import { toast } from "sonner";
 import { PostEngagementBar } from "./PostEngagementBar";
 import {
+  addGameComment,
   addNoteComment,
   addStatusComment,
   deleteHostedGame,
   deleteMapNote,
   deleteMyStatus,
+  fetchGameComments,
   fetchNoteComments,
   fetchStatusComments,
+  feedItemToGameRow,
   feedMediaLooksVideo,
   feedMediaPublicUrl,
+  toggleGameLike,
   toggleMapNoteLike,
   toggleStatusLike,
+  type GameCommentRow,
   type LiveFeedItem,
   type UnifiedFeedItem,
 } from "../../../lib/api";
-import type { FeedMediaPostRow, MapNoteCommentRow, StatusCommentRow } from "../../../lib/supabase";
+import type { FeedMediaPostRow, GameRow, MapNoteCommentRow, StatusCommentRow } from "../../../lib/supabase";
+import { GameActionBar } from "../game/GameActionBar";
+import { gameViewerRole } from "../../lib/gameViewerRole";
+import { isGameEnded, isGameLive, formatUrgentCountdown } from "../../../lib/mapGameTimer";
+import { sportEmojiFor } from "../../../lib/sportDisplay";
+import { useSharedNow } from "../../../hooks/useSharedNow";
 import { glassMessengerPanel } from "../../styles/glass";
 import { noteVisibilityLabel } from "../../lib/noteVisibility";
 import { LikeButton } from "./LikeButton";
@@ -264,15 +274,167 @@ export function NoteFeedCard(props: {
   );
 }
 
+/** Sport + start time + spots, all from the one row the feed already returned. */
+function GameHeadline({ row, nowMs }: { row: GameRow; nowMs: number }) {
+  const ended = isGameEnded(row, nowMs);
+  const live = isGameLive(row, nowMs);
+  const startMs = row.starts_at ? Date.parse(row.starts_at) : Number.NaN;
+
+  // The loudest thing on the card is when it starts, because that is the one
+  // fact that decides whether you can go.
+  let when: string;
+  if (ended) when = "Ended";
+  else if (live) when = "Playing now";
+  else if (!Number.isNaN(startMs)) {
+    when = startMs > nowMs ? `Starts in ${formatUrgentCountdown(startMs - nowMs)}` : "Starting now";
+  } else when = "Any time";
+
+  return (
+    <p
+      className={cn(
+        "text-[15px] font-bold tabular-nums",
+        ended ? "text-slate-500" : live ? "text-alert" : "text-white",
+      )}
+    >
+      {when}
+    </p>
+  );
+}
+
+/**
+ * How full a game is, as a bar rather than as the words "1 of 4 in".
+ *
+ * Substitutes are drawn past the end of the roster, so "full, with three people
+ * waiting" reads differently from "full".
+ */
+function SpotsBar({ row }: { row: GameRow }) {
+  const total = Math.max(1, row.spots_needed ?? 1);
+  const taken = Math.min(row.participant_count ?? 0, total);
+  const subs = row.substitute_count ?? 0;
+  const remaining = Math.max(0, total - taken);
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          {remaining > 0
+            ? `${remaining} ${remaining === 1 ? "spot" : "spots"} left`
+            : subs > 0
+            ? `Full · ${subs} waiting`
+            : "Full"}
+        </span>
+        <span className="text-[11px] tabular-nums text-slate-500">
+          {taken}/{total}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-1">
+        <div
+          className={cn("h-full rounded-full", remaining > 0 ? "bg-primary" : "bg-slate-500")}
+          style={{ width: `${(taken / total) * 100}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A game, as a post you can read, ask about and join.
+ *
+ * Games have always been in `get_unified_feed` and the feed has always thrown
+ * them away, because the row it got back had a title, a description and nothing
+ * else — no time, no spots, no status, no counts. `unified_feed_games_v2` returns
+ * all of that in `item.game`, and `feedItemToGameRow` turns it into the same
+ * `GameRow` the map popup reasons with, so Join here behaves exactly as Join
+ * there rather than being a second implementation of the same rules.
+ *
+ * The conversation is `game_comments` — public, for people deciding whether to
+ * come — and is deliberately not the squad chat, which stays private to the
+ * people who already did.
+ */
 export function GameFeedCard(props: {
   item: Extract<UnifiedFeedItem, { kind: "game" }>;
   currentUserId?: string | null;
   onOpenOnMap?: () => void;
   onInvalidate?: () => void;
+  /** Join / leave, owned by the page so the rest of the app learns about it. */
+  onJoin?: (game: GameRow) => void | Promise<void>;
+  onLeave?: (game: GameRow) => void | Promise<void>;
+  onOpenChat?: (game: GameRow) => void;
+  /** Games the viewer holds a participant row for, when the page knows. */
+  joinedGameIds?: Set<string>;
 }) {
   const { item, currentUserId, onInvalidate } = props;
+  const [comments, setComments] = useState<GameCommentRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const nowMs = useSharedNow(30_000);
+
+  const row = useMemo(() => feedItemToGameRow(item), [item]);
   const isHost = Boolean(currentUserId && item.created_by && currentUserId === item.created_by);
+
+  // The feed row already says whether you are in; fall back to the page's set
+  // when the RPC predates that column.
+  const joined = useMemo(() => {
+    const ids = new Set(props.joinedGameIds ?? []);
+    if (item.game?.joined_by_me) ids.add(item.id);
+    return ids;
+  }, [props.joinedGameIds, item.game?.joined_by_me, item.id]);
+
+  const role = useMemo(
+    () => gameViewerRole(row, { currentUserId: currentUserId ?? null, joinedGameIds: joined, nowMs }),
+    [row, currentUserId, joined, nowMs],
+  );
+
+  useEffect(() => {
+    if (loaded || (item.comment_count ?? 0) === 0) return;
+    let cancelled = false;
+    setLoadingComments(true);
+    void fetchGameComments(item.id).then((r) => {
+      if (cancelled) return;
+      setLoadingComments(false);
+      setLoaded(true);
+      if (r.error) {
+        setError(r.error.message);
+        return;
+      }
+      setComments(r.data ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.id, item.comment_count, loaded]);
+
+  const totalCount = Math.max(comments.length, item.comment_count ?? 0);
+  const visibleComments = showAll ? comments : comments.slice(-PREVIEW_COUNT);
+  const hiddenCount = Math.max(0, comments.length - visibleComments.length);
+
+  const gameId = item.id;
+  const handleLike = useCallback(() => toggleGameLike(gameId), [gameId]);
+
+  const handleSend = async () => {
+    const body = draft.trim();
+    if (!body || sending) return;
+    setSending(true);
+    setError(null);
+    const { data, error: err } = await addGameComment({ gameId, body });
+    setSending(false);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    setDraft("");
+    if (data) {
+      setComments((prev) => [...prev, data]);
+      setLoaded(true);
+    } else {
+      setError("Comment saved, but couldn't display it yet. Pull to refresh to see it.");
+    }
+  };
 
   const handleDelete = async () => {
     if (!isHost || deleteBusy) return;
@@ -288,53 +450,176 @@ export function GameFeedCard(props: {
     onInvalidate?.();
   };
 
+  const venue = item.game?.location_label?.trim();
+  const distanceKm = item.game?.distance_km;
+
   return (
     <article
       className={cn(
         glassMessengerPanel("group relative overflow-hidden transition-all duration-300 rounded-3xl"),
-        "hover:border-violet-400/25 hover:shadow-[0_0_30px_-12px_rgba(124,58,237,0.35)]",
+        "hover:shadow-[var(--glow-md)]",
       )}
     >
-      <div className="p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="space-y-0.5 min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Game</p>
-            <p className="text-sm font-bold text-white truncate">{item.title?.trim() || "Pickup game"}</p>
+      <div className="space-y-3 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-lg leading-none" aria-hidden>
+                {sportEmojiFor(item.sport ?? "")}
+              </span>
+              <Badge className="border-white/10 bg-black/40 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider backdrop-blur-md">
+                {item.sport?.trim() || "Sport"}
+              </Badge>
+              {role.isLive ? (
+                <span className="rounded-full bg-alert px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-alert-foreground">
+                  Live
+                </span>
+              ) : null}
+            </div>
+            <GameHeadline row={row} nowMs={nowMs} />
+            <p className="truncate text-sm font-semibold text-slate-200">
+              {item.title?.trim() || "Pickup game"}
+            </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Badge className="bg-black/40 backdrop-blur-md border-white/10 text-[10px] font-bold uppercase tracking-wider py-0.5 px-2.5">
-              {item.sport?.trim() || "Sport"}
-            </Badge>
-            {isHost ? (
-              <button
-                type="button"
-                onClick={() => void handleDelete()}
-                disabled={deleteBusy}
-                className="inline-flex size-8 items-center justify-center rounded-xl border border-white/10 text-slate-400 hover:text-rose-400 hover:border-rose-500/30 transition-colors disabled:opacity-50"
-                aria-label="Delete game"
-              >
-                {deleteBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-              </button>
-            ) : null}
-          </div>
+          {isHost ? (
+            <button
+              type="button"
+              onClick={() => void handleDelete()}
+              disabled={deleteBusy}
+              className="inline-flex size-8 shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-50"
+              aria-label="Delete game"
+            >
+              {deleteBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+            </button>
+          ) : null}
         </div>
 
-        {item.body?.trim() ? (
-          <p className="text-sm text-slate-300 leading-relaxed line-clamp-3 italic">“{item.body.trim()}”</p>
-        ) : (
-          <p className="text-xs text-slate-500">No description yet.</p>
-        )}
-
-        {props.onOpenOnMap ? (
-          <button
-            type="button"
-            onClick={props.onOpenOnMap}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-slate-300 hover:bg-white/[0.06] hover:text-white transition-colors"
-          >
-            <MapPin className="size-3.5" />
-            View on map
-          </button>
+        {venue || distanceKm != null ? (
+          <p className="flex items-center gap-1.5 text-xs text-slate-400">
+            <MapPin className="size-3.5 shrink-0 text-slate-500" aria-hidden />
+            <span className="truncate">
+              {venue || "On the map"}
+              {distanceKm != null ? ` · ${distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`} away` : ""}
+            </span>
+          </p>
         ) : null}
+
+        {item.body?.trim() ? (
+          <p className="line-clamp-3 text-sm leading-relaxed text-slate-300">{item.body.trim()}</p>
+        ) : null}
+
+        <SpotsBar row={row} />
+
+        <GameActionBar
+          game={row}
+          role={role}
+          density="compact"
+          onJoin={props.onJoin}
+          onLeave={props.onLeave}
+          onChat={props.onOpenChat}
+          onOpenDetails={props.onOpenOnMap ? () => props.onOpenOnMap?.() : undefined}
+        />
+
+        <div className="flex items-center gap-2 pt-0.5">
+          <LikeButton
+            rowId={item.id}
+            likeCount={item.like_count}
+            likedByMe={item.liked_by_me}
+            toggle={handleLike}
+            label="game"
+            variant="chip"
+            onError={setError}
+          />
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-[11px] font-semibold text-slate-400">
+            <MessageCircle className="size-3.5" aria-hidden />
+            {totalCount}
+          </span>
+          {props.onOpenOnMap ? (
+            <button
+              type="button"
+              onClick={props.onOpenOnMap}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-white"
+            >
+              <MapPin className="size-3.5" aria-hidden />
+              Map
+            </button>
+          ) : null}
+        </div>
+
+        {/* The public thread. Same shape as a note's, because a person reading
+            both should not have to learn two of them. */}
+        <div className="space-y-2 border-t border-white/5 pt-3">
+          {loadingComments ? (
+            <p className="flex items-center gap-2 text-xs text-slate-500">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden /> Loading questions…
+            </p>
+          ) : null}
+
+          {hiddenCount > 0 && !showAll ? (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400 transition-colors hover:text-white"
+            >
+              Show {hiddenCount} earlier {hiddenCount === 1 ? "comment" : "comments"}
+              <ChevronRight className="size-3" aria-hidden />
+            </button>
+          ) : null}
+
+          {visibleComments.map((c) => (
+            <div key={c.id} className="flex items-start gap-2 rounded-2xl bg-surface-1 px-3 py-2">
+              <p className="min-w-0 flex-1 break-words text-[13px] leading-relaxed text-slate-300">
+                {c.body}
+              </p>
+              <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-slate-600">
+                {relTime(c.created_at)}
+              </span>
+            </div>
+          ))}
+
+          {comments.length === 0 && !loadingComments ? (
+            <p className="text-xs text-slate-500">
+              Ask the host anything before you commit — is it beginners welcome, is there parking.
+            </p>
+          ) : null}
+
+          {error ? (
+            <p className="rounded-xl bg-rose-500/12 px-3 py-2 text-xs text-rose-200" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex items-center gap-2">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void handleSend();
+                }
+              }}
+              placeholder="Ask about this game…"
+              maxLength={2000}
+              className="min-h-10 min-w-0 flex-1 rounded-full bg-surface-3 px-4 text-[13px] text-slate-100 placeholder:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              aria-label="Ask about this game"
+            />
+            <button
+              type="button"
+              onClick={() => void handleSend()}
+              disabled={!draft.trim() || sending}
+              className={cn(
+                "inline-flex size-10 shrink-0 items-center justify-center rounded-full transition-colors",
+                draft.trim() && !sending
+                  ? "bg-primary text-primary-foreground hover:bg-primary-container"
+                  : "bg-surface-2 text-slate-600",
+              )}
+              aria-label="Send comment"
+            >
+              {sending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+            </button>
+          </div>
+        </div>
       </div>
     </article>
   );

@@ -1,5 +1,171 @@
 # Schema changelog
 
+## 2026-09-27 — The loop that closes after the game
+
+`20260927160000_post_game_loop.sql`.
+
+Before: the trust system was complete and had never fired. `athlete_endorsements`,
+`endorse_athlete`, `get_athlete_reputation`, `profiles.sportsmanship_avg`,
+`TrustRatingsBlock`, the badge in chat — all shipped, and every rating in the
+database was zero, because nothing in the app had ever asked anyone to rate anyone.
+`game_participants.confirmed_result` had been in the schema since it was written
+and nothing had ever set it. And `athlete_endorsements` had RLS enabled with INSERT
+and UPDATE policies and **no SELECT policy at all**, so any client read of it
+returned nothing — silently, because the trigger-maintained aggregate on `profiles`
+kept working and the number on screen looked fine.
+
+After: three tables and the moment that fills them, in the game's own chat thread
+once the game is over. `game_outcome_reports` answers "did it happen?" (and a
+`played` finally sets `confirmed_result`, which is the honest numerator of
+games-played over games-created). `get_rateable_teammates` is the row of faces that
+calls the endorsement RPC that has existed all along. `game_polls` /
+`game_poll_votes` are the host-only "run it back?" with one In-or-Out vote each and
+a partial unique index allowing exactly one open poll per game.
+
+`get_game_outcome_summary` is plpgsql rather than sql on purpose: an aggregate with
+no GROUP BY returns one row even when the WHERE matched nothing, so a participant
+test in the WHERE clause would still have handed an outsider a row — including the
+participant count.
+
+Check-in is deliberately still deferred; when it lands, joining a game should mark
+attendance rather than asking a second time.
+
+## 2026-09-27 — Games ranked for the person looking at them
+
+`20260927150000_suggested_games.sql`.
+
+Before: nothing in the schema answered "is anyone playing my sport near me
+tonight?". `get_games_nearby` ordered by distance, `get_unified_feed` by
+`created_at`, and the client's `rankGameRows` was a four-key sort. The app knew
+what games existed and nothing about which one you would go to.
+
+After: `get_suggested_games` scores sport match 40%, time-to-start 25%, distance
+20%, spots left 10% and host reputation 5%, modelled on `get_similar_athletes` —
+the only other weighted scorer here. Your own games and ones you already joined
+are excluded; the gender, liveness and TTL rules are the same ones
+`get_games_nearby` enforces, so a suggestion is always a pin the map would draw.
+An unrated host scores the middle of the scale, not the bottom, so reputation
+tips a tie rather than burying a first-time host.
+
+Also `get_games_at_venue` (+ a guest wrapper): the games hosted at a set of
+coordinates, past ones flagged. OSM records what a place is *tagged* as, not what
+happens there — a park tagged `leisure=park` may have three hoops and a `pitch`
+may be locked every evening — and this is the only first-hand evidence either way.
+
+## 2026-09-27 — Games become things you can talk about in public
+
+`20260927130000_game_social.sql`, then `20260927140000_unified_feed_games_v2.sql`.
+
+Before: a game had exactly one conversation, `game_messages` — the private thread
+for people who had already joined. There was nowhere to ask the question you ask
+*before* joining ("beginners welcome?", "is there parking?"), and the feed threw
+games away entirely, because `get_unified_feed` returned them with
+`comment_count = 0, like_count = 0, liked_by_me = false` hard-coded and no start
+time, status, spots or venue. There was nothing to put on a card you could act on.
+
+After: `game_comments`, `game_comment_likes` and `game_likes` give a game the same
+three tables notes already had, with the same RPC surface, so the feed renders both
+through the same components. Every policy delegates to the games read policy — a
+comment on an invite-only game is invisible to someone who cannot see the game,
+without this migration knowing anything about visibility — and `anon` holds no
+privilege on the tables at all, reading only through `get_guest_game_comments`,
+which projects no author. `get_unified_feed` returns a `game` jsonb column with
+everything a joinable card needs, including whether the viewer is already in, and
+real counts. It also gains the untimed-TTL predicate it never had: a pickup game
+with no start time used to sit in the feed forever, while the map retired it after
+three days.
+
+## 2026-09-27 — An ended game ends
+
+`20260927120000_game_lifecycle_fixes.sql`.
+
+Before: `status`, `ends_at` and `ended_at` could all disagree about the same game,
+and every consumer keyed off a different one. `start_game` set
+`ends_at = now() + duration` and its own `BEFORE UPDATE OF starts_at` trigger
+immediately overwrote that with `starts_at + duration`, so a 7 pm game started at
+8:30 was born already over. `end_game` set `status` and `ended_at` but left
+`ends_at` an hour in the future, which is what `mark_ended_games_completed`'s own
+WHERE clause reads. And `get_my_game_inbox` — the one surface that lists games
+regardless of date, so it cannot infer "over" from a row's absence — returned
+`ends_at` without `ended_at`, so a game the host ended 20 minutes in read
+"Live · 70:00 left" in its own chat header.
+
+After: the trigger respects an `ends_at` the statement set deliberately and never
+re-times a completed or cancelled game; `end_game` closes `status`, `ended_at` and
+`ends_at` together; the inbox returns the whole lifecycle (`status`, `ends_at`,
+`ended_at`, `live_started_at`) and lets the client decide. `mark_ended_games_completed`
+is scheduled under pg_cron where the extension exists, and says so in a notice where
+it does not — it stays revoked from `authenticated`, because it writes other people's
+rows.
+
+`get_unified_feed`'s missing untimed-TTL predicate is deliberately not here:
+`unified_feed_games_v2` replaces that function for feed game cards and fixes it there.
+
+
+## 2026-09-26 — The map read stops carrying the venue card's data
+
+`20260926120000_venues_in_bbox_slim.sql`.
+
+Before: `get_venues_in_bbox` returned 20 columns for up to 1,000 venues — 416 KB per
+map load, of which 303 KB was `wikidata_description`, `photo_attributions`,
+`hero_image_url`, `enrichment_source`, `wikidata_label`, `opening_hours`, `website`,
+`operator`, `surface` and `lit`: data the map never draws, downloaded, parsed and
+held as a GeoJSON property on every pin so that the venue card could re-read the same
+row through `fetchVenueById` the moment it opened.
+
+After: nine columns — position and identity, what to draw, and whether to draw it at
+all. 113 KB. Filters, ordering and the cap are unchanged. The venue card still reads
+the full row on open, which it already did.
+
+## 2026-09-22 — Guests browse; the database is what says so
+
+`20260922130000_guest_browse_read_paths.sql`, then (after the client ships)
+`20260922140000_guest_browse_lock_anon_tables.sql`.
+
+Before: a signed-out visitor saw an empty map, because `can_view_game_for_gender`
+answered "no gender on file, no games" — and at the same time could read every
+profile, the whole follow graph, every public note with its author, and every
+venue review with its `user_id`, straight off the tables. The product said
+"guests see nothing about people" while the database said the opposite.
+
+After: guests read six `get_guest_*` functions and nothing else. Each is a thin
+SECURITY DEFINER select over the function members already use, projecting no
+`created_by` and no `user_id`, filtered to public games and public notes. The
+gender rule now reads "Co-ed is open to everyone; Same gender needs an exact
+match", which is what every other part of the app already assumed, and which also
+gives a member who skipped onboarding the Co-ed games instead of an empty map.
+The identity tables move to `authenticated`, so the anonymity is a property of
+the schema rather than of the UI.
+
+Note the deploy order: part 1 is additive and can go first; part 2 removes access
+the shipped client still uses, so it follows the deploy. MIGRATION_ORDER.md has
+the detail.
+
+
+## 2026-09-22 — Game reads enforce their own rules
+
+`20260922120000_game_read_visibility_and_invite_tokens.sql`.
+
+Two things were true of production until today: any signed-in account could read
+every game's `invite_token` (and `redeem_invite_token` asks for nothing else, so
+that is a key to every invite-only game), and the "Same gender" rule was enforced
+only inside the read RPCs while the table itself answered `select *` to anyone —
+including a signed-out caller. The gate that migration `20260801130000` moved out
+of the client was never put on the door the rows actually leave through.
+
+Now: `games` and `game_participants` have SELECT policies that mirror the RPCs
+(host, participant, or gender-and-visibility eligible) and `invite_token` is
+revoked from the client roles, readable only through the new
+`get_game_invite_token()` for the host and joined players. `anon` keeps the
+column grants but matches no policy, so signed-out reads come back empty rather
+than as an error — the two SECURITY INVOKER feed RPCs read `games` under the
+caller's rights and would otherwise fail outright for guests.
+
+Caveat to carry forward: column-level grants do not cover columns added later. A
+new column on `games` needs adding to that grant, or clients get
+`permission denied` for it.
+
+
 ## 2026-08-10 — Baseline recovered, SQL Editor snippets triaged
 
 ### What happened
