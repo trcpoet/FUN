@@ -282,6 +282,12 @@ export function VenueInfoPopup({
   const [view, setView] = useState<View>("actions");
   const [tab, setTab] = useState<Tab>("games");
   const [details, setDetails] = useState<VenueSelection>(venue);
+  /**
+   * Hours, website and the hero now arrive from the single-row read rather than
+   * riding along on every pin in the viewport (see osmVenueColumns.ts). That is
+   * ~300ms after open, so the card says so instead of rearranging itself.
+   */
+  const [detailsLoading, setDetailsLoading] = useState(true);
   const [now, setNow] = useState(() => Date.now());
   const [heroImageUrl, setHeroImageUrl] = useState<string | null>(venue.hero_image_url ?? null);
   const [photoAttributions, setPhotoAttributions] = useState<string[]>(
@@ -305,6 +311,7 @@ export function VenueInfoPopup({
         : "games"
     );
     setDetails(venue);
+    setDetailsLoading(true);
     setHeroImageUrl(venue.hero_image_url ?? null);
     setPhotoAttributions(venue.photo_attributions ?? []);
     setEnriching(false);
@@ -330,7 +337,9 @@ export function VenueInfoPopup({
     if (!open) return;
     let cancelled = false;
     void fetchVenueById(venue.id).then(({ data }) => {
-      if (cancelled || !data) return;
+      if (cancelled) return;
+      setDetailsLoading(false);
+      if (!data) return;
       setDetails((prev) => ({ ...prev, ...data, center: prev.center }));
       if (data.hero_image_url) setHeroImageUrl(data.hero_image_url);
     });
@@ -899,13 +908,18 @@ export function VenueInfoPopup({
                 </div>
                 )}
 
-                {hours.length > 0 || websiteHref ? (
+                {(
                   <div className="mt-3 flex flex-col gap-2 border-t border-white/10 pt-3">
                     <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium">At a glance</p>
                     {hours.length > 0 ? (
                       <div className="flex items-start gap-2 text-sm text-slate-300">
                         <Clock className="w-4 h-4 shrink-0 text-slate-500 mt-0.5" aria-hidden />
                         <span className="min-w-0 break-words">{hours.join(" · ")}</span>
+                      </div>
+                    ) : detailsLoading ? (
+                      <div className="flex items-center gap-2" aria-hidden>
+                        <Clock className="w-4 h-4 shrink-0 text-slate-600" />
+                        <span className="h-3 w-40 animate-pulse rounded bg-white/5" />
                       </div>
                     ) : null}
                     {websiteHref ? (
@@ -929,7 +943,7 @@ export function VenueInfoPopup({
                       <ChevronRight className="w-4 h-4" aria-hidden />
                     </button>
                   </div>
-                ) : null}
+                )}
               </div>
 
               {/* Footer actions */}

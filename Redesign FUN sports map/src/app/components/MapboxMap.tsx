@@ -47,7 +47,11 @@ import * as MapCfg from "../map/mapConfig";
 import { quantize, steppedRgb, makeTicker, StyleWriteCache, EPS } from "../map/animationBudget";
 import { applyFunBasemapTheme } from "../map/mapTheme";
 import { loadMapboxGl } from "../lib/mapboxCached";
-import { registerGameSportImages } from "../map/registerGameSportImages";
+import {
+  registerGameSportImages,
+  sportIconIdsForGames,
+  sportIconIdsInFeatures,
+} from "../map/registerGameSportImages";
 import { getGameMapboxIconId } from "../map/gameSportIcons";
 const Avatar3DOverlay = React.lazy(() =>
   import("./Avatar3DOverlay").then((m) => ({ default: m.Avatar3DOverlay }))
@@ -1604,7 +1608,10 @@ export function MapboxMap(props: MapboxMapProps) {
     if (!map || !mapLoaded || gameLayersInitedRef.current) return;
     gameLayersInitedRef.current = true; // guard so this only runs once per style load
 
-    registerGameSportImages(map); // load the sport emoji images Mapbox will draw
+    // Only the sports actually nearby. Registering the whole 59-sport catalogue
+    // here meant 59 canvas rasterizations and 59 texture uploads before a single
+    // pin was drawn; the setData effect below tops this up as new sports arrive.
+    registerGameSportImages(map, sportIconIdsForGames(gamesRef.current));
 
     // The game data source, with Mapbox's built-in clustering turned on.
     map.addSource(L_GAME_SOURCE, {
@@ -1874,7 +1881,11 @@ export function MapboxMap(props: MapboxMapProps) {
 
     // Limit to the games near the viewport so we never push thousands of features at once.
     const capped = limitGamesForMapViewport(games, map, MapCfg.MAX_VISIBLE_INDIVIDUAL_GAMES);
-    src.setData(gamesToGeoJSON(capped, selectedGameId, absorbedGameIds));
+    const geojson = gamesToGeoJSON(capped, selectedGameId, absorbedGameIds);
+    // Before the data, never after: a symbol whose `icon-image` names an image the
+    // style does not hold renders nothing at all, with no warning.
+    registerGameSportImages(map, sportIconIdsInFeatures(geojson.features));
+    src.setData(geojson);
     applyMapLayerVisibility();
     // No mapMinuteEpoch: nothing here reads the clock. What the minute tick can
     // change is which games are absorbed by a venue, and that arrives as a new
@@ -3018,8 +3029,8 @@ export function MapboxMap(props: MapboxMapProps) {
         // missing icon over a basemap pitch. `setStyle` can drop the image registry while
         // leaving the layers in place, so registering only on layer creation was a
         // standing way for every venue icon to silently disappear. It's a no-op when the
-        // images are already there.
-        registerGameSportImages(mapInstance);
+        // images are already there, and the pixels are cached across style swaps.
+        registerGameSportImages(mapInstance, sportIconIdsInFeatures(enriched.features));
 
         if (venueGlLayersReady(mapInstance)) {
           (mapInstance.getSource(SRC_VENUE_POINTS) as import("mapbox-gl").GeoJSONSource).setData(enriched);
