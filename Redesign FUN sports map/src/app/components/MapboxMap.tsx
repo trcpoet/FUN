@@ -1102,17 +1102,27 @@ export function MapboxMap(props: MapboxMapProps) {
     };
   }, [mapLoaded, selectedVenue?.id, selectedVenue?.center.lng, selectedVenue?.center.lat, enable3D, cinematicTier, isMobile]);
 
-  // —— Open game modal from carousel (center + delayed popup) ——
+  /**
+   * Open a game's card by id (the carousel, and a game you just created).
+   *
+   * Deliberately depends on `games`: a game created a moment ago is not in the
+   * list yet, because the refetch that will bring it is still in flight. The
+   * nonce is only marked handled once the row actually arrives, so this re-runs
+   * on the next list and opens the card then. A request for a game that never
+   * arrives simply never opens, which is the right outcome for one that was
+   * filtered out or is out of range.
+   */
   useEffect(() => {
     if (!mapLoaded || !gamePopupRequest) return;
     if (lastHandledGamePopupNonceRef.current === gamePopupRequest.nonce) return;
-    lastHandledGamePopupNonceRef.current = gamePopupRequest.nonce;
 
     const map = mapRef.current;
     if (!map) return;
 
-    const game = gamesRef.current.find((g) => g.id === gamePopupRequest.gameId);
-    if (!game) return; // requested game isn't on the map
+    const game = games.find((g) => g.id === gamePopupRequest.gameId);
+    if (!game) return; // not on the map yet — try again when the list changes
+
+    lastHandledGamePopupNonceRef.current = gamePopupRequest.nonce;
 
     // Close venue popup (if open) and ensure game selection is synced.
     onSelectVenue(null);
@@ -1134,7 +1144,7 @@ export function MapboxMap(props: MapboxMapProps) {
     }, 650);
 
     return () => window.clearTimeout(t);
-  }, [mapLoaded, gamePopupRequest, onSelectVenue]);
+  }, [mapLoaded, gamePopupRequest, games, onSelectVenue]);
 
   /**
    * Mapbox Directions walking route overlay. A route outlives the popup that started it, so this

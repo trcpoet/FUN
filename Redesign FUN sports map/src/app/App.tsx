@@ -1314,6 +1314,18 @@ export default function App() {
           refetchGames();
           void refetchNotes();
           void reloadJoinedGameIds();
+
+          // Put the host on the thing they just made. Creating a game used to
+          // close the sheet and leave them on the same map, hunting for their own
+          // pin among everyone else's. The popup request waits for the refetch to
+          // land, so this opens the card the moment the row arrives.
+          if (gameId) {
+            openGamePopupNonceRef.current += 1;
+            setGamePopupRequest({ nonce: openGamePopupNonceRef.current, gameId });
+            toast.success("Game created", {
+              description: "Share the invite, or wait for players to find it on the map.",
+            });
+          }
         }}
       />
       ) : null}
