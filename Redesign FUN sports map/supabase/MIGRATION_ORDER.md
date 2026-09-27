@@ -101,6 +101,51 @@ where proname = '<name>' and pronargs = <n> and pronamespace = 'public'::regname
 
 ## Pending — apply in this order
 
+### The short version (verified against production 2026-09-27: none of these are applied)
+
+Nine files, three steps. The reason it is not one step: two of them deliberately
+remove something the **currently deployed** client still asks for, and one adds
+something the **new** client needs before it ships. So: add first, swap the client,
+remove last.
+
+**Step 1 — before the deploy.** All additive; the live client ignores every one of
+them and behaves exactly as it does today.
+
+```
+20260922130000_guest_browse_read_paths.sql
+20260927120000_game_lifecycle_fixes.sql
+20260927130000_game_social.sql
+20260927140000_unified_feed_games_v2.sql
+20260927150000_suggested_games.sql
+20260927160000_post_game_loop.sql
+```
+
+**Step 2 — merge `perf/map-raf-write-budget` into main and let Vercel deploy.**
+Confirm the new build is live before going on.
+
+**Step 3 — after the deploy is confirmed.** These break the old client, which is
+why they wait until it is gone.
+
+```
+20260926120000_venues_in_bbox_slim.sql                      (old client loses hero/hours on map pins)
+20260922120000_game_read_visibility_and_invite_tokens.sql   (BREAKS old client's chat inbox)
+20260922140000_guest_browse_lock_anon_tables.sql            (BREAKS old client's guest reads)
+```
+
+Run each file on its own, in a single transaction, and stop on the first error —
+three of them drop and recreate a function, and without a transaction there is a
+window where that function does not exist:
+
+```bash
+psql "$DATABASE_URL" --single-transaction -v ON_ERROR_STOP=1 -f supabase/migrations/<file>.sql
+```
+
+Every file ends with its own verification queries. Run them before moving to the
+next one. Regenerate `schema.sql` (`node scripts/dump-schema.mjs`) once the batch
+is done.
+
+### Per-file detail
+
 - **`20260922130000_guest_browse_read_paths.sql` — apply BEFORE deploying guest mode.**
   Additive: relaxes `can_view_game_for_gender` (no gender on file now means "Co-ed
   only" rather than "nothing at all") and adds the six `get_guest_*` wrappers,
