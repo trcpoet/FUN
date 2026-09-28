@@ -12,6 +12,10 @@ import { FunOrbitLoader } from "./app/components/FunOrbitLoader";
 import { Toaster } from "./app/components/ui/sonner";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
+import { reportError, startErrorReporting } from "./lib/errorReporting";
+
+const sentryDsn = (import.meta.env.VITE_SENTRY_DSN || "").trim();
+if (sentryDsn) void startErrorReporting(sentryDsn);
 
 const App = lazy(() => import("./app/App.tsx"));
 const ForgotPassword = lazy(() => import("./app/pages/ForgotPassword.tsx"));
@@ -67,6 +71,12 @@ class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBo
 
   static getDerivedStateFromError(error: Error): RouteErrorBoundaryState {
     return { error };
+  }
+
+  // In production React does not rethrow what a boundary catches, so Sentry's
+  // global handlers never see it; this is the only way these crashes get reported.
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    reportError(error, { componentStack: info.componentStack });
   }
 
   render() {

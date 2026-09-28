@@ -27,6 +27,7 @@ Create `.env` in `Redesign FUN sports map/` with:
 VITE_MAPBOX_ACCESS_TOKEN=<mapbox token>
 VITE_SUPABASE_URL=<supabase url>
 VITE_SUPABASE_ANON_KEY=<supabase anon key>
+VITE_SENTRY_DSN=<optional; crash reporting via src/lib/errorReporting.ts, off when unset>
 ```
 
 Server-only (for `/api/` routes on Vercel):
