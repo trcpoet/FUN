@@ -74,18 +74,52 @@ function supabasePreconnect(env: Record<string, string>): Plugin {
  * With neither, the placeholder collapses to a root-relative path — the same
  * behaviour as before, rather than a URL that is confidently wrong.
  */
-function ogOrigin(env: Record<string, string>): Plugin {
+function publicOrigin(env: Record<string, string>): string {
   const fromEnv = (env.VITE_PUBLIC_ORIGIN || '').trim().replace(/\/+$/, '')
   const vercel = (
     process.env.VERCEL_PROJECT_PRODUCTION_URL ||
     process.env.VERCEL_URL ||
     ''
   ).trim()
-  const origin = fromEnv || (vercel ? `https://${vercel.replace(/^https?:\/\//, '')}` : '')
+  return fromEnv || (vercel ? `https://${vercel.replace(/^https?:\/\//, '')}` : '')
+}
+
+function ogOrigin(env: Record<string, string>): Plugin {
+  const origin = publicOrigin(env)
   return {
     name: 'fun-og-origin',
     transformIndexHtml(html) {
       return html.replaceAll('%OG_ORIGIN%', origin)
+    },
+  }
+}
+
+/**
+ * robots.txt and sitemap.xml, written at build from the same origin as the share
+ * card. Hand-written copies in public/ would hard-code today's vercel.app URL and
+ * go stale the day a custom domain lands. With no origin (a local build), robots
+ * ships without its Sitemap line and no sitemap is written: sitemap URLs must be
+ * absolute, and a relative one is worse than none.
+ */
+function seoFiles(env: Record<string, string>): Plugin {
+  const origin = publicOrigin(env)
+  return {
+    name: 'fun-seo-files',
+    apply: 'build',
+    generateBundle() {
+      const robots = ['User-agent: *', 'Disallow: /api/']
+      if (origin) robots.push('', `Sitemap: ${origin}/sitemap.xml`)
+      this.emitFile({ type: 'asset', fileName: 'robots.txt', source: `${robots.join('\n')}\n` })
+      if (!origin) return
+      this.emitFile({
+        type: 'asset',
+        fileName: 'sitemap.xml',
+        source:
+          '<?xml version="1.0" encoding="UTF-8"?>\n' +
+          '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+          `  <url><loc>${origin}/</loc></url>\n` +
+          '</urlset>\n',
+      })
     },
   }
 }
@@ -124,6 +158,7 @@ export default defineConfig(({ mode }) => {
     phantomRestartGuard(),
     supabasePreconnect(env),
     ogOrigin(env),
+    seoFiles(env),
     // Dev-only: same behavior as `api/overpass.ts` (multi-mirror). Vite `server.proxy` often 504s on slow Overpass.
     overpassDevProxy(),
     // The React and Tailwind plugins are both required for Make, even if
