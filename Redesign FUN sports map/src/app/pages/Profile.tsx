@@ -292,7 +292,9 @@ export default function Profile() {
               handle={athleteProfile.handle ?? null}
               avatarUrl={avatarUrl}
               fallbackInitial={fallbackInitial}
-              verified={!!athleteProfile.verified}
+              // Self-set `athlete_profile.verified` is no longer trusted; the crest returns
+              // with verification (identity_verifications), never from the profile JSON.
+              verified={false}
               rating={repAvg ?? athleteProfile.trust?.sportsmanship ?? null}
               ratingCount={repCount}
               gamesPlayed={stats?.games_played_total ?? 0}

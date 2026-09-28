@@ -3,6 +3,18 @@ import { Link } from "react-router";
 import { Lock, Mail, ShieldCheck } from "lucide-react";
 import { signIn, signUp, validatePassword } from "../../../lib/api";
 import { mapAuthError } from "../../../lib/rpcErrors";
+import { accountSetupErrorMessage } from "../../../lib/ageRules";
+import { acceptedDocumentsPayload } from "../../../lib/legal";
+import {
+  AccountDetailsFields,
+  EMPTY_ACCOUNT_DETAILS,
+  accountDetailsProblem,
+  useSignupRules,
+  type AccountDetailsDraft,
+  type AccountDetailsSections,
+} from "./AccountDetailsFields";
+
+const ALL_SECTIONS: AccountDetailsSections = { birthdate: true, gender: true, consent: true };
 
 /**
  * The two account forms, with no page around them.
@@ -106,15 +118,23 @@ export function SignUpForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [details, setDetails] = useState<AccountDetailsDraft>(EMPTY_ACCOUNT_DETAILS);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const rules = useSignupRules(details, setDetails, true);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setInfo(null);
 
+    // Age first: someone below the minimum should learn that before choosing a password.
+    const problem = accountDetailsProblem(details, ALL_SECTIONS, rules);
+    if (problem) {
+      setError(problem);
+      return;
+    }
     if (password !== confirm) {
       setError("Passwords do not match.");
       return;
@@ -127,9 +147,14 @@ export function SignUpForm({
 
     setSubmitting(true);
     try {
-      const { error: signUpError } = await signUp(email, password);
+      const { error: signUpError } = await signUp(email, password, {
+        birthdate: details.birthdate,
+        gender: details.gender!,
+        country: details.country,
+        accepted: acceptedDocumentsPayload(),
+      });
       if (signUpError) {
-        setError(mapAuthError(signUpError.message));
+        setError(accountSetupErrorMessage(mapAuthError(signUpError.message)));
         return;
       }
       // If email confirmation is off, session exists → onboarding.
@@ -199,6 +224,8 @@ export function SignUpForm({
           />
         </span>
       </label>
+
+      <AccountDetailsFields draft={details} onChange={setDetails} sections={ALL_SECTIONS} />
 
       {error ? (
         <p className="rounded-xl bg-rose-500/12 px-3 py-2 text-sm text-rose-200" role="alert">

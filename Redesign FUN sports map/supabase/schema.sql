@@ -10,7 +10,7 @@
 -- Extension-owned objects (PostGIS, pg_trgm) are intentionally excluded — the
 -- `create extension` statements below bring them back.
 --
--- Generated: 2026-09-28T04:34:41.527Z
+-- Generated: 2026-09-28T16:04:17.676Z
 
 set search_path = public;
 
@@ -37,6 +37,12 @@ create extension if not exists "uuid-ossp";
 -- ======================================================================
 -- Tables
 -- ======================================================================
+
+create table if not exists public.app_flags (
+  key text not null,
+  enabled boolean not null,
+  updated_at timestamp with time zone default now() not null
+);
 
 create table if not exists public.athlete_endorsements (
   id uuid default gen_random_uuid() not null,
@@ -221,6 +227,21 @@ create table if not exists public.games (
   invite_token uuid default gen_random_uuid() not null
 );
 
+create table if not exists public.legal_acceptances (
+  id bigint not null,
+  user_id uuid not null,
+  document text not null,
+  version text not null,
+  country text,
+  accepted_at timestamp with time zone default now() not null
+);
+
+create table if not exists public.legal_documents (
+  document text not null,
+  current_version text not null,
+  updated_at timestamp with time zone default now() not null
+);
+
 create table if not exists public.map_note_comment_likes (
   comment_id uuid not null,
   user_id uuid not null,
@@ -253,6 +274,12 @@ create table if not exists public.map_notes (
   body text not null,
   visibility text default 'public'::text not null,
   place_name text
+);
+
+create table if not exists public.min_age_by_country (
+  country text not null,
+  min_age smallint not null,
+  basis text not null
 );
 
 create table if not exists public.notifications (
@@ -302,6 +329,13 @@ create table if not exists public.profile_locations (
   updated_at timestamp with time zone default now() not null,
   location_geography geography(Point,4326),
   location_visibility text default 'ghost'::text not null
+);
+
+create table if not exists public.profile_private (
+  user_id uuid not null,
+  birthdate date not null,
+  country text not null,
+  created_at timestamp with time zone default now() not null
 );
 
 create table if not exists public.profiles (
@@ -448,6 +482,8 @@ create table if not exists public.venue_reviews (
 -- Constraints
 -- ======================================================================
 
+alter table public.app_flags add constraint app_flags_pkey PRIMARY KEY (key);
+
 alter table public.athlete_endorsements add constraint athlete_endorsements_pkey PRIMARY KEY (id);
 
 alter table public.badges add constraint badges_pkey PRIMARY KEY (id);
@@ -488,6 +524,10 @@ alter table public.game_results add constraint game_results_pkey PRIMARY KEY (id
 
 alter table public.games add constraint games_pkey PRIMARY KEY (id);
 
+alter table public.legal_acceptances add constraint legal_acceptances_pkey PRIMARY KEY (id);
+
+alter table public.legal_documents add constraint legal_documents_pkey PRIMARY KEY (document);
+
 alter table public.map_note_comment_likes add constraint map_note_comment_likes_pkey PRIMARY KEY (comment_id, user_id);
 
 alter table public.map_note_comments add constraint map_note_comments_pkey PRIMARY KEY (id);
@@ -496,11 +536,15 @@ alter table public.map_note_likes add constraint map_note_likes_pkey PRIMARY KEY
 
 alter table public.map_notes add constraint map_notes_pkey PRIMARY KEY (id);
 
+alter table public.min_age_by_country add constraint min_age_by_country_pkey PRIMARY KEY (country);
+
 alter table public.notifications add constraint notifications_pkey PRIMARY KEY (id);
 
 alter table public.osm_sports_venues add constraint osm_sports_venues_pkey PRIMARY KEY (id);
 
 alter table public.profile_locations add constraint profile_locations_pkey PRIMARY KEY (profile_id);
+
+alter table public.profile_private add constraint profile_private_pkey PRIMARY KEY (user_id);
 
 alter table public.profiles add constraint profiles_pkey PRIMARY KEY (id);
 
@@ -548,6 +592,8 @@ alter table public.game_participants add constraint game_participants_game_id_us
 
 alter table public.game_results add constraint game_results_game_id_key UNIQUE (game_id);
 
+alter table public.legal_acceptances add constraint legal_acceptances_user_id_document_version_key UNIQUE (user_id, document, version);
+
 alter table public.user_badges add constraint user_badges_user_id_badge_id_key UNIQUE (user_id, badge_id);
 
 alter table public.venue_photos add constraint venue_photos_storage_path_key UNIQUE (storage_path);
@@ -582,9 +628,17 @@ alter table public.games add constraint games_status_check CHECK ((status = ANY 
 
 alter table public.games add constraint games_visibility_valid CHECK ((visibility = ANY (ARRAY['public'::text, 'friends_only'::text, 'invite_only'::text])));
 
+alter table public.legal_documents add constraint legal_documents_document_check CHECK ((document = ANY (ARRAY['terms'::text, 'privacy'::text, 'guidelines'::text])));
+
 alter table public.map_notes add constraint map_notes_visibility_valid CHECK ((visibility = ANY (ARRAY['public'::text, 'friends'::text, 'private'::text])));
 
+alter table public.min_age_by_country add constraint min_age_by_country_country_check CHECK ((country ~ '^[A-Z]{2}$'::text));
+
+alter table public.min_age_by_country add constraint min_age_by_country_min_age_check CHECK (((min_age >= 13) AND (min_age <= 18)));
+
 alter table public.profile_locations add constraint profile_locations_visibility_valid CHECK ((location_visibility = ANY (ARRAY['ghost'::text, 'close_friends'::text, 'public'::text])));
+
+alter table public.profile_private add constraint profile_private_country_check CHECK ((country ~ '^[A-Z]{2}$'::text));
 
 alter table public.profiles add constraint profiles_gender_check CHECK (((gender IS NULL) OR (gender = ANY (ARRAY['man'::text, 'woman'::text, 'nonbinary'::text]))));
 
@@ -678,6 +732,10 @@ alter table public.game_results add constraint game_results_game_id_fkey FOREIGN
 
 alter table public.games add constraint games_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL;
 
+alter table public.legal_acceptances add constraint legal_acceptances_document_fkey FOREIGN KEY (document) REFERENCES legal_documents(document);
+
+alter table public.legal_acceptances add constraint legal_acceptances_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
 alter table public.map_note_comment_likes add constraint map_note_comment_likes_comment_id_fkey FOREIGN KEY (comment_id) REFERENCES map_note_comments(id) ON DELETE CASCADE;
 
 alter table public.map_note_comment_likes add constraint map_note_comment_likes_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
@@ -695,6 +753,8 @@ alter table public.map_notes add constraint map_notes_created_by_fkey FOREIGN KE
 alter table public.notifications add constraint notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE;
 
 alter table public.profile_locations add constraint profile_locations_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE;
+
+alter table public.profile_private add constraint profile_private_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
 alter table public.profiles add constraint profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
@@ -925,6 +985,69 @@ AS $function$
     ),
     array[]::text[]
   )
+$function$;
+
+CREATE OR REPLACE FUNCTION public._fun_apply_account_setup(p_uid uuid, p_birthdate date, p_gender text, p_country text, p_accepted jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_country text := upper(btrim(coalesce(p_country, '')));
+  v_accepted jsonb := coalesce(p_accepted, '{}'::jsonb);
+  v_existing_country text;
+  v_age integer;
+  v_doc record;
+begin
+  select pp.country into v_existing_country from public.profile_private pp where pp.user_id = p_uid;
+
+  -- Birthdate and country are set once. On a later call they are ignored, not rejected,
+  -- so the accept-new-terms path can reuse this without re-sending them.
+  if v_existing_country is null then
+    if p_birthdate is null or v_country = '' then
+      raise exception 'FUN_SETUP_INCOMPLETE';
+    end if;
+    if v_country !~ '^[A-Z]{2}$' then
+      raise exception 'FUN_INVALID_COUNTRY';
+    end if;
+    if p_birthdate > current_date or p_birthdate < current_date - interval '120 years' then
+      raise exception 'FUN_INVALID_BIRTHDATE';
+    end if;
+    v_age := public.fun_age_years(p_birthdate);
+    if v_age < public.fun_min_age(v_country) then
+      raise exception 'FUN_UNDER_MIN_AGE';
+    end if;
+    if v_age < 18 and not coalesce(
+      (select f.enabled from public.app_flags f where f.key = 'teen_signups_open'), false
+    ) then
+      raise exception 'FUN_TEEN_SIGNUPS_CLOSED';
+    end if;
+    insert into public.profile_private (user_id, birthdate, country)
+    values (p_uid, p_birthdate, v_country);
+    v_existing_country := v_country;
+  end if;
+
+  if p_gender is not null then
+    if p_gender not in ('man', 'woman', 'nonbinary') then
+      raise exception 'FUN_INVALID_GENDER';
+    end if;
+    update public.profiles set gender = p_gender where id = p_uid;
+  end if;
+
+  -- Only the version the person was shown counts. A stale one means the page they read
+  -- is older than the document now in force.
+  for v_doc in select d.document, d.current_version from public.legal_documents d loop
+    if v_accepted ? v_doc.document then
+      if (v_accepted ->> v_doc.document) is distinct from v_doc.current_version then
+        raise exception 'FUN_STALE_LEGAL_VERSION';
+      end if;
+      insert into public.legal_acceptances (user_id, document, version, country)
+      values (p_uid, v_doc.document, v_doc.current_version, v_existing_country)
+      on conflict (user_id, document, version) do nothing;
+    end if;
+  end loop;
+end;
 $function$;
 
 CREATE OR REPLACE FUNCTION public.add_game_comment(p_game_id uuid, p_body text)
@@ -1270,6 +1393,22 @@ CREATE OR REPLACE FUNCTION public.close_rematch_poll(p_poll_id uuid)
 AS $function$
   update public.game_polls set closed_at = now()
    where id = p_poll_id and closed_at is null;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.complete_account_setup(p_birthdate date DEFAULT NULL::date, p_gender text DEFAULT NULL::text, p_country text DEFAULT NULL::text, p_accepted jsonb DEFAULT '{}'::jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'FUN_NOT_SIGNED_IN' using errcode = '42501';
+  end if;
+  perform public._fun_apply_account_setup(v_uid, p_birthdate, p_gender, p_country, p_accepted);
+end;
 $function$;
 
 CREATE OR REPLACE FUNCTION public.complete_game(p_game_id uuid, p_winner_team_or_user text DEFAULT NULL::text, p_score jsonb DEFAULT NULL::jsonb)
@@ -1824,6 +1963,49 @@ begin
   on conflict (id) do nothing;
 end $function$;
 
+CREATE OR REPLACE FUNCTION public.fun_account_setup_complete(p_uid uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select exists (
+      select 1
+      from public.profile_private pp
+      join public.profiles p on p.id = pp.user_id
+      where pp.user_id = p_uid and p.gender is not null
+    )
+    and not exists (
+      select 1 from public.legal_documents d
+      where not exists (
+        select 1 from public.legal_acceptances a
+        where a.user_id = p_uid and a.document = d.document and a.version = d.current_version
+      )
+    );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.fun_age_tier(p_birthdate date)
+ RETURNS text
+ LANGUAGE sql
+ STABLE
+ SET search_path TO ''
+AS $function$
+  select case
+    when p_birthdate is null then null
+    when public.fun_age_years(p_birthdate) >= 18 then 'adult'
+    else 'teen'
+  end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.fun_age_years(p_birthdate date)
+ RETURNS integer
+ LANGUAGE sql
+ STABLE
+ SET search_path TO ''
+AS $function$
+  select extract(year from age(current_date, p_birthdate))::integer;
+$function$;
+
 CREATE OR REPLACE FUNCTION public.fun_games_sync_lat_lng()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1838,6 +2020,18 @@ begin
 
   return new;
 end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.fun_min_age(p_country text)
+ RETURNS smallint
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  select coalesce(
+    (select m.min_age from public.min_age_by_country m where m.country = upper(btrim(p_country))),
+    13
+  )::smallint;
 $function$;
 
 CREATE OR REPLACE FUNCTION public.games_set_ends_at()
@@ -2256,6 +2450,21 @@ AS $function$
   where n.visibility = 'public';
 $function$;
 
+CREATE OR REPLACE FUNCTION public.get_guest_signup_rules()
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select jsonb_build_object(
+    'default_min_age', 13,
+    'min_age_by_country',
+      coalesce((select jsonb_object_agg(m.country, m.min_age) from public.min_age_by_country m), '{}'::jsonb),
+    'teen_signups_open',
+      coalesce((select f.enabled from public.app_flags f where f.key = 'teen_signups_open'), false)
+  );
+$function$;
+
 CREATE OR REPLACE FUNCTION public.get_guest_venue_comments(p_venue_id text, p_limit integer DEFAULT 50, p_offset integer DEFAULT 0)
  RETURNS TABLE(id uuid, created_at timestamp with time zone, venue_id text, user_id uuid, body text, like_count integer, liked_by_me boolean)
  LANGUAGE sql
@@ -2404,6 +2613,32 @@ AS $function$
   ) u
   order by u.created_at desc
   limit (select lim from cfg);
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_my_account_status()
+ RETURNS TABLE(has_birthdate boolean, has_gender boolean, missing_documents text[], age_tier text, teen_signups_open boolean)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select
+    pp.user_id is not null,
+    p.gender is not null,
+    coalesce(
+      (select array_agg(d.document order by d.document)
+       from public.legal_documents d
+       where not exists (
+         select 1 from public.legal_acceptances a
+         where a.user_id = me.uid and a.document = d.document and a.version = d.current_version
+       )),
+      '{}'::text[]
+    ),
+    public.fun_age_tier(pp.birthdate),
+    coalesce((select f.enabled from public.app_flags f where f.key = 'teen_signups_open'), false)
+  from (select auth.uid() as uid) me
+  left join public.profiles p on p.id = me.uid
+  left join public.profile_private pp on pp.user_id = me.uid
+  where me.uid is not null;
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_my_dm_inbox()
@@ -3550,10 +3785,27 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
  SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
+declare
+  v_meta jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
 begin
   insert into public.profiles (id, display_name, onboarding_completed)
   values (new.id, 'Player', false)
   on conflict (id) do nothing;
+
+  if v_meta ? 'birthdate' then
+    perform public._fun_apply_account_setup(
+      new.id,
+      (v_meta ->> 'birthdate')::date,
+      nullif(v_meta ->> 'gender', ''),
+      v_meta ->> 'country',
+      coalesce(v_meta -> 'accepted', '{}'::jsonb)
+    );
+    -- The answers now live in their own tables. Auth metadata is copied into every
+    -- session token, so a birthdate left there would travel with every request.
+    update auth.users
+    set raw_user_meta_data = raw_user_meta_data - 'birthdate' - 'gender' - 'country' - 'accepted'
+    where id = new.id;
+  end if;
   return new;
 end;
 $function$;
@@ -4911,6 +5163,8 @@ CREATE TRIGGER venue_photo_reports_apply AFTER INSERT ON public.venue_photo_repo
 -- Row Level Security
 -- ======================================================================
 
+alter table public.app_flags enable row level security;
+
 alter table public.athlete_endorsements enable row level security;
 
 alter table public.badges enable row level security;
@@ -4951,6 +5205,10 @@ alter table public.game_results enable row level security;
 
 alter table public.games enable row level security;
 
+alter table public.legal_acceptances enable row level security;
+
+alter table public.legal_documents enable row level security;
+
 alter table public.map_note_comment_likes enable row level security;
 
 alter table public.map_note_comments enable row level security;
@@ -4959,11 +5217,15 @@ alter table public.map_note_likes enable row level security;
 
 alter table public.map_notes enable row level security;
 
+alter table public.min_age_by_country enable row level security;
+
 alter table public.notifications enable row level security;
 
 alter table public.osm_sports_venues enable row level security;
 
 alter table public.profile_locations enable row level security;
+
+alter table public.profile_private enable row level security;
 
 alter table public.profiles enable row level security;
 
@@ -5153,6 +5415,8 @@ create policy "games: readable by viewers it is meant for" on public.games as PE
    FROM profiles h
   WHERE (h.id = games.created_by)), (requirements ->> 'matchType'::text)) AND ((COALESCE(visibility, 'public'::text) = 'public'::text) OR is_eligible_to_join_game(id, ( SELECT auth.uid() AS uid))))));
 
+create policy "legal_acceptances: owner reads" on public.legal_acceptances as PERMISSIVE for SELECT to authenticated using ((( SELECT auth.uid() AS uid) = user_id));
+
 create policy "map_note_comment_likes: delete own" on public.map_note_comment_likes as PERMISSIVE for DELETE to authenticated using ((( SELECT auth.uid() AS uid) = user_id));
 
 create policy "map_note_comment_likes: insert own" on public.map_note_comment_likes as PERMISSIVE for INSERT to authenticated with check ((( SELECT auth.uid() AS uid) = user_id));
@@ -5202,6 +5466,8 @@ create policy "Profile locations: read own only" on public.profile_locations as 
 create policy "Users can insert own profile location" on public.profile_locations as PERMISSIVE for INSERT to authenticated with check ((( SELECT auth.uid() AS uid) = profile_id));
 
 create policy "Users can update own profile location" on public.profile_locations as PERMISSIVE for UPDATE to authenticated using ((( SELECT auth.uid() AS uid) = profile_id)) with check ((( SELECT auth.uid() AS uid) = profile_id));
+
+create policy "profile_private: owner reads" on public.profile_private as PERMISSIVE for SELECT to authenticated using ((( SELECT auth.uid() AS uid) = user_id));
 
 create policy "Profiles are viewable by everyone" on public.profiles as PERMISSIVE for SELECT to authenticated using (true);
 
@@ -5347,6 +5613,8 @@ comment on function public.get_venues_in_bbox(p_min_lat double precision, p_min_
 -- Grants — tables
 -- ======================================================================
 
+grant delete, insert, references, select, trigger, truncate, update on public.app_flags to service_role;
+
 grant delete, insert, references, select, trigger, truncate, update on public.athlete_endorsements to anon;
 
 grant delete, insert, references, select, trigger, truncate, update on public.athlete_endorsements to authenticated;
@@ -5465,6 +5733,12 @@ grant delete, insert, references, select, trigger, truncate, update on public.ge
 
 grant delete, insert, references, select, trigger, truncate, update on public.geometry_columns to service_role;
 
+grant select on public.legal_acceptances to authenticated;
+
+grant delete, insert, references, select, trigger, truncate, update on public.legal_acceptances to service_role;
+
+grant delete, insert, references, select, trigger, truncate, update on public.legal_documents to service_role;
+
 grant delete, insert, references, select, trigger, truncate, update on public.map_note_comment_likes to anon;
 
 grant delete, insert, references, select, trigger, truncate, update on public.map_note_comment_likes to authenticated;
@@ -5489,6 +5763,8 @@ grant delete, insert, references, select, trigger, truncate, update on public.ma
 
 grant delete, insert, references, select, trigger, truncate, update on public.map_notes to service_role;
 
+grant delete, insert, references, select, trigger, truncate, update on public.min_age_by_country to service_role;
+
 grant delete, insert, references, select, trigger, truncate, update on public.notifications to anon;
 
 grant delete, insert, references, select, trigger, truncate, update on public.notifications to authenticated;
@@ -5506,6 +5782,10 @@ grant delete, insert, references, select, trigger, truncate, update on public.pr
 grant delete, insert, references, select, trigger, truncate, update on public.profile_locations to authenticated;
 
 grant delete, insert, references, select, trigger, truncate, update on public.profile_locations to service_role;
+
+grant select on public.profile_private to authenticated;
+
+grant delete, insert, references, select, trigger, truncate, update on public.profile_private to service_role;
 
 grant delete, insert, references, select, trigger, truncate, update on public.profiles to anon;
 
@@ -5615,6 +5895,8 @@ grant execute on function public._athlete_sports_array(profile_json jsonb) to au
 
 grant execute on function public._athlete_sports_array(profile_json jsonb) to service_role;
 
+grant execute on function public._fun_apply_account_setup(p_uid uuid, p_birthdate date, p_gender text, p_country text, p_accepted jsonb) to service_role;
+
 grant execute on function public.add_game_comment(p_game_id uuid, p_body text) to authenticated;
 
 grant execute on function public.add_game_comment(p_game_id uuid, p_body text) to service_role;
@@ -5666,6 +5948,10 @@ grant execute on function public.check_nearby_similar_games(p_sport text, p_lat 
 grant execute on function public.close_rematch_poll(p_poll_id uuid) to authenticated;
 
 grant execute on function public.close_rematch_poll(p_poll_id uuid) to service_role;
+
+grant execute on function public.complete_account_setup(p_birthdate date, p_gender text, p_country text, p_accepted jsonb) to authenticated;
+
+grant execute on function public.complete_account_setup(p_birthdate date, p_gender text, p_country text, p_accepted jsonb) to service_role;
 
 grant execute on function public.complete_game(p_game_id uuid, p_winner_team_or_user text, p_score jsonb) to authenticated;
 
@@ -5721,11 +6007,19 @@ grant execute on function public.enqueue_notification(p_user_id uuid, p_type tex
 
 grant execute on function public.ensure_venue_row(p_venue_id text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to service_role;
 
+grant execute on function public.fun_account_setup_complete(p_uid uuid) to service_role;
+
+grant execute on function public.fun_age_tier(p_birthdate date) to service_role;
+
+grant execute on function public.fun_age_years(p_birthdate date) to service_role;
+
 grant execute on function public.fun_games_sync_lat_lng() to anon;
 
 grant execute on function public.fun_games_sync_lat_lng() to authenticated;
 
 grant execute on function public.fun_games_sync_lat_lng() to service_role;
+
+grant execute on function public.fun_min_age(p_country text) to service_role;
 
 grant execute on function public.games_set_ends_at() to anon;
 
@@ -5803,6 +6097,12 @@ grant execute on function public.get_guest_notes_nearby(p_lat double precision, 
 
 grant execute on function public.get_guest_notes_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to service_role;
 
+grant execute on function public.get_guest_signup_rules() to anon;
+
+grant execute on function public.get_guest_signup_rules() to authenticated;
+
+grant execute on function public.get_guest_signup_rules() to service_role;
+
 grant execute on function public.get_guest_venue_comments(p_venue_id text, p_limit integer, p_offset integer) to anon;
 
 grant execute on function public.get_guest_venue_comments(p_venue_id text, p_limit integer, p_offset integer) to authenticated;
@@ -5828,6 +6128,10 @@ grant execute on function public.get_latest_status(p_user uuid) to service_role;
 grant execute on function public.get_live_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to authenticated;
 
 grant execute on function public.get_live_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to service_role;
+
+grant execute on function public.get_my_account_status() to authenticated;
+
+grant execute on function public.get_my_account_status() to service_role;
 
 grant execute on function public.get_my_dm_inbox() to authenticated;
 

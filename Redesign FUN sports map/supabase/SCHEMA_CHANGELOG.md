@@ -1,5 +1,22 @@
 # Schema changelog
 
+## 2026-09-28 — Age, country and the legal documents, before the account exists
+
+`20260928180000_account_setup_and_legal.sql`.
+
+FUN is splitting into two communities that never meet: under-18s and adults. The line
+is a birthdate, so sign-up now asks for it (with country, gender and acceptance of the
+Terms, Privacy Policy and Community Guidelines), and the server — not the form — decides:
+`handle_new_user` raises on an under-age sign-up, which aborts the auth insert, so no
+account exists to clean up. The minimum is 13, or the country's higher legal minimum
+(`min_age_by_country`: GDPR digital-consent ages, Australia's 16). Teen sign-ups stay
+shut (`app_flags.teen_signups_open`) until the wall between the tiers is live.
+
+The birthdate lives in `profile_private`, which only its owner can read and nobody can
+write through the API — so it cannot be edited to cross the line — and is stripped from
+auth metadata, which would otherwise ride in every session token. Accounts made before
+this, or sent back by a terms update, finish at `/account-setup`.
+
 ## 2026-09-28 — `schema.sql` caught up with production
 
 Regenerated in `422e2c9`, the first dump since 2026-08-12: 44 tables, 122 functions,

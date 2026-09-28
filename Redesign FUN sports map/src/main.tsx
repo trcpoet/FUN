@@ -7,6 +7,7 @@ import { RequireAuth } from "./app/components/RequireAuth";
 import { RequireOnboarding } from "./app/components/RequireOnboarding";
 import { RequireMember } from "./app/components/RequireMember";
 import { PublicOnly } from "./app/components/PublicOnly";
+import { AccountSetupGate } from "./app/components/AccountSetupGate";
 import "./styles/index.css";
 import { FunOrbitLoader } from "./app/components/FunOrbitLoader";
 import { Toaster } from "./app/components/ui/sonner";
@@ -28,6 +29,8 @@ const Feed = lazy(() => import("./app/pages/Feed.tsx"));
 const RecommendedGames = lazy(() => import("./app/pages/RecommendedGames.tsx"));
 const PopularVenues = lazy(() => import("./app/pages/PopularVenues.tsx"));
 const RedeemInvite = lazy(() => import("./app/pages/RedeemInvite.tsx"));
+const AccountSetup = lazy(() => import("./app/pages/AccountSetup.tsx"));
+const LegalPage = lazy(() => import("./app/pages/LegalPage.tsx"));
 
 function RouteFallback() {
   return <FunOrbitLoader />;
@@ -114,8 +117,14 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <RouteErrorBoundary>
         <Suspense fallback={<RouteFallback />}>
+          <AccountSetupGate>
           <Routes>
             <Route path="/" element={<App />} />
+            <Route path="/account-setup" element={<AccountSetup />} />
+            <Route path="/terms" element={<LegalPage slug="terms" />} />
+            <Route path="/privacy" element={<LegalPage slug="privacy" />} />
+            <Route path="/guidelines" element={<LegalPage slug="guidelines" />} />
+            <Route path="/child-safety" element={<LegalPage slug="child-safety" />} />
             <Route path="/login" element={<AuthAlias mode="signin" />} />
             <Route path="/signup" element={<AuthAlias mode="signup" />} />
             <Route
@@ -185,6 +194,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/g/:token" element={<RedeemInvite />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </AccountSetupGate>
         </Suspense>
       </RouteErrorBoundary>
     </BrowserRouter>

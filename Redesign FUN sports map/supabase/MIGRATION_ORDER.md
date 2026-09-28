@@ -435,6 +435,32 @@ is done.
   `get_guest_games_at_venue` still computes geography distances (52 m to a real game).
   The `rls_disabled_in_public` lint on this table stays — only the owner can clear it.
 
+- **`20260928180000_account_setup_and_legal.sql` — ✅ APPLIED 2026-09-28.** Birthdate,
+  country, gender and legal acceptance, collected before an account exists (phase 1 of
+  the teen/adult split). New tables `profile_private` (owner-read, no write policy),
+  `legal_acceptances`, `legal_documents`, `min_age_by_country`, `app_flags`
+  (`teen_signups_open = false`); `handle_new_user` now applies the rules at insert and
+  strips the answers from auth metadata; RPCs `get_guest_signup_rules`,
+  `get_my_account_status`, `complete_account_setup`.
+
+  Applied **before** the client that sends the fields, deliberately: the old client sends
+  no birthdate, which takes the "created but setup incomplete" path, so sign-ups kept
+  working in between.
+
+  Dry-run inside `begin; … rollback;` through the MCP (which holds the transaction),
+  inserting real `auth.users` rows: an adult with full metadata gets a private row, 3
+  acceptances, gender, `setup complete = true`, and metadata reduced to its unrelated
+  keys. Refused with no `auth.users` row left: 12 in US (`FUN_UNDER_MIN_AGE`), 15 in US
+  (`FUN_TEEN_SIGNUPS_CLOSED`), 15 in AU and DE (min 16), a future date, a malformed
+  date, a 3-letter country, a stale terms version. A metadata-less sign-up is created
+  incomplete, cannot insert into `profile_private` directly (42501), completes via the
+  RPC, and a later attempt to change its birthdate is ignored. Guests can call only
+  `get_guest_signup_rules`. Verified afterwards that the rollback left no objects.
+
+  `min_age_by_country` values are GDPR Art. 8 national ages plus AU 16, KR 14, CN 14 —
+  **to be confirmed by counsel** before teens are admitted outside the US.
+  `legal_documents.current_version` must equal `LEGAL_VERSION` in `src/lib/legal.ts`.
+
 ## Resolved 2026-09-28 — anonymous sign-ins were enabled
 
 **Resolved.** Re-checked 2026-09-28: `GET /auth/v1/settings` reports

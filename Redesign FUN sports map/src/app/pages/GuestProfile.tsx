@@ -188,6 +188,13 @@ export default function GuestProfile() {
             Keep browsing the map as a guest
           </Link>
         </p>
+
+        <nav aria-label="Legal documents" className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-1 pb-4 text-xs text-slate-500">
+          <Link to="/terms" className="hover:text-slate-300">Terms</Link>
+          <Link to="/privacy" className="hover:text-slate-300">Privacy</Link>
+          <Link to="/guidelines" className="hover:text-slate-300">Community Guidelines</Link>
+          <Link to="/child-safety" className="hover:text-slate-300">Child Safety</Link>
+        </nav>
       </div>
     </main>
   );
