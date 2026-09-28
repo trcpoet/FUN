@@ -1,5 +1,19 @@
 # Schema changelog
 
+## 2026-09-28 — Guests can no longer write to PostGIS's coordinate table
+
+`20260928170000_spatial_ref_sys_read_only.sql`.
+
+`spatial_ref_sys` arrived with postgis, in `public`, owned by supabase_admin, RLS off,
+and with every privilege granted to `anon` and `authenticated`. PostgREST served it, so
+a signed-out browser holding the publishable key could edit or delete rows — and every
+geography in this schema is SRID 4326, which PostGIS resolves by reading that table.
+Deleting one row would have taken the map's distance queries down for everyone.
+
+`postgres` can neither enable RLS (not the owner) nor revoke (not the grantor), but it
+holds TRIGGER, so a statement-level trigger now refuses writes from the two API roles.
+Reads, and supabase_admin (postgis upgrades), are untouched.
+
 ## 2026-09-28 — The map read carries the host; venues can be saved
 
 `20260928100000_game_host_summary.sql`, `20260928110000_saved_venues.sql`.

@@ -411,7 +411,29 @@ is done.
   meaningless because `generate_series` gave all five rows the same `created_at`,
   leaving the order to a random uuid tiebreak; it was redone with distinct times.
 
-## Open security finding — anonymous sign-ins are enabled
+- **`20260928170000_spatial_ref_sys_read_only.sql` — ✅ APPLIED 2026-09-28.** A
+  statement-level trigger that refuses INSERT/UPDATE/DELETE/TRUNCATE on
+  `public.spatial_ref_sys` from `anon` and `authenticated`.
+
+  Found in the pre-launch security pass: the table is PostGIS's, sits in `public` with
+  RLS off, and supabase_admin had granted the API roles every privilege on it. Before
+  applying, a PATCH through PostgREST with the publishable key returned **200**; one
+  `DELETE ?srid=eq.4326` would have broken every geography query in the app. RLS and
+  REVOKE are both unavailable to `postgres` (not owner, not grantor); TRIGGER is.
+
+  Dry-run first inside `begin; … rollback;` (owner write passes, `set local role anon`
+  write raises, `authenticated` reads 4326), then confirmed nothing persisted. After
+  applying, probed through PostgREST as a guest: PATCH and DELETE both return
+  `401 42501 spatial_ref_sys is read-only`, a read of 4326 returns 200, and
+  `get_guest_games_at_venue` still computes geography distances (52 m to a real game).
+  The `rls_disabled_in_public` lint on this table stays — only the owner can clear it.
+
+## Resolved 2026-09-28 — anonymous sign-ins were enabled
+
+**Resolved.** Re-checked 2026-09-28: `GET /auth/v1/settings` reports
+`anonymous_users: false` (email is the only provider, confirmation required), and the
+advisors no longer raise the anonymous-access lint. The original finding is kept below
+for the record.
 
 Not a migration, and not introduced by this work, but it interacts badly with it.
 
