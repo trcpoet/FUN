@@ -1,5 +1,20 @@
 # Schema changelog
 
+## 2026-09-28 — `schema.sql` caught up with production
+
+Regenerated in `422e2c9`, the first dump since 2026-08-12: 44 tables, 122 functions,
+111 policies, 77 indexes and 16 triggers (was 34 / 81 / 83 / 64 / 12). The Realtime
+publication now reads `chat_reads, dm_messages, game_messages, notifications`.
+
+Checked against the repo rather than trusted: every table, function and added column
+that any of the 61 files in `migrations/` creates exists in the dump. That matters for
+the seven files from `20260809120000` to `20260813090000`, which were applied by hand
+and so have no row in `supabase_migrations.schema_migrations` — their objects are live
+all the same. The September files that went through the Supabase MCP are recorded
+under their apply-time versions (`20260927144918 guest_browse_read_paths` for
+`20260922130000_guest_browse_read_paths.sql`), so `supabase migration list` will not
+line up with the folder by version.
+
 ## 2026-09-28 — Guests can no longer write to PostGIS's coordinate table
 
 `20260928170000_spatial_ref_sys_read_only.sql`.

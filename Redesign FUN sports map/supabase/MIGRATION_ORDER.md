@@ -200,11 +200,18 @@ their status).
 
 ### Follow-up
 
-`schema.sql` has not been regenerated for these nine. `scripts/dump-schema.mjs`
-shells out to the `supabase` binary, which is not installed on this machine
-(`spawnSync supabase ENOENT`). Install the CLI and run `node scripts/dump-schema.mjs
-> supabase/schema.sql` so the baseline stops drifting — it is currently nine
-migrations behind production.
+**✅ Done 2026-09-28.** `schema.sql` was regenerated from production in `422e2c9`
+(04:34 UTC, after `20260928170000`), and a second dump taken afterwards matched it
+line for line apart from the timestamp. It covers every migration through
+`20260928170000`, not just these nine: every table (28), function (100) and added
+column (23) that any file in `migrations/` creates is present in it.
+
+One thing the dump does not capture is column-level grants. `dump-schema.mjs` reads
+`information_schema.role_table_grants`, which is table-level only, so the per-column
+SELECT on `games` that `20260922120000` gives `anon` and `authenticated` (every column
+except `invite_token`) is absent from `schema.sql`. That fails closed — a database
+built from `schema.sql` alone cannot read `games` at all — and the rebuild recipe at
+the top re-applies `20260922120000`, which restores it.
 
 Run each file on its own, in a single transaction, and stop on the first error —
 three of them drop and recreate a function, and without a transaction there is a
@@ -432,8 +439,15 @@ is done.
 
 **Resolved.** Re-checked 2026-09-28: `GET /auth/v1/settings` reports
 `anonymous_users: false` (email is the only provider, confirmation required), and the
-advisors no longer raise the anonymous-access lint. The original finding is kept below
-for the record.
+advisors no longer raise the anonymous-access lint.
+
+Turning the provider off stops only *new* anonymous sign-ins; an existing session keeps
+refreshing. 2 of the 4 dormant accounts still held one, so those 2 rows were deleted from
+`auth.sessions` on 2026-09-28 (their refresh tokens went with them). Verified after: 0
+sessions and 0 unrevoked refresh tokens belong to anonymous users. The 4 accounts, their
+profiles, 6 participant rows and 7 expired games were left as they were.
+
+The original finding is kept below for the record.
 
 Not a migration, and not introduced by this work, but it interacts badly with it.
 
