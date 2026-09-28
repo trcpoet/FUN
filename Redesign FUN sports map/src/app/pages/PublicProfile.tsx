@@ -173,7 +173,9 @@ export default function PublicProfile() {
               handle={ap.handle ?? null}
               avatarUrl={avatarUrl}
               fallbackInitial={fallbackInitial}
-              verified={!!ap.verified}
+              // Self-set `athlete_profile.verified` is no longer trusted; the crest returns
+              // with verification (identity_verifications), never from the profile JSON.
+              verified={false}
               rating={rating}
               ratingCount={repCount}
               gamesPlayed={0}

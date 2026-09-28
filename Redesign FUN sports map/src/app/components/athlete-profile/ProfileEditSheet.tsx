@@ -808,17 +808,38 @@ export function ProfileEditSheet({
                 {editTab === "more" && (
                   <div className={sectionCard("space-y-6 animate-in fade-in slide-in-from-right-4 duration-500")}>
                     <div className="space-y-4">
-                      <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Public Verification</Label>
-                      <div className="flex items-center justify-between p-5 rounded-[32px] bg-white/[0.02] border border-white/5">
-                        <div className="flex items-center gap-3">
-                          <Trophy className="size-5 text-amber-400" />
-                          <div>
-                            <p className="text-xs font-black uppercase tracking-tighter text-white">Verified Status</p>
-                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Show verified crest</p>
-                          </div>
+                      {/* The crest used to be a switch anyone could turn on. It will come
+                          back only as the result of a real check (Persona), never self-set. */}
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Verification</Label>
+                      <div className="flex items-center gap-3 p-5 rounded-[32px] bg-white/[0.02] border border-white/5">
+                        <Trophy className="size-5 shrink-0 text-amber-400" />
+                        <div>
+                          <p className="text-xs font-black uppercase tracking-tighter text-white">Verified badge</p>
+                          <p className="mt-1 text-[11px] leading-snug text-slate-400">
+                            Verify with a photo ID to earn the badge. Coming soon.
+                          </p>
                         </div>
-                        <Switch checked={!!draft.verified} onCheckedChange={(v) => setDraft((d) => ({ ...d, verified: v }))} />
                       </div>
+
+                      <Label className="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Legal</Label>
+                      <nav aria-label="Legal documents" className="grid grid-cols-2 gap-2">
+                        {[
+                          ["/terms", "Terms"],
+                          ["/privacy", "Privacy Policy"],
+                          ["/guidelines", "Community Guidelines"],
+                          ["/child-safety", "Child Safety"],
+                        ].map(([href, label]) => (
+                          <a
+                            key={href}
+                            href={href}
+                            target="_blank"
+                            rel="noopener"
+                            className="flex min-h-11 items-center rounded-2xl border border-white/5 bg-white/[0.02] px-4 text-xs font-semibold text-slate-300 hover:text-primary"
+                          >
+                            {label}
+                          </a>
+                        ))}
+                      </nav>
 
                       {onSignOut && (
                         <Button

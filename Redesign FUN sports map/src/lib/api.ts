@@ -12,6 +12,8 @@ import { isGuestSession, pickReadRpc } from "./guestRpc";
 import { subscribeWithRetry } from "./realtimeRetry";
 import { parseAthleteProfile, type AthleteProfilePayload } from "./athleteProfile";
 import { parseGender, type Gender } from "./gamePreferenceOptions";
+import { FALLBACK_SIGNUP_RULES, type AgeTier, type SignupRules } from "./ageRules";
+import type { AcceptedDocument } from "./legal";
 import { searchPeople } from "./searchPeople";
 import type { LocationVisibilityMode } from "./locationVisibility";
 import type {
@@ -689,14 +691,125 @@ export function validatePassword(password: string): { ok: boolean; message?: str
   return { ok: true };
 }
 
-export async function signUp(email: string, password: string): Promise<{ error: Error | null }> {
+/** What a person tells us before an account exists. See `_fun_apply_account_setup`. */
+export type AccountDetails = {
+  /** `YYYY-MM-DD` */
+  birthdate: string;
+  gender: Gender;
+  /** ISO 3166-1 alpha-2 */
+  country: string;
+  /** The version of each document the form showed. */
+  accepted: Record<AcceptedDocument, string>;
+};
+
+/**
+ * The details travel as sign-up metadata. `handle_new_user` checks them at insert
+ * (refusing the account outright if the rules say no), copies them into their own
+ * tables and strips them from the metadata, so none of this rides in session tokens.
+ */
+export async function signUp(
+  email: string,
+  password: string,
+  details: AccountDetails,
+): Promise<{ error: Error | null }> {
   if (!supabase) return { error: new Error("Supabase not configured") };
   const validation = validatePassword(password);
   if (!validation.ok) return { error: new Error(validation.message) };
   const { error } = await supabase.auth.signUp({
     email: email.trim().toLowerCase(),
     password,
-    options: { emailRedirectTo: window.location.origin },
+    options: {
+      emailRedirectTo: window.location.origin,
+      data: {
+        birthdate: details.birthdate,
+        gender: details.gender,
+        country: details.country,
+        accepted: details.accepted,
+      },
+    },
+  });
+  return { error: error ? new Error(error.message) : null };
+}
+
+export async function getSignupRules(): Promise<SignupRules> {
+  if (!supabase) return FALLBACK_SIGNUP_RULES;
+  const { data, error } = await supabase.rpc("get_guest_signup_rules");
+  if (error || !data || typeof data !== "object") return FALLBACK_SIGNUP_RULES;
+  const raw = data as { default_min_age?: number; min_age_by_country?: Record<string, number>; teen_signups_open?: boolean };
+  return {
+    defaultMinAge: typeof raw.default_min_age === "number" ? raw.default_min_age : FALLBACK_SIGNUP_RULES.defaultMinAge,
+    minAgeByCountry: raw.min_age_by_country ?? {},
+    teenSignupsOpen: raw.teen_signups_open === true,
+  };
+}
+
+/** The visitor's country from Vercel's IP lookup, to prefill the form. Null when unknown. */
+export async function getIpCountry(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/geo", { cache: "no-store" });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { success?: boolean; data?: { country?: string | null } };
+    const code = body.data?.country ?? null;
+    return typeof code === "string" && /^[A-Z]{2}$/.test(code) ? code : null;
+  } catch {
+    return null;
+  }
+}
+
+export type AccountStatus = {
+  hasBirthdate: boolean;
+  hasGender: boolean;
+  missingDocuments: AcceptedDocument[];
+  ageTier: AgeTier | null;
+  teenSignupsOpen: boolean;
+};
+
+export function isAccountSetupComplete(status: AccountStatus): boolean {
+  return status.hasBirthdate && status.hasGender && status.missingDocuments.length === 0;
+}
+
+export async function getMyAccountStatus(): Promise<{ status: AccountStatus | null; error: Error | null }> {
+  if (!supabase) return { status: null, error: new Error("Supabase not configured") };
+  const { data, error } = await supabase.rpc("get_my_account_status");
+  if (error) return { status: null, error: new Error(error.message) };
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | {
+        has_birthdate?: boolean;
+        has_gender?: boolean;
+        missing_documents?: string[] | null;
+        age_tier?: string | null;
+        teen_signups_open?: boolean;
+      }
+    | undefined;
+  if (!row) return { status: null, error: new Error("No account status") };
+  return {
+    status: {
+      hasBirthdate: row.has_birthdate === true,
+      hasGender: row.has_gender === true,
+      missingDocuments: (row.missing_documents ?? []) as AcceptedDocument[],
+      ageTier: row.age_tier === "teen" || row.age_tier === "adult" ? row.age_tier : null,
+      teenSignupsOpen: row.teen_signups_open === true,
+    },
+    error: null,
+  };
+}
+
+/**
+ * For accounts made before sign-up asked (or after a terms update). Birthdate and
+ * country are set once; on a later call the server ignores them.
+ */
+export async function completeAccountSetup(details: {
+  birthdate?: string | null;
+  gender?: Gender | null;
+  country?: string | null;
+  accepted: Partial<Record<AcceptedDocument, string>>;
+}): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.rpc("complete_account_setup", {
+    p_birthdate: details.birthdate ?? null,
+    p_gender: details.gender ?? null,
+    p_country: details.country ?? null,
+    p_accepted: details.accepted,
   });
   return { error: error ? new Error(error.message) : null };
 }

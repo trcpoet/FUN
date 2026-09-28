@@ -6,7 +6,6 @@ import { uploadAvatarImage } from "../../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { GENDER_OPTIONS, type Gender } from "../../lib/gamePreferenceOptions";
 import { safeReturnTo } from "../../lib/guestAccess";
 import { POPULAR_SPORT_LABELS } from "../../lib/sportsCatalog";
 import { sportEmojiFor } from "../../lib/sportDisplay";
@@ -25,13 +24,14 @@ import { cn } from "../components/ui/utils";
  * Deliberately not required. Someone who skips it still gets distance-ranked
  * games, and the question is asked again the first time the map has nothing in
  * their sports to show.
+ *
+ * Gender is no longer asked here: sign-up asks it, with date of birth and country,
+ * before the account exists (see AccountDetailsFields).
  */
 export default function Onboarding() {
-  const { displayName, avatarUrl, gender: savedGender, athleteProfile, updateProfile, refetch } =
-    useMyProfile();
+  const { displayName, avatarUrl, athleteProfile, updateProfile, refetch } = useMyProfile();
   const { refetchProfile } = useAuth();
   const [name, setName] = useState("");
-  const [gender, setGender] = useState<Gender | null>(null);
   const [sports, setSports] = useState<string[]>([]);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,10 +48,6 @@ export default function Onboarding() {
   React.useEffect(() => {
     if (displayName != null) setName(displayName);
   }, [displayName, avatarUrl]);
-
-  React.useEffect(() => {
-    if (savedGender) setGender(savedGender);
-  }, [savedGender]);
 
   // Re-running onboarding should not silently wipe sports already on file.
   React.useEffect(() => {
@@ -71,11 +67,6 @@ export default function Onboarding() {
       setError("Display name is required");
       return;
     }
-    // Gender gates game visibility, so it can't be deferred past onboarding.
-    if (!gender) {
-      setError("Please select your gender to continue");
-      return;
-    }
     setError(null);
     setLoading(true);
 
@@ -93,7 +84,6 @@ export default function Onboarding() {
     const err = await updateProfile({
       display_name: trimmedName,
       ...(newAvatarUrl !== null ? { avatar_url: newAvatarUrl } : {}),
-      gender,
       onboarding_completed: true,
       // Merged, not replaced: this screen knows about two of the twenty-odd
       // fields in an athlete profile, and a re-run must not drop the rest.
@@ -145,34 +135,6 @@ export default function Onboarding() {
               required
               className="bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500"
             />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-slate-300">Gender</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {GENDER_OPTIONS.map((o) => {
-                const selected = gender === o.value;
-                return (
-                  <button
-                    key={o.value}
-                    type="button"
-                    onClick={() => setGender(o.value)}
-                    aria-pressed={selected}
-                    className={
-                      "min-h-11 rounded-xl border px-3 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 " +
-                      (selected
-                        ? "border-primary bg-primary/15 text-primary"
-                        : "border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500")
-                    }
-                  >
-                    {o.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-xs text-slate-500">
-              Required. Games open only to one gender are shown just to matching players — this is
-              what keeps them private, so we can&rsquo;t show you games until it&rsquo;s set.
-            </p>
           </div>
           <div className="space-y-2">
             <Label className="text-slate-300">What do you play?</Label>
