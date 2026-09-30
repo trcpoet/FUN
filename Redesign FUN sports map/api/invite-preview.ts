@@ -18,6 +18,13 @@
  *
  * The decisions about *what* a preview may say, and the HTML rewriting, live in
  * `server/lib/invitePreview.ts` where they are unit-tested.
+ *
+ * Routing: `vercel.json` rewrites `/g/:token` here, and that entry MUST stay
+ * above the SPA catch-all or the catch-all swallows it and crawlers get the
+ * generic card again. The rewrite carries no comment because Vercel validates
+ * vercel.json strictly — an extra key such as `"//"` fails the build, and a
+ * failed build leaves the previous deployment serving, which looks exactly like
+ * the rewrite silently not working.
  */
 import {
   applyPreview,

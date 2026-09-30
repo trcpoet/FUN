@@ -2,7 +2,6 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "//": "Share links get server-rendered meta tags. Must come before the SPA catch-all below, which would otherwise swallow /g/<token> and hand crawlers the generic card. The function returns the real index.html with a few tags rewritten, so people still get the SPA and react-router still handles the route.",
       "source": "/g/:token",
       "destination": "/api/invite-preview?token=:token"
     },
