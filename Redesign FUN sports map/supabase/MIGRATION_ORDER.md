@@ -461,6 +461,35 @@ is done.
   **to be confirmed by counsel** before teens are admitted outside the US.
   `legal_documents.current_version` must equal `LEGAL_VERSION` in `src/lib/legal.ts`.
 
+- **`20260929120000_invite_preview.sql` — ✅ APPLIED 2026-09-29.** Adds
+  `get_invite_preview(uuid)`, the data behind a real share-link unfurl. Read by
+  `api/invite-preview.ts`, which rewrites six meta tags into the served
+  `index.html` for `/g/<token>`.
+
+  **The projection is the point.** Ten columns, none of which can name a person:
+  no `created_by`, no host, no participant names, no `id`, no coordinates, no
+  `description`. What, where, when, how many — the same four things the map already
+  shows a signed-out visitor, now on the share card. Verified over HTTP in
+  production with the publishable key: the response carries exactly those ten
+  fields and nothing else.
+
+  Granted to `anon` because crawlers are unauthenticated. Enumeration is not a
+  concern (`invite_token` is a v4 uuid) and the token is already the credential —
+  whoever holds it can redeem and join. The endpoint reads with the **anon** key
+  rather than the service role specifically so it cannot exceed a guest.
+
+  Verified end to end on production: a crawler UA gets per-game `<title>`,
+  `og:title`, `og:url` and the twitter pair; a well-formed but unknown token
+  degrades to the generic shell; a non-uuid token is rejected at the edge with a
+  400; and a real visitor still boots the SPA, reaches `RedeemInvite`, and
+  bounces to sign-in with `?redirect=/g/<token>` intact.
+
+  Note for whoever edits that route next: the `/g/:token` rewrite must stay
+  **above** the SPA catch-all in `vercel.json`, and that file takes no comments.
+  An extra key such as `"//"` fails Vercel's schema validation, and a failed
+  build leaves the *previous* deployment serving — which is indistinguishable
+  from the rewrite quietly not working. That cost one deploy cycle to diagnose.
+
 ## Resolved 2026-09-28 — anonymous sign-ins were enabled
 
 **Resolved.** Re-checked 2026-09-28: `GET /auth/v1/settings` reports
