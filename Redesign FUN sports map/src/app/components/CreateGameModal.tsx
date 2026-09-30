@@ -836,7 +836,7 @@ export function CreateGameModal({
                       selected={pickDate}
                       onSelect={setPickDate}
                       disabled={{ before: startOfToday() }}
-                      initialFocus
+                      autoFocus
                       className="bg-transparent text-slate-100"
                     />
                   </div>
