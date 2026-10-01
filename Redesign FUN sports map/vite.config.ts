@@ -107,18 +107,40 @@ function seoFiles(env: Record<string, string>): Plugin {
     name: 'fun-seo-files',
     apply: 'build',
     generateBundle() {
-      const robots = ['User-agent: *', 'Disallow: /api/']
+      // `/g/` is NOT disallowed on purpose. Those pages carry `noindex` instead
+      // (see api/invite-preview.ts): a Disallow would stop Facebook's and
+      // Slack's scrapers fetching the page at all, which is the one thing the
+      // share preview exists to allow. noindex keeps them out of Google while
+      // still letting a chat app read the og: tags.
+      const robots = [
+        'User-agent: *',
+        'Disallow: /api/',
+        'Disallow: /profile',
+        'Disallow: /account-setup',
+        'Disallow: /reset-password',
+      ]
       if (origin) robots.push('', `Sitemap: ${origin}/sitemap.xml`)
       this.emitFile({ type: 'asset', fileName: 'robots.txt', source: `${robots.join('\n')}\n` })
       if (!origin) return
+
+      // Only pages a stranger can actually read, and that say something. The
+      // map is the product; the four legal pages are real, substantive text and
+      // carry the trust signals a new site needs. Deliberately absent: venue
+      // and city pages. FUN holds 92,615 venues but only OSM's own facts about
+      // them — 1 review, 1 comment, 0 photos site-wide — so generating them
+      // today would publish thousands of pages that re-state what Google
+      // already has from OSM, which is the shape of thin content that drags a
+      // whole domain down. They become worth building when FUN knows something
+      // about a venue that nobody else does; the threshold is in the PR.
+      const paths = ['/', '/terms', '/privacy', '/guidelines', '/child-safety']
       this.emitFile({
         type: 'asset',
         fileName: 'sitemap.xml',
         source:
           '<?xml version="1.0" encoding="UTF-8"?>\n' +
           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
-          `  <url><loc>${origin}/</loc></url>\n` +
-          '</urlset>\n',
+          paths.map((p) => `  <url><loc>${origin}${p}</loc></url>`).join('\n') +
+          '\n</urlset>\n',
       })
     },
   }

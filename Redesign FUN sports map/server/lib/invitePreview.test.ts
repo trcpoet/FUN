@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   applyPreview,
+  setNoIndex,
   escapeAttr,
   INVITE_TOKEN_RE,
   isOver,
@@ -197,5 +198,43 @@ describe("applyPreview against the real index.html", () => {
     expect(out).not.toContain('onload="alert(1)');
     expect(out).not.toContain("<img src=x");
     expect(out).toContain("&quot; onload=&quot;alert(1)");
+  });
+});
+
+describe("setNoIndex", () => {
+  it("inserts a robots meta into a head that has none", () => {
+    const out = setNoIndex("<html><head>\n<title>x</title></head><body></body></html>");
+    expect(out).toContain('<meta name="robots" content="noindex, nofollow" />');
+    // and keeps the rest of the head
+    expect(out).toContain("<title>x</title>");
+  });
+
+  it("overwrites an existing robots meta rather than adding a second", () => {
+    const out = setNoIndex('<head><meta name="robots" content="index, follow" /></head>');
+    expect(out).toContain('content="noindex, nofollow"');
+    expect(out).not.toContain('content="index, follow"');
+    expect(out.match(/name="robots"/g)).toHaveLength(1);
+  });
+
+  it("copes with attributes on the head tag", () => {
+    const out = setNoIndex('<head lang="en"><title>x</title></head>');
+    expect(out).toContain('name="robots"');
+    expect(out).toContain('<head lang="en">');
+  });
+});
+
+describe("the share page is never indexable", () => {
+  const html = readFileSync(resolve(__dirname, "../../index.html"), "utf8");
+
+  it("applyPreview marks the page noindex", () => {
+    const out = applyPreview(html, game(), "https://fun.example/g/abc", NOW);
+    expect(out).toContain('name="robots" content="noindex, nofollow"');
+  });
+
+  it("a private game can never reach a search index through this path", () => {
+    // The whole reason: these pages now carry real game detail.
+    const out = applyPreview(html, game({ visibility: "invite_only" }), "https://fun.example/g/abc", NOW);
+    expect(out).toContain("noindex");
+    expect(out).toContain("Elzie Odom, Arlington");
   });
 });
