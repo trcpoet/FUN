@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "og:card": "node scripts/render-og-card.mjs"
+    "og:card": "node scripts/render-og-card.mjs",
+    "check:vercel": "node scripts/check-vercel-json.mjs"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "1.2.3",
