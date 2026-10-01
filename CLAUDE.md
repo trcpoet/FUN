@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Quick Start Commands
 
-All commands run from `Redesign FUN sports map/` directory:
+All commands run from the `Redesign FUN sports map/` directory, and every path in this file
+is relative to it unless it says otherwise (this file and `.github/` sit at the repo root):
 
 ```bash
 # Local development
@@ -14,9 +15,11 @@ npm run dev         # Start Vite dev server on http://localhost:5173
 # Production build
 npm run build       # Outputs to dist/
 
+# Before merging to main — the same four checks CI runs
+npm run typecheck && npm test && npm run check:vercel && npm run build
+
 # Database utilities
-npm run import-
- # Imports OpenStreetMap venue data into Supabase
+npm run import-osm  # Imports OpenStreetMap venue data into Supabase
 ```
 
 ## Environment Setup
@@ -28,56 +31,77 @@ VITE_MAPBOX_ACCESS_TOKEN=<mapbox token>
 VITE_SUPABASE_URL=<supabase url>
 VITE_SUPABASE_ANON_KEY=<supabase anon key>
 VITE_SENTRY_DSN=<optional; crash reporting via src/lib/errorReporting.ts, off when unset>
+VITE_MAPBOX_STYLE_URL=<optional; overrides the basemap style>
+VITE_PUBLIC_ORIGIN=<optional, build-time; absolute origin for share cards and the sitemap — falls back to Vercel's own URL, then root-relative>
 ```
 
 Server-only (for `/api/` routes on Vercel):
-- `SUPABASE_SERVICE_ROLE_KEY` — OSM importer
-- `OSM_IMPORT_SECRET` — shared secret for import endpoint
+- `SUPABASE_URL` — every route that talks to Supabase (most fall back to `VITE_SUPABASE_URL`;
+  `osm-venues-import` does not)
+- `SUPABASE_SERVICE_ROLE_KEY` — `osm-venues-import`, `warm-venues`, `venue-enrich`, `venue-photo`
+- `SUPABASE_ANON_KEY` — `invite-preview` (falls back to `VITE_SUPABASE_ANON_KEY`)
+- `OSM_IMPORT_SECRET` — shared secret for `osm-venues-import`
+- `GOOGLE_PLACES_API_KEY` — `venue-enrich`, `venue-photo`
+- `WORLD_NEWS_API_KEY` — `local-news`
+- `MAPBOX_ACCESS_TOKEN` — `directions` (falls back to `VITE_MAPBOX_ACCESS_TOKEN`)
 
 ## Database Setup & Schema
 
-Database migrations live in `supabase/migrations/`. Apply them in order per `supabase/MIGRATION_ORDER.md`:
+Database migrations live in `supabase/migrations/`. Apply them one file at a time, in the order
+`supabase/MIGRATION_ORDER.md` gives — never with `supabase db push`, which applies every pending
+file at once, including any a teammate added since you last looked:
 
 ```bash
-supabase db push  # (if using Supabase CLI locally)
+supabase db query --linked -f supabase/migrations/<file>.sql
+supabase migration repair --linked --status applied <version>   # db query does not record it
 ```
 
-After schema changes, refresh the PostgREST cache:
+Pass the file with `-f`: inlining it fails, because every migration opens with a `--` comment
+that the CLI parses as a flag. Then confirm the objects exist (`pg_proc`, `pg_policy`,
+`information_schema.columns`) and refresh the PostgREST cache:
 
 ```sql
 NOTIFY pgrst, 'reload schema';
 ```
 
-Core schema: `supabase/schema.sql` (tables, RLS, RPCs, functions)
+Core schema: `supabase/schema.sql` — a generated snapshot of production (tables, RLS, RPCs,
+functions, grants). Regenerate it after applying anything:
+`node scripts/dump-schema.mjs > supabase/schema.sql`.
 
 ## Architecture Overview
 
 ### Repo Layout
 
 ```
+├── .github/workflows/typecheck.yml — CI: typecheck, tests, check:vercel, build
 ├── Redesign FUN sports map/    — Main web app (React + Vite)
 │   ├── src/
 │   │   ├── lib/
-│   │   │   ├── api.ts          ← CENTRALIZED API LAYER (all Supabase calls)
+│   │   │   ├── api.ts           ← CENTRALIZED API LAYER (all Supabase calls)
 │   │   │   ├── supabase.ts      ← Client init + DB type definitions
+│   │   │   ├── guestRpc.ts      ← Member vs guest read RPCs, chosen by session
 │   │   │   └── [other utils]
 │   │   ├── app/
-│   │   │   ├── App.tsx          ← Root map shell (~630 lines)
+│   │   │   ├── App.tsx          ← Root map shell (~1,450 lines)
 │   │   │   ├── components/      ← UI components
 │   │   │   ├── pages/           ← Route-level pages
 │   │   │   ├── contexts/        ← React context (AuthContext)
+│   │   │   ├── lib/             ← Map, venue and game logic (pure, unit-tested)
 │   │   │   └── map/             ← Map config + utilities
 │   │   ├── hooks/               ← Custom React hooks
 │   │   ├── styles/              ← Global CSS
 │   │   └── main.tsx             ← App entry + BrowserRouter
-│   └── api/                     ← Vercel serverless routes
-│       ├── overpass.ts          ← OSM Overpass proxy
-│       └── osm-venues-import.ts ← OSM venue importer
-├── supabase/                   — Database layer
-│   ├── schema.sql
-│   ├── migrations/              ← 17+ incremental SQL files
-│   ├── MIGRATION_ORDER.md
-│   └── SCHEMA_CHANGELOG.md
+│   ├── api/                     ← Vercel serverless routes: overpass, osm-venues-import,
+│   │                              warm-venues, auto-cache-venues, venue-enrich, venue-photo,
+│   │                              invite-preview, directions, geo, local-news
+│   ├── server/lib/              ← Logic the routes share (unit-tested)
+│   ├── scripts/                 ← dump-schema, check-vercel-json, import-osm-venues, OG card
+│   ├── supabase/                ← Database layer
+│   │   ├── schema.sql           ← Generated snapshot of production
+│   │   ├── migrations/          ← 60+ incremental SQL files
+│   │   ├── MIGRATION_ORDER.md
+│   │   └── SCHEMA_CHANGELOG.md
+│   └── vercel.json              ← Rewrites; Vercel validates it strictly
 └── docs/                        — Supporting documentation
 ```
 
@@ -85,20 +109,22 @@ Core schema: `supabase/schema.sql` (tables, RLS, RPCs, functions)
 
 | Layer | Technology |
 |---|---|
-| **Framework** | React 18 + TypeScript + Vite |
-| **Styling** | Tailwind CSS 4 + Motion/Framer Motion |
+| **Framework** | React 19 + TypeScript + Vite, with the React Compiler |
+| **Routing** | React Router 7 |
+| **Styling** | Tailwind CSS 4 + Motion |
 | **Maps** | Mapbox GL JS + Three.js (3D avatars) |
 | **Backend** | Supabase (Postgres + PostgREST + Realtime) |
 | **Forms** | React Hook Form |
 | **Charts** | Recharts |
+| **Errors** | Sentry (`@sentry/react`), loaded lazily, off when `VITE_SENTRY_DSN` is unset |
 | **Deploy** | Vercel (SPA + serverless `/api/` routes) |
 
 ### Data Flow at Scale
 
-1. **Map Load**: User location → `useGeolocation` hook → parallel Supabase RPCs (`get_games_nearby`, `get_profiles_nearby`)
-2. **Game Pins**: Rendered with emoji, clustered at low zoom, individual at high zoom
-3. **Venue Loading**: Check `osm_sports_venues` cache first → fallback to Overpass via `/api/overpass` → Web Worker clusters the data off-thread
-4. **Chat Inboxes**: Prefetched on login idle so messenger opens instantly
+1. **Map Load**: User location → `useGeolocation` hook → parallel Supabase RPCs (`get_games_nearby`, `get_profiles_nearby`; a guest gets `get_guest_games_nearby` instead, chosen in `guestRpc.ts`, and no profiles)
+2. **Game Pins**: Sport glyphs rasterized on demand (`registerGameSportImages.ts`), clustered at low zoom, individual at high zoom
+3. **Venue Loading**: Read from the database only (`get_venues_in_bbox`, nearest first). A cache miss fires a non-blocking `/api/warm-venues` request that imports from Overpass server-side, and the map picks the rows up on its next read. Mapbox clusters the pins natively.
+4. **Chat Inboxes**: Prefetched on idle after sign-in so the messenger opens instantly
 5. **Messaging**: Game chat → Supabase Realtime on `game_messages` table; DMs use `dm_threads`/`dm_messages`
 
 ## Dev Conventions (Critical)
@@ -144,10 +170,14 @@ See `src/lib/api.ts` for the full list of functions (auth, games, profiles, stat
 FUN treats performance as a feature. Key patterns:
 
 - **RPC over Table Queries**: Complex aggregations/joins use Postgres functions, not direct SELECT
-- **Progressive Loading**: Fetch "near ring" venues first, then expand radius
-- **Web Workers**: Venue clustering runs off-thread via `venueCluster.worker.ts`
-- **Prefetching**: Chat inboxes prefetch on login idle
+- **Nearest First**: Venue reads are ordered by distance, so PostgREST's 1,000-row cap keeps the closest venues rather than an arbitrary sample
+- **No Blocking on OSM**: The map never waits for Overpass; missing areas are imported in the background (`/api/warm-venues`)
+- **Let the Map Go Idle**: Nothing writes map style every frame. Animations run on a budget (`src/app/map/animationBudget.ts`) and stop when they settle, so an untouched map draws nothing
+- **Prefetching**: Chat inboxes prefetch on idle after sign-in
 - **Pause Venue Fetches When Chatting**: If the messenger is open, pause venue fetch kickoffs to prioritize chat bandwidth
+
+`venueCluster.worker.ts` is unreferenced: venue clustering is Mapbox's own, and moving the park
+scan into a worker was measured and rejected (see `b7deb29`).
 
 ### Config Tuning
 All map UX constants (zoom thresholds, icon sizes, pulse timings) live in `src/app/map/mapConfig.ts`. Tweak there, not hardcoded in components.
@@ -159,20 +189,24 @@ The app uses localStorage flags like `fun_profiles_athlete_column` to gracefully
 
 | File | Role |
 |---|---|
-| `src/main.tsx` | App entry: mounts React, sets up BrowserRouter, wraps with AuthProvider |
+| `src/main.tsx` | App entry: mounts React, sets up BrowserRouter, wraps with AuthProvider, starts error reporting |
 | `src/app/App.tsx` | Map shell: all game/player rendering, state, interaction handlers |
 | `src/lib/api.ts` | **Central API layer** — auth, games, profiles, stats, chat, venues |
 | `src/lib/supabase.ts` | Supabase client init + all DB row type definitions |
 | `src/app/components/MapboxMap.tsx` | Mapbox canvas: renders game pins, player avatars, venues |
 | `src/app/map/mapConfig.ts` | Tunable map UX constants |
-| `src/app/lib/sportsVenues.ts` | Venue fetching (Supabase cache → Overpass fallback) |
-| `src/app/lib/venueCluster.worker.ts` | Web Worker for venue clustering |
-| `supabase/schema.sql` | Postgres tables, RLS policies, RPCs |
+| `src/app/lib/sportsVenues.ts` | Venue reads: database only; a cache miss asks `/api/warm-venues` to import in the background |
+| `src/lib/guestRpc.ts` | Picks the member or guest read RPC by session, in one place |
+| `supabase/schema.sql` | Generated snapshot of production: tables, RLS policies, RPCs, grants |
+| `vercel.json` | Rewrites (`/g/:token` → `/api/invite-preview`, then the SPA catch-all) |
 
 ## Testing & Debugging
 
-Vitest covers the pure logic (`npm test`, 40+ files under `src/**/*.test.ts`), and
-`npm run typecheck` covers both tsconfigs; CI runs both on every PR. There are no component or
+Vitest covers the pure logic (`npm test`, 50+ files under `src/` and `server/`), and
+`npm run typecheck` covers both tsconfigs. CI (`.github/workflows/typecheck.yml`, on Node from
+`.nvmrc`) runs those plus `npm run check:vercel` and the production build on every PR and every
+push to main. A push to main deploys at the moment CI starts, so CI reports a bad deploy rather
+than preventing one — run the same four locally before merging. There are no component or
 end-to-end tests, so the rest is manual:
 - Run `npm run dev` locally
 - Use browser DevTools to inspect network requests to Supabase
@@ -181,11 +215,15 @@ end-to-end tests, so the rest is manual:
 
 ## Deployment (Vercel)
 
+- Production: `https://fun-trcpoet.vercel.app`; every push to main deploys
 - `build` command: `npm run build` → outputs `dist/`
-- `vercel.json` configures SPA rewrites (non-`/api/` paths → `index.html`)
+- `vercel.json` rewrites `/g/:token` to `/api/invite-preview` (share-link unfurls; it must stay
+  above the catch-all) and every other non-`/api/`, non-asset path to `index.html`
+- Vercel validates `vercel.json` strictly: an unknown key, even a `"//"` comment, fails the
+  deploy and leaves the previous one serving. `npm run check:vercel` catches it first
 - `/api/` routes auto-deploy as serverless functions
 - **Required env vars**: `VITE_MAPBOX_ACCESS_TOKEN`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
-- **Serverless env vars**: `SUPABASE_SERVICE_ROLE_KEY`, `OSM_IMPORT_SECRET`
+- **Serverless env vars**: see Environment Setup above
 
 ## Existing Documentation
 
