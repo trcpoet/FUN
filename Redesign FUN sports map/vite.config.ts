@@ -163,7 +163,21 @@ export default defineConfig(({ mode }) => {
     overpassDevProxy(),
     // The React and Tailwind plugins are both required for Make, even if
     // Tailwind is not being actively used – do not remove them
-    react(),
+    //
+    // React Compiler auto-memoises components and values, which this codebase
+    // needed more than the raw hook count suggests: it had 105 useMemo and 112
+    // useCallback against exactly **one** React.memo, and a memoised callback
+    // handed to an unmemoised child saves nothing. The compiler does both ends.
+    //
+    // Safe to turn on here because its own healthcheck compiles 396 of 396
+    // components with zero bailouts and finds no incompatible libraries. If that
+    // ever stops being true, `npx react-compiler-healthcheck` says so, and
+    // removing this block is the whole rollback.
+    react({
+      babel: {
+        plugins: [['babel-plugin-react-compiler', {}]],
+      },
+    }),
     tailwindcss(),
     asyncCriticalCss(),
   ],
