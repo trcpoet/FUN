@@ -132,6 +132,26 @@ export function setMeta(
   return re.test(html) ? html.replace(re, `$1${value}$2`) : html;
 }
 
+/**
+ * Keep a share link out of search results.
+ *
+ * These pages now carry real game details, so an indexed one would put a
+ * private game into Google. `noindex` rather than a robots.txt `Disallow`
+ * because Facebook's and Slack's scrapers honour robots.txt and would then
+ * refuse to fetch the page at all — which is the one thing the preview exists
+ * to allow. noindex keeps Google out while a chat app can still read the
+ * og: tags.
+ */
+export function setNoIndex(html: string): string {
+  if (/<meta\s+name=["']robots["']/i.test(html)) {
+    return html.replace(
+      /(<meta\s+name=["']robots["'][^>]*?content=["'])[^"']*(["'])/i,
+      "$1noindex, nofollow$2",
+    );
+  }
+  return html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    <meta name="robots" content="noindex, nofollow" />`);
+}
+
 /** Apply a preview to the app's shell HTML. */
 export function applyPreview(
   html: string,
@@ -142,7 +162,8 @@ export function applyPreview(
   const { title, description } = previewMeta(p, now);
   const t = escapeAttr(title);
   const d = escapeAttr(description);
-  let out = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${t}</title>`);
+  let out = setNoIndex(html);
+  out = out.replace(/<title>[\s\S]*?<\/title>/i, `<title>${t}</title>`);
   out = setMeta(out, "name", "description", d);
   out = setMeta(out, "property", "og:title", t);
   out = setMeta(out, "property", "og:description", d);

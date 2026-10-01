@@ -29,6 +29,7 @@
 import {
   applyPreview,
   INVITE_TOKEN_RE,
+  setNoIndex,
   type InvitePreview,
 } from "../server/lib/invitePreview";
 
@@ -51,7 +52,10 @@ export default async function handler(request: Request): Promise<Response> {
   // The shell we serve either way. An unknown token still gets the real app,
   // which shows its own "invalid or expired" screen — better than a 404, and it
   // means a lookup failure degrades to today's behaviour rather than an error.
-  const shell = await fetch(new URL("/index.html", url.origin).toString()).then((r) => r.text());
+  const raw = await fetch(new URL("/index.html", url.origin).toString()).then((r) => r.text());
+  // Every /g/ URL stays out of the index, including the fallbacks — an unknown
+  // token is still a private link someone shared.
+  const shell = setNoIndex(raw);
 
   if (!INVITE_TOKEN_RE.test(token)) return html(shell);
 
