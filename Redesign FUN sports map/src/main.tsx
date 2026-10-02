@@ -1,4 +1,4 @@
-import React, { Component, Suspense, lazy } from "react";
+import React, { Component, StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router";
 import { AuthProvider, useAuth } from "./app/contexts/AuthContext";
@@ -106,7 +106,43 @@ class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBo
   }
 }
 
-createRoot(document.getElementById("root")!).render(
+/**
+ * One root, even across a hot reload.
+ *
+ * Vite re-evaluates this module when you edit it, which would call
+ * `createRoot` a second time on a container that already has one — React logs
+ * a red error and the edit appears to break the app. Holding the root on the
+ * element makes an HMR pass a re-render instead.
+ *
+ * Worth the five lines because StrictMode below is only useful if the console
+ * is trustworthy; a spurious error every time someone edits the entry file is
+ * how people learn to ignore it.
+ */
+const container = document.getElementById("root")!;
+type RootHolder = HTMLElement & { __funRoot?: ReturnType<typeof createRoot> };
+const holder = container as RootHolder;
+const root = holder.__funRoot ?? createRoot(container);
+holder.__funRoot = root;
+
+root.render(
+  /*
+    StrictMode is inert in production. The element itself stays in the bundle —
+    a few bytes — but React's production build ships none of the double-invoke
+    machinery, so a user's experience is byte-for-byte what it was. Verified
+    against dist/: the react chunk contains no double-render path.
+    
+    What it buys: in dev, React calls every component twice and mounts each
+    effect, unmounts it, then mounts it again. That turns the bugs that never
+    throw into bugs you see immediately — a realtime channel that does not
+    unsubscribe, a timer that is never cleared, a listener left attached. Those
+    are invisible to Sentry, because nothing crashes; they surface as duplicate
+    messages and a warm phone. This is the only thing that catches them before
+    a user does, and FUN opens realtime channels on every chat thread.
+    
+    It also validates the purity the React Compiler assumes, so the two belong
+    together.
+  */
+  <StrictMode>
   <AuthProvider>
     {/*
       Above the router, so unread state survives navigation and its three
@@ -203,4 +239,5 @@ createRoot(document.getElementById("root")!).render(
     <SpeedInsights />
     </UnreadProvider>
   </AuthProvider>
+  </StrictMode>
 );
