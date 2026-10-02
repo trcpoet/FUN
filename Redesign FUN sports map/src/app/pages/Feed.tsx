@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { cn } from "../components/ui/utils";
 import { useNotifications } from "../../hooks/useNotifications";
 import { useGeolocation } from "../../hooks/useGeolocation";
+import { PeopleSearchSheet } from "../components/people/PeopleSearchSheet";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
@@ -248,6 +249,8 @@ export default function Feed() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  /** The players sheet, opened by the search button in the header. */
+  const [peopleOpen, setPeopleOpen] = useState(false);
   const { notifications, markRead } = useNotifications({ limit: 12 });
   const { coords } = useGeolocation();
   const {
@@ -599,9 +602,11 @@ export default function Feed() {
             </div>
 
             <div className="flex items-center gap-2">
-              <button 
+              <button
+                type="button"
+                onClick={() => setPeopleOpen(true)}
                 className="flex size-10 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-muted-foreground hover:text-white hover:bg-white/[0.08] transition-all"
-                aria-label="Search"
+                aria-label="Search players"
               >
                 <Search className="size-5" />
               </button>
@@ -1131,6 +1136,13 @@ export default function Feed() {
           </button>
         )}
       </div>
+
+      <PeopleSearchSheet
+        open={peopleOpen}
+        onOpenChange={setPeopleOpen}
+        viewerCoords={coords ?? null}
+        currentUserId={user?.id ?? null}
+      />
     </div>
   );
 }
