@@ -39,9 +39,20 @@ node scripts/dump-schema.mjs > supabase/schema.sql
 ```
 
 Requires a linked project (`supabase link --project-ref <ref>`). No DB password needed.
+The link lives in the gitignored `supabase/.temp/`, so a fresh git worktree has to be
+linked (or have that folder copied in) before the dump can reach production.
 
 Regenerate it whenever you apply a batch of migrations to production, so the baseline
 never drifts far from live.
+
+Privileges are dumped exactly, not just added. Supabase's default privileges give
+`anon`, `authenticated` and `service_role` ALL on every new table and EXECUTE on every new
+function, so a replay that only granted would quietly undo every migration that revoked
+something. Each table and function is therefore reset for those roles (and PUBLIC) and
+then granted what production has, including column-level grants. Checked on 2026-10-01 by
+replaying the statements on a local Postgres that starts from those grant-everything
+defaults: all 45 privilege checks (`games`, `games.invite_token`, `chat_reads`, four RPCs,
+three roles) matched production.
 
 ## Applying migrations to production
 
@@ -66,10 +77,12 @@ never drifts far from live.
 > landed this way on 2026-08-10 (`20260810130000_venue_coverage.sql`, arriving with the
 > venue-pipeline merge) between two dumps taken minutes apart.
 
-To apply a single migration deliberately, pass the **file** — do not inline it:
+To apply a single migration deliberately, pass the **file** — do not inline it — and then
+record it in the ledger, which `db query` does not write:
 
 ```bash
 supabase db query --linked -f supabase/migrations/<file>.sql
+supabase migration repair --linked --status applied <version>
 ```
 
 Inlining with `"$(cat …)"` fails: every migration here opens with a `--` comment, and the
@@ -80,6 +93,28 @@ Then confirm PostgREST picked up any signature change:
 ```sql
 notify pgrst, 'reload schema';
 ```
+
+### The migration ledger
+
+`supabase_migrations.schema_migrations` matches the folder as of 2026-10-01: all 63 files,
+each under its own filename version, and `supabase migration list --linked` shows no
+local-only or remote-only rows. Before that it had drifted two ways. Files applied by hand
+through the SQL editor or `db query` left no row at all (the seven August files from
+`20260809120000` to `20260813090000`, plus `spatial_ref_sys_read_only` and
+`account_setup_and_legal`). Files applied through the Supabase MCP's `apply_migration` were
+recorded under the time they ran rather than their own version
+(`20260927144918 guest_browse_read_paths` for `20260922130000_guest_browse_read_paths.sql`).
+
+It was repaired with `migration repair` alone, which writes only that history table and
+runs no migration SQL: 27 versions recorded as applied, each one's objects confirmed live
+first, and 19 mislabelled rows removed. What those 19 rows recorded is archived verbatim in
+`snapshots/2026-10-01-ledger-rows-replaced.sql`, since six of the files had been edited
+after they ran (see `SCHEMA_CHANGELOG.md`, 2026-10-01).
+
+To keep it matching, apply with `db query -f` and record with `migration repair`, as above.
+If something is applied through the MCP's `apply_migration`, its row carries the wrong
+version: revert that version and record the file's own. A complete ledger still is not
+proof — confirm the objects exist before trusting it.
 
 ## Verifying a migration before applying it
 
@@ -206,12 +241,12 @@ line for line apart from the timestamp. It covers every migration through
 `20260928170000`, not just these nine: every table (28), function (100) and added
 column (23) that any file in `migrations/` creates is present in it.
 
-One thing the dump does not capture is column-level grants. `dump-schema.mjs` reads
-`information_schema.role_table_grants`, which is table-level only, so the per-column
-SELECT on `games` that `20260922120000` gives `anon` and `authenticated` (every column
-except `invite_token`) is absent from `schema.sql`. That fails closed — a database
-built from `schema.sql` alone cannot read `games` at all — and the rebuild recipe at
-the top re-applies `20260922120000`, which restores it.
+That dump did not capture column-level grants, and it only ever added privileges, never
+revoked them. This note said on 2026-09-28 that the gap "fails closed". It did not:
+Supabase's default privileges grant every new table to `anon`, so a database built from
+that `schema.sql` would have let a guest read `games.invite_token` again (reproduced on a
+local Postgres on 2026-10-01). **Fixed 2026-10-01:** the dump now records exact
+privileges, column-level included — see "Regenerating schema.sql".
 
 Run each file on its own, in a single transaction, and stop on the first error —
 three of them drop and recreate a function, and without a transaction there is a

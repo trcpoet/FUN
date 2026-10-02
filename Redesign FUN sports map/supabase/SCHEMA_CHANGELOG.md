@@ -1,5 +1,35 @@
 # Schema changelog
 
+## 2026-10-01 — The ledger matches the folder; `schema.sql` keeps what was revoked
+
+No new migration, and no migration SQL ran. Three records were wrong about production.
+
+**The ledger.** `supabase_migrations.schema_migrations` now lists all 63 files under their
+own versions. Nine files had no row (applied by hand), and eighteen were recorded under
+the time the Supabase MCP applied them rather than their filename version. `supabase
+migration repair` recorded 27 versions and removed 19 rows; it writes only the history
+table. Every file's objects were confirmed live first. The 19 removed rows are archived in
+`snapshots/2026-10-01-ledger-rows-replaced.sql`.
+
+Comparing what those rows recorded with the files found six files edited after they ran.
+Four differ only in comment wording or formatting (`game_lifecycle_fixes`, `suggested_games`,
+`game_host_summary`, `saved_venues`). `chat_reads` had absorbed the separately applied
+`chat_reads_tighten_grants`, so that row had no file of its own. One difference was real:
+`20260922120000_game_read_visibility_and_invite_tokens` revoked `viewer_is_game_participant`
+from PUBLIC only and granted it to `authenticated`, while production received
+`from public, anon` and `to authenticated, service_role`. Revoking PUBLIC alone leaves anon
+the EXECUTE that Supabase's default privileges grant, so the file was corrected to the form
+production has. Production's ACL already was `{postgres, authenticated, service_role}`.
+
+**`schema.sql` privileges.** The dump only ever added grants. Supabase's default privileges
+grant ALL on new tables and EXECUTE on new functions to `anon`, `authenticated` and
+`service_role`, so a database built from it would have handed a guest `games.invite_token`
+(reproduced on a local Postgres) and every member-only RPC. `dump-schema.mjs` now resets
+each table and function for those roles and grants exactly what production has, column
+grants included; replayed against grant-everything defaults, 45 of 45 privilege checks
+matched production. The regenerated file also picks up `get_invite_preview`
+(`20260929120000`), which the last dump predated.
+
 ## 2026-09-28 — Age, country and the legal documents, before the account exists
 
 `20260928180000_account_setup_and_legal.sql`.

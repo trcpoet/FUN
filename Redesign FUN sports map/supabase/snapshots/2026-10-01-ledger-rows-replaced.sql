@@ -1,0 +1,2998 @@
+-- ============================================================================
+-- ARCHIVE ONLY — DO NOT RUN THIS FILE. Every line is commented out on purpose.
+-- ============================================================================
+-- The 19 rows removed from supabase_migrations.schema_migrations on 2026-10-01,
+-- verbatim: the SQL each one recorded when it ran in production.
+--
+-- Each was replaced by a row under its own file's version (`supabase migration
+-- repair`), which records the file's current text. Six files had been edited after
+-- they ran, so for those six this archive is the only record of what actually
+-- ran: four differ only in comment wording or formatting, `chat_reads` was later
+-- merged with the separate `chat_reads_tighten_grants` row below, and
+-- `game_read_visibility_and_invite_tokens` is the one real difference — production
+-- revoked viewer_is_game_participant from anon as well as PUBLIC, and the file was
+-- corrected to match on 2026-10-01. See SCHEMA_CHANGELOG.md, 2026-10-01.
+
+-- ----------------------------------------------------------------------------
+-- version 20260808004350  name games_nearby_untimed_ttl  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260808010000_games_nearby_untimed_ttl.sql
+-- ----------------------------------------------------------------------------
+-- -- Align get_games_nearby with get_live_nearby's untimed TTL.
+--
+-- create or replace function public.get_games_nearby(
+--   lat double precision,
+--   lng double precision,
+--   radius_km double precision default 10
+-- )
+-- returns table(
+--   id uuid,
+--   title text,
+--   sport text,
+--   spots_needed integer,
+--   starts_at timestamp with time zone,
+--   created_by uuid,
+--   created_at timestamp with time zone,
+--   status text,
+--   location_label text,
+--   description text,
+--   requirements jsonb,
+--   participant_count integer,
+--   substitute_count integer,
+--   spots_remaining integer,
+--   distance_km double precision,
+--   lat double precision,
+--   lng double precision,
+--   live_started_at timestamp with time zone,
+--   ended_at timestamp with time zone,
+--   visibility text,
+--   ends_at timestamp with time zone,
+--   duration_minutes integer
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   with viewer as (
+--     select p.gender from public.profiles p where p.id = auth.uid()
+--   )
+--   select
+--     g.id,
+--     g.title,
+--     g.sport,
+--     g.spots_needed,
+--     g.starts_at,
+--     g.created_by,
+--     g.created_at,
+--     g.status,
+--     g.location_label,
+--     g.description,
+--     coalesce(g.requirements, '{}'::jsonb)                          as requirements,
+--     coalesce(part.player_cnt, 0)::int                              as participant_count,
+--     coalesce(part.sub_cnt, 0)::int                                 as substitute_count,
+--     greatest(g.spots_needed - coalesce(part.player_cnt, 0), 0)::int as spots_remaining,
+--     (st_distance(g.location, st_point(lng, lat)::geography) / 1000.0) as distance_km,
+--     st_y(g.location::geometry)                                     as lat,
+--     st_x(g.location::geometry)                                     as lng,
+--     g.live_started_at,
+--     g.ended_at,
+--     g.visibility,
+--     g.ends_at,
+--     g.duration_minutes
+--   from public.games g
+--   left join lateral (
+--     select
+--       count(*) filter (where gp.role != 'substitute')::int as player_cnt,
+--       count(*) filter (where gp.role  = 'substitute')::int as sub_cnt
+--     from public.game_participants gp
+--     where gp.game_id = g.id
+--   ) part on true
+--   left join public.profiles host on host.id = g.created_by
+--   where st_dwithin(g.location, st_point(lng, lat)::geography, radius_km * 1000.0)
+--     and g.status in ('open', 'full', 'live')
+--     and (
+--       g.status <> 'live'
+--       or (coalesce(g.live_started_at, g.updated_at, g.created_at) > now() - interval '24 hours')
+--     )
+--     and (
+--       (g.ends_at is not null and g.ends_at > now())
+--       or (g.ends_at is null and g.created_at > now() - interval '3 days')
+--     )
+--     and (
+--       g.live_started_at is null
+--       or g.live_started_at + make_interval(mins => coalesce(g.duration_minutes, 90)) > now()
+--     )
+--     and public.can_view_game_for_gender(
+--       (select gender from viewer),
+--       host.gender,
+--       g.requirements->>'matchType'
+--     )
+--   order by distance_km asc;
+-- $function$;
+--
+-- revoke execute on function public.get_games_nearby(double precision, double precision, double precision) from public;
+-- grant execute on function public.get_games_nearby(double precision, double precision, double precision) to anon, authenticated;
+--
+-- update public.games
+--    set status     = 'completed',
+--        ended_at   = coalesce(ended_at, now()),
+--        updated_at = now()
+--  where status in ('open', 'full')
+--    and starts_at is null
+--    and ends_at is null
+--    and created_at <= now() - interval '3 days';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927144918  name guest_browse_read_paths  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260922130000_guest_browse_read_paths.sql
+-- ----------------------------------------------------------------------------
+-- -- Guest browsing, part 1 of 2: the read paths a signed-out visitor is allowed.
+-- -- Repo file: supabase/migrations/20260922130000_guest_browse_read_paths.sql
+--
+-- create or replace function public.can_view_game_for_gender(
+--   p_viewer_gender text,
+--   p_host_gender text,
+--   p_match_type text
+-- )
+-- returns boolean
+-- language sql
+-- immutable
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     coalesce(nullif(trim(p_match_type), ''), 'Co-ed') <> 'Same gender'
+--     or (p_viewer_gender is not null and p_host_gender = p_viewer_gender);
+-- $function$;
+--
+-- create or replace function public.get_guest_games_nearby(
+--   lat double precision,
+--   lng double precision,
+--   radius_km double precision default 10
+-- )
+-- returns table(
+--   id uuid,
+--   title text,
+--   sport text,
+--   spots_needed integer,
+--   starts_at timestamp with time zone,
+--   created_by uuid,
+--   created_at timestamp with time zone,
+--   status text,
+--   location_label text,
+--   description text,
+--   requirements jsonb,
+--   participant_count integer,
+--   substitute_count integer,
+--   spots_remaining integer,
+--   distance_km double precision,
+--   lat double precision,
+--   lng double precision,
+--   live_started_at timestamp with time zone,
+--   ended_at timestamp with time zone,
+--   visibility text,
+--   ends_at timestamp with time zone,
+--   duration_minutes integer
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     g.id,
+--     g.title,
+--     g.sport,
+--     g.spots_needed,
+--     g.starts_at,
+--     null::uuid as created_by, -- the whole point: a guest never learns who hosts
+--     g.created_at,
+--     g.status,
+--     g.location_label,
+--     g.description,
+--     g.requirements,
+--     g.participant_count,
+--     g.substitute_count,
+--     g.spots_remaining,
+--     g.distance_km,
+--     g.lat,
+--     g.lng,
+--     g.live_started_at,
+--     g.ended_at,
+--     g.visibility,
+--     g.ends_at,
+--     g.duration_minutes
+--   from public.get_games_nearby(lat, lng, radius_km) g
+--   where coalesce(g.visibility, 'public') = 'public';
+-- $function$;
+--
+-- revoke execute on function public.get_guest_games_nearby(double precision, double precision, double precision) from public;
+-- grant execute on function public.get_guest_games_nearby(double precision, double precision, double precision) to anon;
+--
+-- create or replace function public.get_guest_notes_nearby(
+--   p_lat double precision,
+--   p_lng double precision,
+--   p_radius_km double precision default 10,
+--   p_limit integer default 50
+-- )
+-- returns table(
+--   id uuid,
+--   created_at timestamp with time zone,
+--   created_by uuid,
+--   lat double precision,
+--   lng double precision,
+--   body text,
+--   visibility text,
+--   place_name text,
+--   distance_km double precision,
+--   comment_count integer,
+--   like_count integer,
+--   liked_by_me boolean
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     n.id,
+--     n.created_at,
+--     null::uuid as created_by,
+--     n.lat,
+--     n.lng,
+--     n.body,
+--     n.visibility,
+--     n.place_name,
+--     n.distance_km,
+--     n.comment_count,
+--     n.like_count,
+--     false as liked_by_me
+--   from public.get_notes_nearby(p_lat, p_lng, p_radius_km, p_limit) n
+--   where n.visibility = 'public';
+-- $function$;
+--
+-- revoke execute on function public.get_guest_notes_nearby(double precision, double precision, double precision, integer) from public;
+-- grant execute on function public.get_guest_notes_nearby(double precision, double precision, double precision, integer) to anon;
+--
+-- create or replace function public.get_guest_note_by_id(
+--   p_note_id uuid,
+--   p_lat double precision default null,
+--   p_lng double precision default null
+-- )
+-- returns table(
+--   id uuid,
+--   created_at timestamp with time zone,
+--   created_by uuid,
+--   lat double precision,
+--   lng double precision,
+--   body text,
+--   visibility text,
+--   place_name text,
+--   distance_km double precision,
+--   comment_count integer,
+--   like_count integer,
+--   liked_by_me boolean
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     n.id,
+--     n.created_at,
+--     null::uuid as created_by,
+--     n.lat,
+--     n.lng,
+--     n.body,
+--     n.visibility,
+--     n.place_name,
+--     n.distance_km,
+--     n.comment_count,
+--     n.like_count,
+--     false as liked_by_me
+--   from public.get_note_by_id(p_note_id, p_lat, p_lng) n
+--   where n.visibility = 'public';
+-- $function$;
+--
+-- revoke execute on function public.get_guest_note_by_id(uuid, double precision, double precision) from public;
+-- grant execute on function public.get_guest_note_by_id(uuid, double precision, double precision) to anon;
+--
+-- create or replace function public.get_guest_venue_reviews(
+--   p_venue_id text,
+--   p_limit int default 20,
+--   p_offset int default 0
+-- )
+-- returns table(
+--   id uuid,
+--   created_at timestamptz,
+--   updated_at timestamptz,
+--   venue_id text,
+--   user_id uuid,
+--   rating smallint,
+--   body text,
+--   is_mine boolean,
+--   total_count int,
+--   avg_rating numeric
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     r.id, r.created_at, r.updated_at, r.venue_id,
+--     null::uuid as user_id,
+--     r.rating, r.body,
+--     false as is_mine,
+--     r.total_count, r.avg_rating
+--   from public.get_venue_reviews(p_venue_id, p_limit, p_offset) r;
+-- $function$;
+--
+-- revoke execute on function public.get_guest_venue_reviews(text, int, int) from public;
+-- grant execute on function public.get_guest_venue_reviews(text, int, int) to anon;
+--
+-- create or replace function public.get_guest_venue_comments(
+--   p_venue_id text,
+--   p_limit int default 50,
+--   p_offset int default 0
+-- )
+-- returns table(
+--   id uuid,
+--   created_at timestamptz,
+--   venue_id text,
+--   user_id uuid,
+--   body text,
+--   like_count int,
+--   liked_by_me boolean
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     c.id, c.created_at, c.venue_id,
+--     null::uuid as user_id,
+--     c.body, c.like_count,
+--     false as liked_by_me
+--   from public.get_venue_comments_with_likes(p_venue_id, p_limit, p_offset) c;
+-- $function$;
+--
+-- revoke execute on function public.get_guest_venue_comments(text, int, int) from public;
+-- grant execute on function public.get_guest_venue_comments(text, int, int) to anon;
+--
+-- create or replace function public.get_guest_venue_photos(
+--   p_venue_id text,
+--   p_limit int default 12
+-- )
+-- returns table(
+--   id uuid,
+--   created_at timestamptz,
+--   venue_id text,
+--   user_id uuid,
+--   storage_path text,
+--   caption text,
+--   status text
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     p.id, p.created_at, p.venue_id,
+--     null::uuid as user_id,
+--     p.storage_path, p.caption, p.status
+--   from public.get_venue_photos(p_venue_id, p_limit) p
+--   where p.status = 'visible';
+-- $function$;
+--
+-- revoke execute on function public.get_guest_venue_photos(text, int) from public;
+-- grant execute on function public.get_guest_venue_photos(text, int) to anon;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927145235  name game_lifecycle_fixes  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260927120000_game_lifecycle_fixes.sql
+-- ----------------------------------------------------------------------------
+-- -- An ended game ends. Everywhere, at once.
+-- -- Repo file: supabase/migrations/20260927120000_game_lifecycle_fixes.sql
+--
+-- -- 1) The trigger stops clobbering a deliberate ends_at
+-- create or replace function public.games_set_ends_at()
+-- returns trigger
+-- language plpgsql
+-- set search_path to 'public', 'extensions'
+-- as $function$
+-- begin
+--   if NEW.status in ('completed', 'cancelled') then
+--     return NEW;
+--   end if;
+--
+--   if TG_OP = 'UPDATE' and NEW.ends_at is distinct from OLD.ends_at then
+--     return NEW;
+--   end if;
+--   if TG_OP = 'INSERT' and NEW.ends_at is not null then
+--     return NEW;
+--   end if;
+--
+--   if NEW.starts_at is null then
+--     NEW.ends_at := null;
+--   else
+--     NEW.ends_at := NEW.starts_at + make_interval(mins => coalesce(NEW.duration_minutes, 90));
+--   end if;
+--   return NEW;
+-- end $function$;
+--
+-- comment on function public.games_set_ends_at() is
+--   'Keeps games.ends_at = starts_at + duration_minutes, except when the statement '
+--   'set ends_at deliberately (start_game) or the game is already completed/cancelled. '
+--   'Fires BEFORE INSERT OR UPDATE OF starts_at, duration_minutes.';
+--
+-- -- 2) end_game closes the window as well as the status
+-- create or replace function public.end_game(p_game_id uuid)
+-- returns void
+-- language plpgsql
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_host uuid;
+--   v_status text;
+--   v_starts_at timestamptz;
+-- begin
+--   select created_by, status, starts_at into v_host, v_status, v_starts_at
+--   from public.games
+--   where id = p_game_id;
+--
+--   if v_host is null then
+--     raise exception 'Game not found';
+--   end if;
+--   if auth.uid() is null or auth.uid() <> v_host then
+--     raise exception 'Only the host can end the game';
+--   end if;
+--   if v_status in ('completed', 'cancelled') then
+--     return;
+--   end if;
+--
+--   if v_status <> 'live' and (v_starts_at is null or v_starts_at > now()) then
+--     delete from public.games where id = p_game_id and created_by = auth.uid();
+--     return;
+--   end if;
+--
+--   update public.games
+--     set status = 'completed',
+--         ended_at = now(),
+--         ends_at = now(),
+--         updated_at = now()
+--   where id = p_game_id;
+-- end;
+-- $function$;
+--
+-- comment on function public.end_game(uuid) is
+--   'Host ends their own game: status=completed, ended_at=now(), ends_at=now(). '
+--   'Ending a game that has not started yet deletes it instead. '
+--   'The three timestamps are set together on purpose.';
+--
+-- -- 3) The chat inbox carries the whole lifecycle
+-- drop function if exists public.get_my_game_inbox();
+--
+-- create function public.get_my_game_inbox()
+-- returns table (
+--   id                uuid,
+--   title             text,
+--   sport             text,
+--   starts_at         timestamptz,
+--   ends_at           timestamptz,
+--   ended_at          timestamptz,
+--   live_started_at   timestamptz,
+--   duration_minutes  integer,
+--   visibility        text,
+--   invite_token      uuid,
+--   created_by        uuid,
+--   status            text,
+--   location_label    text,
+--   lat               double precision,
+--   lng               double precision,
+--   participant_count integer,
+--   spots_remaining   integer,
+--   last_message_body text,
+--   last_message_at   timestamptz
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   with my_games as (
+--     select gp.game_id, gp.chat_hidden_at
+--       from public.game_participants gp
+--      where gp.user_id = auth.uid()
+--   ),
+--   counts as (
+--     select gp.game_id, count(*)::int as cnt
+--       from public.game_participants gp
+--      where gp.game_id in (select game_id from my_games)
+--      group by gp.game_id
+--   ),
+--   last_msgs as (
+--     select distinct on (m.game_id)
+--            m.game_id,
+--            m.body  as last_message_body,
+--            m.created_at as last_message_at
+--       from public.game_messages m
+--      where m.game_id in (select game_id from my_games)
+--      order by m.game_id, m.created_at desc
+--   )
+--   select g.id,
+--          g.title,
+--          g.sport,
+--          g.starts_at,
+--          g.ends_at,
+--          g.ended_at,
+--          g.live_started_at,
+--          g.duration_minutes,
+--          g.visibility,
+--          g.invite_token,
+--          g.created_by,
+--          g.status::text,
+--          g.location_label,
+--          g.lat,
+--          g.lng,
+--          coalesce(c.cnt, 0) as participant_count,
+--          greatest(0, coalesce(g.spots_needed, 2) - coalesce(c.cnt, 0)) as spots_remaining,
+--          lm.last_message_body,
+--          lm.last_message_at
+--     from public.games g
+--     join my_games mg on mg.game_id = g.id
+--     left join counts c     on c.game_id  = g.id
+--     left join last_msgs lm on lm.game_id = g.id
+--    where mg.chat_hidden_at is null
+--       or coalesce(lm.last_message_at, '-infinity'::timestamptz) > mg.chat_hidden_at
+--    order by greatest(
+--               coalesce(lm.last_message_at, 'epoch'::timestamptz),
+--               coalesce(g.ends_at,         'epoch'::timestamptz),
+--               coalesce(g.starts_at,       'epoch'::timestamptz)
+--             ) desc nulls last,
+--             g.created_at desc;
+-- $function$;
+--
+-- comment on function public.get_my_game_inbox() is
+--   'Every game you hold a participant row for, newest activity first, regardless of '
+--   'date — the one surface that does not filter by time, so it returns the full '
+--   'lifecycle (status, ends_at, ended_at, live_started_at) and lets the client decide '
+--   'what is over. Rows you archived come back only when a newer message arrives.';
+--
+-- revoke execute on function public.get_my_game_inbox() from public, anon;
+-- grant execute on function public.get_my_game_inbox() to authenticated;
+-- grant execute on function public.get_my_game_inbox() to service_role;
+--
+-- -- 4) Make the sweep actually run
+-- do $$
+-- begin
+--   if exists (select 1 from pg_extension where extname = 'pg_cron') then
+--     perform cron.schedule(
+--       'fun-mark-ended-games-completed',
+--       '*/5 * * * *',
+--       $cron$select public.mark_ended_games_completed();$cron$
+--     );
+--     raise notice 'scheduled fun-mark-ended-games-completed every 5 minutes';
+--   else
+--     raise notice
+--       'pg_cron not installed: public.mark_ended_games_completed() is unscheduled.';
+--   end if;
+-- end $$;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927145433  name game_social  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260927130000_game_social.sql
+-- ----------------------------------------------------------------------------
+-- -- Games become things you can talk about in public.
+-- -- Repo file: supabase/migrations/20260927130000_game_social.sql
+--
+-- create table if not exists public.game_comments (
+--   id         uuid primary key default gen_random_uuid(),
+--   game_id    uuid not null references public.games(id) on delete cascade,
+--   user_id    uuid not null references auth.users(id) on delete cascade,
+--   body       text not null,
+--   created_at timestamptz not null default now()
+-- );
+-- create index if not exists game_comments_game_idx on public.game_comments (game_id, created_at);
+-- create index if not exists game_comments_user_idx on public.game_comments (user_id);
+--
+-- create table if not exists public.game_comment_likes (
+--   comment_id uuid not null references public.game_comments(id) on delete cascade,
+--   user_id    uuid not null references auth.users(id) on delete cascade,
+--   created_at timestamptz not null default now(),
+--   primary key (comment_id, user_id)
+-- );
+-- create index if not exists game_comment_likes_user_idx on public.game_comment_likes (user_id);
+--
+-- create table if not exists public.game_likes (
+--   game_id    uuid not null references public.games(id) on delete cascade,
+--   user_id    uuid not null references auth.users(id) on delete cascade,
+--   created_at timestamptz not null default now(),
+--   primary key (game_id, user_id)
+-- );
+-- create index if not exists game_likes_user_idx on public.game_likes (user_id);
+--
+-- comment on table public.game_comments is
+--   'Public conversation on a game, for people deciding whether to join. Distinct from '
+--   'game_messages, which is the private thread for people who already have.';
+--
+-- alter table public.game_comments      enable row level security;
+-- alter table public.game_comment_likes enable row level security;
+-- alter table public.game_likes         enable row level security;
+--
+-- drop policy if exists "game_comments: read if can see game"      on public.game_comments;
+-- drop policy if exists "game_comments: insert own if can see game" on public.game_comments;
+-- drop policy if exists "game_comments: delete own"                 on public.game_comments;
+--
+-- create policy "game_comments: read if can see game"
+--   on public.game_comments as permissive for select to authenticated
+--   using (exists (select 1 from public.games g where g.id = game_comments.game_id));
+--
+-- create policy "game_comments: insert own if can see game"
+--   on public.game_comments as permissive for insert to authenticated
+--   with check (
+--     user_id = (select auth.uid())
+--     and exists (select 1 from public.games g where g.id = game_comments.game_id)
+--   );
+--
+-- create policy "game_comments: delete own"
+--   on public.game_comments as permissive for delete to authenticated
+--   using (user_id = (select auth.uid()));
+--
+-- drop policy if exists "game_comment_likes: read"       on public.game_comment_likes;
+-- drop policy if exists "game_comment_likes: insert own" on public.game_comment_likes;
+-- drop policy if exists "game_comment_likes: delete own" on public.game_comment_likes;
+--
+-- create policy "game_comment_likes: read"
+--   on public.game_comment_likes as permissive for select to authenticated
+--   using (exists (select 1 from public.game_comments c where c.id = game_comment_likes.comment_id));
+--
+-- create policy "game_comment_likes: insert own"
+--   on public.game_comment_likes as permissive for insert to authenticated
+--   with check (
+--     user_id = (select auth.uid())
+--     and exists (select 1 from public.game_comments c where c.id = game_comment_likes.comment_id)
+--   );
+--
+-- create policy "game_comment_likes: delete own"
+--   on public.game_comment_likes as permissive for delete to authenticated
+--   using (user_id = (select auth.uid()));
+--
+-- drop policy if exists "game_likes: read"       on public.game_likes;
+-- drop policy if exists "game_likes: insert own" on public.game_likes;
+-- drop policy if exists "game_likes: delete own" on public.game_likes;
+--
+-- create policy "game_likes: read"
+--   on public.game_likes as permissive for select to authenticated
+--   using (exists (select 1 from public.games g where g.id = game_likes.game_id));
+--
+-- create policy "game_likes: insert own"
+--   on public.game_likes as permissive for insert to authenticated
+--   with check (
+--     user_id = (select auth.uid())
+--     and exists (select 1 from public.games g where g.id = game_likes.game_id)
+--   );
+--
+-- create policy "game_likes: delete own"
+--   on public.game_likes as permissive for delete to authenticated
+--   using (user_id = (select auth.uid()));
+--
+-- revoke all on public.game_comments      from public, anon;
+-- revoke all on public.game_comment_likes from public, anon;
+-- revoke all on public.game_likes         from public, anon;
+--
+-- grant select, insert, delete on public.game_comments      to authenticated;
+-- grant select, insert, delete on public.game_comment_likes to authenticated;
+-- grant select, insert, delete on public.game_likes         to authenticated;
+--
+-- grant all on public.game_comments      to service_role;
+-- grant all on public.game_comment_likes to service_role;
+-- grant all on public.game_likes         to service_role;
+--
+-- create or replace function public.get_game_comments_with_likes(p_game_id uuid)
+-- returns table (
+--   id          uuid,
+--   created_at  timestamptz,
+--   game_id     uuid,
+--   user_id     uuid,
+--   body        text,
+--   like_count  int,
+--   liked_by_me boolean
+-- )
+-- language sql
+-- stable
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     c.id,
+--     c.created_at,
+--     c.game_id,
+--     c.user_id,
+--     c.body,
+--     coalesce(l.cnt, 0) as like_count,
+--     exists (
+--       select 1 from public.game_comment_likes mine
+--        where mine.comment_id = c.id and mine.user_id = (select auth.uid())
+--     ) as liked_by_me
+--   from public.game_comments c
+--   left join (
+--     select comment_id, count(*)::int as cnt
+--       from public.game_comment_likes
+--      group by comment_id
+--   ) l on l.comment_id = c.id
+--   where c.game_id = p_game_id
+--   order by c.created_at asc;
+-- $function$;
+--
+-- revoke execute on function public.get_game_comments_with_likes(uuid) from public, anon;
+-- grant execute on function public.get_game_comments_with_likes(uuid) to authenticated, service_role;
+--
+-- create or replace function public.get_game_social_counts(p_game_ids uuid[])
+-- returns table (
+--   game_id       uuid,
+--   comment_count int,
+--   like_count    int,
+--   liked_by_me   boolean
+-- )
+-- language sql
+-- stable
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     g.id as game_id,
+--     coalesce(c.cnt, 0) as comment_count,
+--     coalesce(l.cnt, 0) as like_count,
+--     coalesce(l.mine, false) as liked_by_me
+--   from public.games g
+--   left join (
+--     select gc.game_id, count(*)::int as cnt
+--       from public.game_comments gc
+--      where gc.game_id = any(p_game_ids)
+--      group by gc.game_id
+--   ) c on c.game_id = g.id
+--   left join (
+--     select gl.game_id,
+--            count(*)::int as cnt,
+--            bool_or(gl.user_id = (select auth.uid())) as mine
+--       from public.game_likes gl
+--      where gl.game_id = any(p_game_ids)
+--      group by gl.game_id
+--   ) l on l.game_id = g.id
+--   where g.id = any(p_game_ids);
+-- $function$;
+--
+-- revoke execute on function public.get_game_social_counts(uuid[]) from public, anon;
+-- grant execute on function public.get_game_social_counts(uuid[]) to authenticated, service_role;
+--
+-- create or replace function public.add_game_comment(p_game_id uuid, p_body text)
+-- returns public.game_comments
+-- language plpgsql
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_uid  uuid := (select auth.uid());
+--   v_row  public.game_comments;
+--   v_body text := trim(coalesce(p_body, ''));
+-- begin
+--   if v_uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
+--   if v_body = '' then raise exception 'empty_body' using errcode = '22023'; end if;
+--   if length(v_body) > 2000 then v_body := left(v_body, 2000); end if;
+--   insert into public.game_comments (game_id, user_id, body)
+--   values (p_game_id, v_uid, v_body)
+--   returning * into v_row;
+--   return v_row;
+-- end $function$;
+--
+-- revoke execute on function public.add_game_comment(uuid, text) from public, anon;
+-- grant execute on function public.add_game_comment(uuid, text) to authenticated, service_role;
+--
+-- create or replace function public.delete_game_comment(p_comment_id uuid)
+-- returns boolean
+-- language plpgsql
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_n int;
+-- begin
+--   if (select auth.uid()) is null then
+--     raise exception 'not_signed_in' using errcode = '42501';
+--   end if;
+--   delete from public.game_comments
+--    where id = p_comment_id and user_id = (select auth.uid());
+--   get diagnostics v_n = row_count;
+--   return v_n > 0;
+-- end $function$;
+--
+-- revoke execute on function public.delete_game_comment(uuid) from public, anon;
+-- grant execute on function public.delete_game_comment(uuid) to authenticated, service_role;
+--
+-- create or replace function public.toggle_game_comment_like(p_comment_id uuid)
+-- returns boolean
+-- language plpgsql
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_uid uuid := (select auth.uid());
+--   v_n   int;
+-- begin
+--   if v_uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
+--   delete from public.game_comment_likes
+--    where comment_id = p_comment_id and user_id = v_uid;
+--   get diagnostics v_n = row_count;
+--   if v_n > 0 then return false; end if;
+--   insert into public.game_comment_likes (comment_id, user_id)
+--   values (p_comment_id, v_uid)
+--   on conflict do nothing;
+--   return true;
+-- end $function$;
+--
+-- revoke execute on function public.toggle_game_comment_like(uuid) from public, anon;
+-- grant execute on function public.toggle_game_comment_like(uuid) to authenticated, service_role;
+--
+-- create or replace function public.toggle_game_like(p_game_id uuid)
+-- returns boolean
+-- language plpgsql
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_uid uuid := (select auth.uid());
+--   v_n   int;
+-- begin
+--   if v_uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
+--   delete from public.game_likes where game_id = p_game_id and user_id = v_uid;
+--   get diagnostics v_n = row_count;
+--   if v_n > 0 then return false; end if;
+--   insert into public.game_likes (game_id, user_id)
+--   values (p_game_id, v_uid)
+--   on conflict do nothing;
+--   return true;
+-- end $function$;
+--
+-- revoke execute on function public.toggle_game_like(uuid) from public, anon;
+-- grant execute on function public.toggle_game_like(uuid) to authenticated, service_role;
+--
+-- create or replace function public.get_guest_game_comments(p_game_id uuid)
+-- returns table (
+--   id          uuid,
+--   created_at  timestamptz,
+--   game_id     uuid,
+--   user_id     uuid,
+--   body        text,
+--   like_count  int,
+--   liked_by_me boolean
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     c.id,
+--     c.created_at,
+--     c.game_id,
+--     null::uuid as user_id,
+--     c.body,
+--     coalesce(l.cnt, 0) as like_count,
+--     false as liked_by_me
+--   from public.game_comments c
+--   left join (
+--     select comment_id, count(*)::int as cnt
+--       from public.game_comment_likes
+--      group by comment_id
+--   ) l on l.comment_id = c.id
+--   where c.game_id = p_game_id
+--     and exists (
+--       select 1 from public.games g
+--        where g.id = c.game_id
+--          and coalesce(g.visibility, 'public') = 'public'
+--          and g.status not in ('completed', 'cancelled')
+--     )
+--   order by c.created_at asc;
+-- $function$;
+--
+-- revoke execute on function public.get_guest_game_comments(uuid) from public;
+-- grant execute on function public.get_guest_game_comments(uuid) to anon, authenticated;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927145559  name unified_feed_games_v2  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260927140000_unified_feed_games_v2.sql
+-- ----------------------------------------------------------------------------
+-- -- The feed learns enough about a game to let you join it.
+-- -- Repo file: supabase/migrations/20260927140000_unified_feed_games_v2.sql
+--
+-- drop function if exists public.get_unified_feed(double precision, double precision, double precision, integer);
+--
+-- create function public.get_unified_feed(
+--   p_lat double precision,
+--   p_lng double precision,
+--   p_map_radius_km double precision default 120,
+--   p_limit integer default 80
+-- )
+-- returns table (
+--   kind          text,
+--   id            text,
+--   created_at    timestamptz,
+--   lat           double precision,
+--   lng           double precision,
+--   title         text,
+--   body          text,
+--   sport         text,
+--   visibility    text,
+--   comment_count integer,
+--   created_by    uuid,
+--   like_count    integer,
+--   liked_by_me   boolean,
+--   game          jsonb
+-- )
+-- language sql
+-- stable
+-- set search_path to 'public', 'extensions'
+-- as $function$
+--   with cfg as (
+--     select
+--       coalesce(p_lat, 0.0) as qlat,
+--       coalesce(p_lng, 0.0) as qlng,
+--       greatest(1.0, least(300.0, coalesce(p_map_radius_km, 120.0))) as rkm,
+--       greatest(1, least(200, coalesce(p_limit, 80))) as lim
+--   ),
+--   viewer as (
+--     select p.gender from public.profiles p where p.id = auth.uid()
+--   ),
+--   note_likes as (
+--     select
+--       l.note_id,
+--       count(*)::int as cnt,
+--       bool_or(l.user_id = (select auth.uid())) as mine
+--       from public.map_note_likes l
+--      group by l.note_id
+--   ),
+--   note_comments as (
+--     select c.note_id, count(*)::int as cnt from public.map_note_comments c group by c.note_id
+--   ),
+--   status_likes_c as (
+--     select
+--       l.status_id,
+--       count(*)::int as cnt,
+--       bool_or(l.user_id = (select auth.uid())) as mine
+--       from public.status_likes l
+--      group by l.status_id
+--   ),
+--   status_comments_c as (
+--     select c.status_id, count(*)::int as cnt from public.status_comments c group by c.status_id
+--   ),
+--   game_likes_c as (
+--     select
+--       l.game_id,
+--       count(*)::int as cnt,
+--       bool_or(l.user_id = (select auth.uid())) as mine
+--       from public.game_likes l
+--      group by l.game_id
+--   ),
+--   game_comments_c as (
+--     select c.game_id, count(*)::int as cnt from public.game_comments c group by c.game_id
+--   ),
+--   notes as (
+--     select
+--       'note'::text as kind,
+--       n.id::text as id,
+--       n.created_at,
+--       n.lat,
+--       n.lng,
+--       null::text as title,
+--       n.body,
+--       null::text as sport,
+--       n.visibility,
+--       coalesce(nc.cnt, 0) as comment_count,
+--       n.created_by,
+--       coalesce(nl.cnt, 0) as like_count,
+--       coalesce(nl.mine, false) as liked_by_me,
+--       null::jsonb as game
+--     from public.map_notes n
+--     left join note_likes nl on nl.note_id = n.id
+--     left join note_comments nc on nc.note_id = n.id
+--     where public.haversine_km((select qlat from cfg), (select qlng from cfg), n.lat, n.lng) <= (select rkm from cfg)
+--   ),
+--   games as (
+--     select
+--       'game'::text as kind,
+--       g.id::text as id,
+--       g.created_at,
+--       g.lat,
+--       g.lng,
+--       g.title as title,
+--       g.description as body,
+--       g.sport,
+--       g.visibility::text as visibility,
+--       coalesce(gc.cnt, 0) as comment_count,
+--       g.created_by,
+--       coalesce(gl.cnt, 0) as like_count,
+--       coalesce(gl.mine, false) as liked_by_me,
+--       jsonb_build_object(
+--         'starts_at',         g.starts_at,
+--         'ends_at',           g.ends_at,
+--         'ended_at',          g.ended_at,
+--         'live_started_at',   g.live_started_at,
+--         'duration_minutes',  g.duration_minutes,
+--         'status',            g.status,
+--         'location_label',    g.location_label,
+--         'spots_needed',      g.spots_needed,
+--         'participant_count', coalesce(part.player_cnt, 0),
+--         'substitute_count',  coalesce(part.sub_cnt, 0),
+--         'spots_remaining',   greatest(g.spots_needed - coalesce(part.player_cnt, 0), 0),
+--         'distance_km',       public.haversine_km((select qlat from cfg), (select qlng from cfg), g.lat, g.lng),
+--         'requirements',      coalesce(g.requirements, '{}'::jsonb),
+--         'joined_by_me',      exists (
+--                                select 1 from public.game_participants gp
+--                                 where gp.game_id = g.id and gp.user_id = (select auth.uid())
+--                              )
+--       ) as game
+--     from public.games g
+--     left join lateral (
+--       select
+--         count(*) filter (where gp.role != 'substitute')::int as player_cnt,
+--         count(*) filter (where gp.role  = 'substitute')::int as sub_cnt
+--       from public.game_participants gp
+--       where gp.game_id = g.id
+--     ) part on true
+--     left join public.profiles host on host.id = g.created_by
+--     left join game_likes_c gl on gl.game_id = g.id
+--     left join game_comments_c gc on gc.game_id = g.id
+--     where public.haversine_km((select qlat from cfg), (select qlng from cfg), g.lat, g.lng) <= (select rkm from cfg)
+--       and coalesce(g.status::text, '') not in ('completed','cancelled')
+--       and (g.ends_at is null or g.ends_at > now())
+--       and (g.ends_at is not null or g.created_at > now() - interval '3 days')
+--       and public.can_view_game_for_gender(
+--         (select gender from viewer),
+--         host.gender,
+--         g.requirements->>'matchType'
+--       )
+--   ),
+--   statuses as (
+--     select
+--       'status'::text as kind,
+--       s.id::text as id,
+--       s.created_at,
+--       null::double precision as lat,
+--       null::double precision as lng,
+--       null::text as title,
+--       s.body,
+--       null::text as sport,
+--       'public'::text as visibility,
+--       coalesce(sc.cnt, 0) as comment_count,
+--       s.user_id as created_by,
+--       coalesce(slc.cnt, 0) as like_count,
+--       coalesce(slc.mine, false) as liked_by_me,
+--       null::jsonb as game
+--     from public.get_recent_statuses(80) s
+--     left join status_likes_c slc on slc.status_id = s.id
+--     left join status_comments_c sc on sc.status_id = s.id
+--   )
+--   select *
+--     from (
+--       select * from notes
+--       union all
+--       select * from games
+--       union all
+--       select * from statuses
+--     ) u
+--    order by u.created_at desc
+--    limit (select lim from cfg);
+-- $function$;
+--
+-- comment on function public.get_unified_feed(double precision, double precision, double precision, integer) is
+--   'One feed of notes, games and statuses near a point, newest first. The `game` '
+--   'jsonb column carries everything a joinable game card renders (schedule, status, '
+--   'spots, venue, whether you are already in); notes and statuses leave it null. '
+--   'Games respect the same gender and TTL rules as the map.';
+--
+-- revoke execute on function public.get_unified_feed(double precision, double precision, double precision, integer) from public, anon;
+-- grant execute on function public.get_unified_feed(double precision, double precision, double precision, integer) to authenticated, service_role;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927145734  name suggested_games  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260927150000_suggested_games.sql
+-- ----------------------------------------------------------------------------
+-- -- "Is anyone playing my sport near me tonight?"
+-- -- Repo file: supabase/migrations/20260927150000_suggested_games.sql
+--
+-- create or replace function public.get_suggested_games(
+--   p_lat       double precision,
+--   p_lng       double precision,
+--   p_radius_km double precision default 25,
+--   p_limit     int default 20
+-- )
+-- returns table (
+--   id                uuid,
+--   title             text,
+--   sport             text,
+--   spots_needed      int,
+--   starts_at         timestamptz,
+--   created_by        uuid,
+--   created_at        timestamptz,
+--   status            text,
+--   location_label    text,
+--   description       text,
+--   requirements      jsonb,
+--   participant_count int,
+--   substitute_count  int,
+--   spots_remaining   int,
+--   distance_km       double precision,
+--   lat               double precision,
+--   lng               double precision,
+--   live_started_at   timestamptz,
+--   ended_at          timestamptz,
+--   visibility        text,
+--   ends_at           timestamptz,
+--   duration_minutes  int,
+--   match_score       double precision,
+--   sport_match       boolean,
+--   host_sportsmanship double precision
+-- )
+-- language plpgsql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_uid    uuid := auth.uid();
+--   v_origin geography := st_point(p_lng, p_lat)::geography;
+--   v_radius double precision := greatest(1.0, least(200.0, coalesce(p_radius_km, 25.0)));
+--   v_limit  int := greatest(1, least(100, coalesce(p_limit, 20)));
+--   v_gender text;
+--   v_primary   text[];
+--   v_secondary text[];
+-- begin
+--   if v_uid is null then
+--     return;
+--   end if;
+--
+--   select
+--     p.gender,
+--     coalesce(
+--       array(select distinct x from jsonb_array_elements_text(
+--         coalesce(nullif(p.athlete_profile->'primarySports', 'null'::jsonb), '[]'::jsonb)) x),
+--       array[]::text[]),
+--     coalesce(
+--       array(select distinct x from jsonb_array_elements_text(
+--         coalesce(nullif(p.athlete_profile->'secondarySports', 'null'::jsonb), '[]'::jsonb)) x),
+--       array[]::text[])
+--     into v_gender, v_primary, v_secondary
+--   from public.profiles p
+--   where p.id = v_uid;
+--
+--   return query
+--   with candidates as (
+--     select
+--       g.*,
+--       coalesce(part.player_cnt, 0)::int as p_cnt,
+--       coalesce(part.sub_cnt, 0)::int    as s_cnt,
+--       (st_distance(g.location, v_origin) / 1000.0) as dist_km,
+--       host.sportsmanship_avg as host_trust
+--     from public.games g
+--     left join lateral (
+--       select
+--         count(*) filter (where gp.role != 'substitute')::int as player_cnt,
+--         count(*) filter (where gp.role  = 'substitute')::int as sub_cnt
+--       from public.game_participants gp
+--       where gp.game_id = g.id
+--     ) part on true
+--     left join public.profiles host on host.id = g.created_by
+--     where st_dwithin(g.location, v_origin, v_radius * 1000.0)
+--       and g.status in ('open', 'full', 'live')
+--       and (
+--         g.status <> 'live'
+--         or (coalesce(g.live_started_at, g.updated_at, g.created_at) > now() - interval '24 hours')
+--       )
+--       and (
+--         (g.ends_at is not null and g.ends_at > now())
+--         or (g.ends_at is null and g.created_at > now() - interval '3 days')
+--       )
+--       and (
+--         g.live_started_at is null
+--         or g.live_started_at + make_interval(mins => coalesce(g.duration_minutes, 90)) > now()
+--       )
+--       and public.can_view_game_for_gender(v_gender, host.gender, g.requirements->>'matchType')
+--       and coalesce(g.created_by, '00000000-0000-0000-0000-000000000000'::uuid) <> v_uid
+--       and not exists (
+--         select 1 from public.game_participants gp
+--          where gp.game_id = g.id and gp.user_id = v_uid
+--       )
+--   ),
+--   scored as (
+--     select
+--       c.*,
+--       (lower(btrim(c.sport)) = any(select lower(btrim(x)) from unnest(v_primary) x))   as is_primary,
+--       (lower(btrim(c.sport)) = any(select lower(btrim(x)) from unnest(v_secondary) x)) as is_secondary,
+--       case
+--         when c.starts_at is null then null::double precision
+--         else extract(epoch from (c.starts_at - now())) / 3600.0
+--       end as hours_out
+--     from candidates c
+--   )
+--   select
+--     s.id,
+--     s.title,
+--     s.sport,
+--     s.spots_needed,
+--     s.starts_at,
+--     s.created_by,
+--     s.created_at,
+--     s.status,
+--     s.location_label,
+--     s.description,
+--     coalesce(s.requirements, '{}'::jsonb),
+--     s.p_cnt,
+--     s.s_cnt,
+--     greatest(s.spots_needed - s.p_cnt, 0)::int,
+--     s.dist_km,
+--     st_y(s.location::geometry),
+--     st_x(s.location::geometry),
+--     s.live_started_at,
+--     s.ended_at,
+--     s.visibility,
+--     s.ends_at,
+--     s.duration_minutes,
+--     (
+--         0.40 * (case when s.is_primary then 1.0 when s.is_secondary then 0.7 else 0.0 end)
+--       + 0.25 * (
+--           case
+--             when s.hours_out is null then 0.5
+--             when s.hours_out < 0 then 0.55
+--             when s.hours_out <= 1 then 0.8 + 0.2 * s.hours_out
+--             when s.hours_out <= 12 then greatest(0.15, 1.0 - (s.hours_out - 1) / 13.0)
+--             else greatest(0.05, 0.15 - (s.hours_out - 12) / 400.0)
+--           end
+--         )
+--       + 0.20 * greatest(0.0, 1.0 - (s.dist_km / nullif(v_radius, 0)))
+--       + 0.10 * (
+--           case
+--             when greatest(s.spots_needed - s.p_cnt, 0) = 0 then 0.15
+--             when s.spots_needed <= 0 then 0.5
+--             else 0.4 + 0.6 * (greatest(s.spots_needed - s.p_cnt, 0)::double precision / s.spots_needed)
+--           end
+--         )
+--       + 0.05 * ((coalesce(s.host_trust, 3.0) - 1.0) / 4.0)
+--     )::double precision as match_score,
+--     (s.is_primary or s.is_secondary) as sport_match,
+--     s.host_trust
+--   from scored s
+--   order by match_score desc, s.dist_km asc
+--   limit v_limit;
+-- end;
+-- $function$;
+--
+-- comment on function public.get_suggested_games(double precision, double precision, double precision, int) is
+--   'Games near a point, ranked for the caller: sport match 40%, time-to-start 25%, '
+--   'distance 20%, spots left 10%, host reputation 5%. Excludes your own games and '
+--   'ones you already joined. Enforces the same gender, liveness and TTL rules as '
+--   'get_games_nearby. Returns nothing for a guest — suggestions are personal.';
+--
+-- revoke execute on function public.get_suggested_games(double precision, double precision, double precision, int) from public, anon;
+-- grant execute on function public.get_suggested_games(double precision, double precision, double precision, int) to authenticated, service_role;
+--
+-- create or replace function public.get_games_at_venue(
+--   p_lat               double precision,
+--   p_lng               double precision,
+--   p_radius_m          double precision default 150,
+--   p_include_completed boolean default true,
+--   p_limit             int default 30
+-- )
+-- returns table (
+--   id               uuid,
+--   title            text,
+--   sport            text,
+--   starts_at        timestamptz,
+--   ends_at          timestamptz,
+--   ended_at         timestamptz,
+--   status           text,
+--   spots_needed     int,
+--   participant_count int,
+--   distance_m       double precision,
+--   is_past          boolean
+-- )
+-- language sql
+-- stable
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     g.id,
+--     g.title,
+--     g.sport,
+--     g.starts_at,
+--     g.ends_at,
+--     g.ended_at,
+--     g.status,
+--     g.spots_needed,
+--     coalesce(part.cnt, 0)::int as participant_count,
+--     st_distance(g.location, st_point(p_lng, p_lat)::geography) as distance_m,
+--     (
+--       g.status in ('completed', 'cancelled')
+--       or g.ended_at is not null
+--       or (g.ends_at is not null and g.ends_at <= now())
+--     ) as is_past
+--   from public.games g
+--   left join lateral (
+--     select count(*)::int as cnt
+--       from public.game_participants gp
+--      where gp.game_id = g.id and gp.role != 'substitute'
+--   ) part on true
+--   where st_dwithin(
+--           g.location,
+--           st_point(p_lng, p_lat)::geography,
+--           greatest(10.0, least(2000.0, coalesce(p_radius_m, 150.0)))
+--         )
+--     and (
+--       coalesce(p_include_completed, true)
+--       or g.status not in ('completed', 'cancelled')
+--     )
+--   order by coalesce(g.starts_at, g.created_at) desc
+--   limit greatest(1, least(100, coalesce(p_limit, 30)));
+-- $function$;
+--
+-- comment on function public.get_games_at_venue(double precision, double precision, double precision, boolean, int) is
+--   'Games hosted within a radius of a point, newest first, past ones flagged. The '
+--   'venue card''s "played here" history.';
+--
+-- revoke execute on function public.get_games_at_venue(double precision, double precision, double precision, boolean, int) from public;
+-- grant execute on function public.get_games_at_venue(double precision, double precision, double precision, boolean, int) to authenticated, service_role;
+--
+-- create or replace function public.get_guest_games_at_venue(
+--   p_lat      double precision,
+--   p_lng      double precision,
+--   p_radius_m double precision default 150,
+--   p_limit    int default 30
+-- )
+-- returns table (
+--   id               uuid,
+--   title            text,
+--   sport            text,
+--   starts_at        timestamptz,
+--   ends_at          timestamptz,
+--   ended_at         timestamptz,
+--   status           text,
+--   spots_needed     int,
+--   participant_count int,
+--   distance_m       double precision,
+--   is_past          boolean
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     g.id, g.title, g.sport, g.starts_at, g.ends_at, g.ended_at, g.status,
+--     g.spots_needed,
+--     coalesce(part.cnt, 0)::int,
+--     st_distance(g.location, st_point(p_lng, p_lat)::geography),
+--     (
+--       g.status in ('completed', 'cancelled')
+--       or g.ended_at is not null
+--       or (g.ends_at is not null and g.ends_at <= now())
+--     )
+--   from public.games g
+--   left join lateral (
+--     select count(*)::int as cnt
+--       from public.game_participants gp
+--      where gp.game_id = g.id and gp.role != 'substitute'
+--   ) part on true
+--   where st_dwithin(
+--           g.location,
+--           st_point(p_lng, p_lat)::geography,
+--           greatest(10.0, least(2000.0, coalesce(p_radius_m, 150.0)))
+--         )
+--     and coalesce(g.visibility, 'public') = 'public'
+--     and public.can_view_game_for_gender(null, null, g.requirements->>'matchType')
+--   order by coalesce(g.starts_at, g.created_at) desc
+--   limit greatest(1, least(100, coalesce(p_limit, 30)));
+-- $function$;
+--
+-- revoke execute on function public.get_guest_games_at_venue(double precision, double precision, double precision, int) from public;
+-- grant execute on function public.get_guest_games_at_venue(double precision, double precision, double precision, int) to anon, authenticated;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927145915  name post_game_loop  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260927160000_post_game_loop.sql
+-- ----------------------------------------------------------------------------
+-- -- The loop that closes after the game.
+-- -- Repo file: supabase/migrations/20260927160000_post_game_loop.sql
+--
+-- create or replace function public.viewer_is_game_participant(p_game_id uuid)
+-- returns boolean
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select exists (
+--     select 1
+--       from public.game_participants gp
+--      where gp.game_id = p_game_id
+--        and gp.user_id = (select auth.uid())
+--   );
+-- $function$;
+--
+-- revoke execute on function public.viewer_is_game_participant(uuid) from public, anon;
+-- grant execute on function public.viewer_is_game_participant(uuid) to authenticated, service_role;
+--
+-- create table if not exists public.game_outcome_reports (
+--   game_id    uuid not null references public.games(id) on delete cascade,
+--   user_id    uuid not null references auth.users(id) on delete cascade,
+--   outcome    text not null check (outcome in ('played', 'no_show', 'missed_it')),
+--   created_at timestamptz not null default now(),
+--   updated_at timestamptz not null default now(),
+--   primary key (game_id, user_id)
+-- );
+-- create index if not exists game_outcome_reports_game_idx on public.game_outcome_reports (game_id);
+--
+-- comment on table public.game_outcome_reports is
+--   'One answer per participant to "did it happen?", asked in the game chat once the '
+--   'game is over. The honest denominator for games-played over games-created.';
+--
+-- alter table public.game_outcome_reports enable row level security;
+--
+-- drop policy if exists "game_outcome_reports: read if in the game" on public.game_outcome_reports;
+-- drop policy if exists "game_outcome_reports: write own"           on public.game_outcome_reports;
+--
+-- create policy "game_outcome_reports: read if in the game"
+--   on public.game_outcome_reports as permissive for select to authenticated
+--   using (public.viewer_is_game_participant(game_id));
+--
+-- create policy "game_outcome_reports: write own"
+--   on public.game_outcome_reports as permissive for all to authenticated
+--   using (user_id = (select auth.uid()))
+--   with check (user_id = (select auth.uid()) and public.viewer_is_game_participant(game_id));
+--
+-- revoke all on public.game_outcome_reports from public, anon;
+-- grant select, insert, update, delete on public.game_outcome_reports to authenticated;
+-- grant all on public.game_outcome_reports to service_role;
+--
+-- create or replace function public.report_game_outcome(p_game_id uuid, p_outcome text)
+-- returns void
+-- language plpgsql
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_uid uuid := (select auth.uid());
+-- begin
+--   if v_uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
+--   if p_outcome not in ('played', 'no_show', 'missed_it') then
+--     raise exception 'invalid_outcome' using errcode = '22023';
+--   end if;
+--   if not exists (
+--     select 1 from public.game_participants gp
+--      where gp.game_id = p_game_id and gp.user_id = v_uid
+--   ) then
+--     raise exception 'not_a_participant' using errcode = '42501';
+--   end if;
+--
+--   insert into public.game_outcome_reports (game_id, user_id, outcome)
+--   values (p_game_id, v_uid, p_outcome)
+--   on conflict (game_id, user_id) do update
+--     set outcome = excluded.outcome, updated_at = now();
+--
+--   update public.game_participants
+--      set confirmed_result = (p_outcome = 'played')
+--    where game_id = p_game_id and user_id = v_uid;
+-- end $function$;
+--
+-- revoke execute on function public.report_game_outcome(uuid, text) from public, anon;
+-- grant execute on function public.report_game_outcome(uuid, text) to authenticated, service_role;
+--
+-- create or replace function public.get_game_outcome_summary(p_game_id uuid)
+-- returns table (
+--   my_outcome     text,
+--   played_count   int,
+--   no_show_count  int,
+--   missed_count   int,
+--   total_reports  int,
+--   participants   int
+-- )
+-- language plpgsql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+-- begin
+--   if (select auth.uid()) is null or not public.viewer_is_game_participant(p_game_id) then
+--     return;
+--   end if;
+--
+--   return query
+--   select
+--     (select r2.outcome from public.game_outcome_reports r2
+--       where r2.game_id = p_game_id and r2.user_id = (select auth.uid())),
+--     coalesce(count(*) filter (where r.outcome = 'played'), 0)::int,
+--     coalesce(count(*) filter (where r.outcome = 'no_show'), 0)::int,
+--     coalesce(count(*) filter (where r.outcome = 'missed_it'), 0)::int,
+--     coalesce(count(r.*), 0)::int,
+--     (select count(*)::int from public.game_participants gp where gp.game_id = p_game_id)
+--   from public.game_outcome_reports r
+--   where r.game_id = p_game_id;
+-- end $function$;
+--
+-- revoke execute on function public.get_game_outcome_summary(uuid) from public, anon;
+-- grant execute on function public.get_game_outcome_summary(uuid) to authenticated, service_role;
+--
+-- create or replace function public.get_rateable_teammates(p_game_id uuid)
+-- returns table (
+--   user_id      uuid,
+--   display_name text,
+--   avatar_url   text,
+--   my_rating    int
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     p.id,
+--     p.display_name,
+--     p.avatar_url,
+--     e.rating
+--   from public.game_participants gp
+--   join public.profiles p on p.id = gp.user_id
+--   left join public.athlete_endorsements e
+--     on e.game_id = p_game_id
+--    and e.athlete_id = gp.user_id
+--    and e.endorser_id = (select auth.uid())
+--   where gp.game_id = p_game_id
+--     and gp.user_id <> (select auth.uid())
+--     and public.viewer_is_game_participant(p_game_id)
+--   order by p.display_name nulls last;
+-- $function$;
+--
+-- revoke execute on function public.get_rateable_teammates(uuid) from public, anon;
+-- grant execute on function public.get_rateable_teammates(uuid) to authenticated, service_role;
+--
+-- create table if not exists public.game_polls (
+--   id         uuid primary key default gen_random_uuid(),
+--   game_id    uuid not null references public.games(id) on delete cascade,
+--   created_by uuid not null references auth.users(id) on delete cascade,
+--   kind       text not null default 'rematch' check (kind in ('rematch')),
+--   question   text,
+--   created_at timestamptz not null default now(),
+--   closed_at  timestamptz
+-- );
+--
+-- create unique index if not exists game_polls_one_open_per_game
+--   on public.game_polls (game_id, kind)
+--   where closed_at is null;
+--
+-- create table if not exists public.game_poll_votes (
+--   poll_id    uuid not null references public.game_polls(id) on delete cascade,
+--   user_id    uuid not null references auth.users(id) on delete cascade,
+--   choice     text not null check (choice in ('in', 'out')),
+--   created_at timestamptz not null default now(),
+--   updated_at timestamptz not null default now(),
+--   primary key (poll_id, user_id)
+-- );
+--
+-- alter table public.game_polls      enable row level security;
+-- alter table public.game_poll_votes enable row level security;
+--
+-- drop policy if exists "game_polls: read if in the game"   on public.game_polls;
+-- drop policy if exists "game_polls: host creates"          on public.game_polls;
+-- drop policy if exists "game_polls: host closes"           on public.game_polls;
+-- drop policy if exists "game_poll_votes: read if in game"  on public.game_poll_votes;
+-- drop policy if exists "game_poll_votes: write own"        on public.game_poll_votes;
+--
+-- create policy "game_polls: read if in the game"
+--   on public.game_polls as permissive for select to authenticated
+--   using (public.viewer_is_game_participant(game_id));
+--
+-- create policy "game_polls: host creates"
+--   on public.game_polls as permissive for insert to authenticated
+--   with check (
+--     created_by = (select auth.uid())
+--     and exists (
+--       select 1 from public.games g
+--        where g.id = game_polls.game_id and g.created_by = (select auth.uid())
+--     )
+--   );
+--
+-- create policy "game_polls: host closes"
+--   on public.game_polls as permissive for update to authenticated
+--   using (exists (
+--     select 1 from public.games g
+--      where g.id = game_polls.game_id and g.created_by = (select auth.uid())
+--   ))
+--   with check (exists (
+--     select 1 from public.games g
+--      where g.id = game_polls.game_id and g.created_by = (select auth.uid())
+--   ));
+--
+-- create policy "game_poll_votes: read if in game"
+--   on public.game_poll_votes as permissive for select to authenticated
+--   using (exists (
+--     select 1 from public.game_polls pl
+--      where pl.id = game_poll_votes.poll_id
+--        and public.viewer_is_game_participant(pl.game_id)
+--   ));
+--
+-- create policy "game_poll_votes: write own"
+--   on public.game_poll_votes as permissive for all to authenticated
+--   using (user_id = (select auth.uid()))
+--   with check (
+--     user_id = (select auth.uid())
+--     and exists (
+--       select 1 from public.game_polls pl
+--        where pl.id = game_poll_votes.poll_id
+--          and pl.closed_at is null
+--          and public.viewer_is_game_participant(pl.game_id)
+--     )
+--   );
+--
+-- revoke all on public.game_polls      from public, anon;
+-- revoke all on public.game_poll_votes from public, anon;
+-- grant select, insert, update on public.game_polls to authenticated;
+-- grant select, insert, update, delete on public.game_poll_votes to authenticated;
+-- grant all on public.game_polls      to service_role;
+-- grant all on public.game_poll_votes to service_role;
+--
+-- create or replace function public.create_rematch_poll(p_game_id uuid, p_question text default null)
+-- returns uuid
+-- language plpgsql
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_uid uuid := (select auth.uid());
+--   v_id  uuid;
+-- begin
+--   if v_uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
+--
+--   select pl.id into v_id
+--     from public.game_polls pl
+--    where pl.game_id = p_game_id and pl.kind = 'rematch' and pl.closed_at is null;
+--   if v_id is not null then
+--     return v_id;
+--   end if;
+--
+--   insert into public.game_polls (game_id, created_by, kind, question)
+--   values (p_game_id, v_uid, 'rematch', nullif(btrim(coalesce(p_question, '')), ''))
+--   returning id into v_id;
+--
+--   return v_id;
+-- end $function$;
+--
+-- revoke execute on function public.create_rematch_poll(uuid, text) from public, anon;
+-- grant execute on function public.create_rematch_poll(uuid, text) to authenticated, service_role;
+--
+-- create or replace function public.vote_rematch_poll(p_poll_id uuid, p_choice text)
+-- returns void
+-- language plpgsql
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+-- begin
+--   if (select auth.uid()) is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
+--   if p_choice not in ('in', 'out') then
+--     raise exception 'invalid_choice' using errcode = '22023';
+--   end if;
+--
+--   insert into public.game_poll_votes (poll_id, user_id, choice)
+--   values (p_poll_id, (select auth.uid()), p_choice)
+--   on conflict (poll_id, user_id) do update
+--     set choice = excluded.choice, updated_at = now();
+-- end $function$;
+--
+-- revoke execute on function public.vote_rematch_poll(uuid, text) from public, anon;
+-- grant execute on function public.vote_rematch_poll(uuid, text) to authenticated, service_role;
+--
+-- create or replace function public.close_rematch_poll(p_poll_id uuid)
+-- returns void
+-- language sql
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+--   update public.game_polls set closed_at = now()
+--    where id = p_poll_id and closed_at is null;
+-- $function$;
+--
+-- revoke execute on function public.close_rematch_poll(uuid) from public, anon;
+-- grant execute on function public.close_rematch_poll(uuid) to authenticated, service_role;
+--
+-- create or replace function public.get_rematch_poll(p_game_id uuid)
+-- returns table (
+--   poll_id    uuid,
+--   created_by uuid,
+--   question   text,
+--   created_at timestamptz,
+--   closed_at  timestamptz,
+--   in_count   int,
+--   out_count  int,
+--   my_choice  text
+-- )
+-- language sql
+-- stable
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     pl.id,
+--     pl.created_by,
+--     pl.question,
+--     pl.created_at,
+--     pl.closed_at,
+--     coalesce(count(*) filter (where v.choice = 'in'), 0)::int,
+--     coalesce(count(*) filter (where v.choice = 'out'), 0)::int,
+--     max(v.choice) filter (where v.user_id = (select auth.uid()))
+--   from public.game_polls pl
+--   left join public.game_poll_votes v on v.poll_id = pl.id
+--   where pl.game_id = p_game_id
+--     and pl.kind = 'rematch'
+--     and pl.closed_at is null
+--   group by pl.id, pl.created_by, pl.question, pl.created_at, pl.closed_at
+--   order by pl.created_at desc
+--   limit 1;
+-- $function$;
+--
+-- revoke execute on function public.get_rematch_poll(uuid) from public, anon;
+-- grant execute on function public.get_rematch_poll(uuid) to authenticated, service_role;
+--
+-- -- The read policy athlete_endorsements never had.
+-- drop policy if exists "athlete_endorsements: read own or shared game" on public.athlete_endorsements;
+--
+-- create policy "athlete_endorsements: read own or shared game"
+--   on public.athlete_endorsements as permissive for select to authenticated
+--   using (
+--     endorser_id = (select auth.uid())
+--     or athlete_id = (select auth.uid())
+--     or public.viewer_is_game_participant(game_id)
+--   );
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927151506  name venues_in_bbox_slim  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260926120000_venues_in_bbox_slim.sql
+-- ----------------------------------------------------------------------------
+-- -- The map read stops carrying the venue card's data.
+-- -- Repo file: supabase/migrations/20260926120000_venues_in_bbox_slim.sql
+--
+-- drop function if exists public.get_venues_in_bbox(double precision, double precision, double precision, double precision, int);
+--
+-- create function public.get_venues_in_bbox(
+--   p_min_lat double precision,
+--   p_min_lng double precision,
+--   p_max_lat double precision,
+--   p_max_lng double precision,
+--   p_limit   int default 1000
+-- )
+-- returns table (
+--   id       text,
+--   lat      double precision,
+--   lng      double precision,
+--   name     text,
+--   sport    text,
+--   leisure  text,
+--   osm_type text,
+--   osm_id   bigint,
+--   access   text
+-- )
+-- language sql
+-- stable
+-- security invoker
+-- set search_path = public
+-- as $$
+--   with anchor as (
+--     select
+--       (p_min_lat + p_max_lat) / 2.0 as clat,
+--       (p_min_lng + p_max_lng) / 2.0 as clng
+--   )
+--   select
+--     v.id, v.lat, v.lng, v.name, v.sport, v.leisure, v.osm_type, v.osm_id, v.access
+--   from public.osm_sports_venues v, anchor a
+--   where v.lat between p_min_lat and p_max_lat
+--     and v.lng between p_min_lng and p_max_lng
+--     and coalesce(lower(btrim(v.access)) not in ('private', 'no'), true)
+--     and not coalesce(
+--       lower(btrim(v.leisure)) = 'swimming_pool'
+--       and btrim(coalesce(v.name, '')) = ''
+--       and (
+--         v.access is null
+--         or lower(btrim(v.access)) not in
+--              ('yes', 'public', 'permissive', 'customers', 'members', 'membership', 'permit')
+--       ),
+--       false
+--     )
+--   order by
+--     ((v.lng - a.clng) * cos(radians(a.clat))) ^ 2 + (v.lat - a.clat) ^ 2
+--   limit greatest(1, least(coalesce(p_limit, 1000), 5000));
+-- $$;
+--
+-- comment on function public.get_venues_in_bbox(double precision, double precision, double precision, double precision, int) is
+--   'Venues inside a bbox, nearest-first from the bbox centre, private and residential '
+--   'excluded. Projection is deliberately the nine columns the map draws with — the '
+--   'venue card reads the rest one row at a time through fetchVenueById. Do not widen '
+--   'it: every column here is multiplied by up to 1000 pins on every map load.';
+--
+-- revoke execute on function public.get_venues_in_bbox(double precision, double precision, double precision, double precision, int) from public;
+-- grant execute on function public.get_venues_in_bbox(double precision, double precision, double precision, double precision, int) to anon, authenticated;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927151550  name game_read_visibility_and_invite_tokens  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260922120000_game_read_visibility_and_invite_tokens.sql
+-- ----------------------------------------------------------------------------
+-- -- Game reads enforce their own rules; invite_token stops being a readable column.
+-- -- Repo file: supabase/migrations/20260922120000_game_read_visibility_and_invite_tokens.sql
+--
+-- create or replace function public.viewer_is_game_participant(p_game_id uuid)
+-- returns boolean
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select exists (
+--     select 1
+--       from public.game_participants gp
+--      where gp.game_id = p_game_id
+--        and gp.user_id = (select auth.uid())
+--   );
+-- $function$;
+--
+-- revoke execute on function public.viewer_is_game_participant(uuid) from public, anon;
+-- grant execute on function public.viewer_is_game_participant(uuid) to authenticated, service_role;
+--
+-- -- 2) Games: read what the viewer is allowed to see
+-- drop policy if exists "Games are viewable by everyone" on public.games;
+--
+-- create policy "games: readable by viewers it is meant for"
+--   on public.games
+--   as permissive
+--   for select
+--   to authenticated
+--   using (
+--     created_by = (select auth.uid())
+--     or public.viewer_is_game_participant(id)
+--     or (
+--       public.can_view_game_for_gender(
+--         (select p.gender from public.profiles p where p.id = (select auth.uid())),
+--         (select h.gender from public.profiles h where h.id = games.created_by),
+--         games.requirements->>'matchType'
+--       )
+--       and (
+--         coalesce(games.visibility, 'public') = 'public'
+--         or public.is_eligible_to_join_game(games.id, (select auth.uid()))
+--       )
+--     )
+--   );
+--
+-- -- 3) Participants: readable exactly when their game is
+-- drop policy if exists "Participants are viewable by everyone" on public.game_participants;
+--
+-- create policy "game_participants: readable when the game is"
+--   on public.game_participants
+--   as permissive
+--   for select
+--   to authenticated
+--   using (exists (select 1 from public.games g where g.id = game_participants.game_id));
+--
+-- -- 4) invite_token stops being a readable column
+-- do $$
+-- declare
+--   v_cols text;
+-- begin
+--   select string_agg(quote_ident(column_name), ', ' order by ordinal_position)
+--     into v_cols
+--     from information_schema.columns
+--    where table_schema = 'public'
+--      and table_name = 'games'
+--      and column_name <> 'invite_token';
+--
+--   execute 'revoke select on public.games from anon, authenticated';
+--   -- anon keeps the column grants even though no policy admits it to a single
+--   -- row. Privilege and policy fail differently: without the grant, the two
+--   -- SECURITY INVOKER feed RPCs would raise "permission denied for table games"
+--   -- at a signed-out caller instead of handing back the empty list.
+--   execute format('grant select (%s) on public.games to anon, authenticated', v_cols);
+-- end $$;
+--
+-- comment on column public.games.invite_token is
+--   'Never granted to client roles. Read it through get_game_invite_token(), which answers only the host and the players who already joined.';
+--
+-- -- 5) The one legitimate way to read a token
+-- create or replace function public.get_game_invite_token(p_game_id uuid)
+-- returns uuid
+-- language plpgsql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_uid uuid := (select auth.uid());
+--   v_token uuid;
+-- begin
+--   if v_uid is null then
+--     raise exception 'not_signed_in' using errcode = '42501';
+--   end if;
+--
+--   select g.invite_token into v_token
+--     from public.games g
+--    where g.id = p_game_id
+--      and (
+--        g.created_by = v_uid
+--        or exists (
+--          select 1 from public.game_participants gp
+--           where gp.game_id = g.id and gp.user_id = v_uid
+--        )
+--      );
+--
+--   return v_token; -- null when the caller is not in the game: no error, no oracle
+-- end $function$;
+--
+-- revoke execute on function public.get_game_invite_token(uuid) from public;
+-- grant execute on function public.get_game_invite_token(uuid) to authenticated;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927151702  name guest_browse_lock_anon_tables  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260922140000_guest_browse_lock_anon_tables.sql
+-- ----------------------------------------------------------------------------
+-- -- Guest browsing, part 2 of 2: close the direct table reads the wrappers replace.
+-- -- Repo file: supabase/migrations/20260922140000_guest_browse_lock_anon_tables.sql
+--
+-- alter policy "Profiles are viewable by everyone" on public.profiles to authenticated;
+-- alter policy "user_follows: read public" on public.user_follows to authenticated;
+-- alter policy "User badges readable by everyone" on public.user_badges to authenticated;
+-- alter policy "Game results readable by everyone" on public.game_results to authenticated;
+-- alter policy "map_notes: read visible" on public.map_notes to authenticated;
+-- alter policy "map_note_comments: read if can see note" on public.map_note_comments to authenticated;
+-- alter policy "map_note_likes: read" on public.map_note_likes to authenticated;
+-- alter policy "map_note_comment_likes: read" on public.map_note_comment_likes to authenticated;
+-- alter policy "venue_reviews: read all" on public.venue_reviews to authenticated;
+-- alter policy "venue_comments: read all" on public.venue_comments to authenticated;
+-- alter policy "venue_comment_likes: read if comment exists" on public.venue_comment_likes to authenticated;
+-- alter policy "venue_photos: read visible or own" on public.venue_photos to authenticated;
+-- alter policy "feed_media_posts: visible" on public.feed_media_posts to authenticated;
+-- alter policy "post_comments: read" on public.feed_media_post_comments to authenticated;
+-- alter policy "post_likes: read" on public.feed_media_post_likes to authenticated;
+-- alter policy "user_statuses: read non-expired" on public.user_statuses to authenticated;
+-- alter policy status_updates_select_public on public.status_updates to authenticated;
+-- alter policy "status_comments: read" on public.status_comments to authenticated;
+-- alter policy "status_likes: read" on public.status_likes to authenticated;
+--
+-- revoke execute on function public.get_games_nearby(double precision, double precision, double precision) from public, anon;
+-- revoke execute on function public.get_notes_nearby(double precision, double precision, double precision, integer) from public, anon;
+-- revoke execute on function public.get_note_by_id(uuid, double precision, double precision) from public, anon;
+-- revoke execute on function public.get_live_nearby(double precision, double precision, double precision, integer) from public, anon;
+-- revoke execute on function public.get_unified_feed(double precision, double precision, double precision, integer) from public, anon;
+-- revoke execute on function public.get_venue_reviews(text, int, int) from public, anon;
+-- revoke execute on function public.get_venue_comments_with_likes(text, int, int) from public, anon;
+-- revoke execute on function public.get_venue_photos(text, int) from public, anon;
+--
+-- do $$
+-- declare
+--   v_sig text;
+-- begin
+--   for v_sig in
+--     select p.oid::regprocedure::text
+--       from pg_proc p
+--       join pg_namespace n on n.oid = p.pronamespace
+--      where n.nspname = 'public'
+--        and p.proname in (
+--          'get_note_comments',
+--          'get_note_comments_with_likes',
+--          'get_recent_statuses',
+--          'get_latest_status',
+--          'get_status_comments'
+--        )
+--   loop
+--     execute format('revoke execute on function %s from public, anon', v_sig);
+--   end loop;
+-- end $$;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927160327  name game_host_summary  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260928100000_game_host_summary.sql
+-- ----------------------------------------------------------------------------
+-- -- The map read carries the host.
+-- -- Repo file: supabase/migrations/20260928100000_game_host_summary.sql
+--
+-- drop function if exists public.get_games_nearby(double precision, double precision, double precision);
+--
+-- create function public.get_games_nearby(
+--   lat double precision,
+--   lng double precision,
+--   radius_km double precision default 10
+-- )
+-- returns table (
+--   id uuid, title text, sport text, spots_needed integer, starts_at timestamptz,
+--   created_by uuid, created_at timestamptz, status text, location_label text,
+--   description text, requirements jsonb, participant_count integer,
+--   substitute_count integer, spots_remaining integer, distance_km double precision,
+--   lat double precision, lng double precision, live_started_at timestamptz,
+--   ended_at timestamptz, visibility text, ends_at timestamptz, duration_minutes integer,
+--   host_name text, host_avatar_url text, host_sportsmanship double precision
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   with viewer as (
+--     select p.gender from public.profiles p where p.id = auth.uid()
+--   )
+--   select
+--     g.id, g.title, g.sport, g.spots_needed, g.starts_at, g.created_by, g.created_at,
+--     g.status, g.location_label, g.description,
+--     coalesce(g.requirements, '{}'::jsonb)                          as requirements,
+--     coalesce(part.player_cnt, 0)::int                              as participant_count,
+--     coalesce(part.sub_cnt, 0)::int                                 as substitute_count,
+--     greatest(g.spots_needed - coalesce(part.player_cnt, 0), 0)::int as spots_remaining,
+--     (st_distance(g.location, st_point(lng, lat)::geography) / 1000.0) as distance_km,
+--     st_y(g.location::geometry)                                     as lat,
+--     st_x(g.location::geometry)                                     as lng,
+--     g.live_started_at, g.ended_at, g.visibility, g.ends_at, g.duration_minutes,
+--     host.display_name                                              as host_name,
+--     host.avatar_url                                                as host_avatar_url,
+--     host.sportsmanship_avg                                         as host_sportsmanship
+--   from public.games g
+--   left join lateral (
+--     select
+--       count(*) filter (where gp.role != 'substitute')::int as player_cnt,
+--       count(*) filter (where gp.role  = 'substitute')::int as sub_cnt
+--     from public.game_participants gp
+--     where gp.game_id = g.id
+--   ) part on true
+--   left join public.profiles host on host.id = g.created_by
+--   where st_dwithin(g.location, st_point(lng, lat)::geography, radius_km * 1000.0)
+--     and g.status in ('open', 'full', 'live')
+--     and (
+--       g.status <> 'live'
+--       or (coalesce(g.live_started_at, g.updated_at, g.created_at) > now() - interval '24 hours')
+--     )
+--     and (
+--       (g.ends_at is not null and g.ends_at > now())
+--       or (g.ends_at is null and g.created_at > now() - interval '3 days')
+--     )
+--     and (
+--       g.live_started_at is null
+--       or g.live_started_at + make_interval(mins => coalesce(g.duration_minutes, 90)) > now()
+--     )
+--     and public.can_view_game_for_gender(
+--       (select gender from viewer),
+--       host.gender,
+--       g.requirements->>'matchType'
+--     )
+--   order by distance_km asc;
+-- $function$;
+--
+-- comment on function public.get_games_nearby(double precision, double precision, double precision) is
+--   'Games near a point for a signed-in viewer, nearest first, gender- and TTL-filtered. '
+--   'Carries the host denormalised (name, avatar, sportsmanship) so a card can name '
+--   'the host without a second round-trip per pin.';
+--
+-- revoke execute on function public.get_games_nearby(double precision, double precision, double precision) from public, anon;
+-- grant execute on function public.get_games_nearby(double precision, double precision, double precision) to authenticated;
+-- grant execute on function public.get_games_nearby(double precision, double precision, double precision) to service_role;
+--
+-- drop function if exists public.get_guest_games_nearby(double precision, double precision, double precision);
+--
+-- create function public.get_guest_games_nearby(
+--   lat double precision,
+--   lng double precision,
+--   radius_km double precision default 10
+-- )
+-- returns table (
+--   id uuid, title text, sport text, spots_needed integer, starts_at timestamptz,
+--   created_by uuid, created_at timestamptz, status text, location_label text,
+--   description text, requirements jsonb, participant_count integer,
+--   substitute_count integer, spots_remaining integer, distance_km double precision,
+--   lat double precision, lng double precision, live_started_at timestamptz,
+--   ended_at timestamptz, visibility text, ends_at timestamptz, duration_minutes integer,
+--   host_name text, host_avatar_url text, host_sportsmanship double precision
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     g.id, g.title, g.sport, g.spots_needed, g.starts_at,
+--     null::uuid as created_by, -- the whole point: a guest never learns who hosts
+--     g.created_at, g.status, g.location_label, g.description, g.requirements,
+--     g.participant_count, g.substitute_count, g.spots_remaining, g.distance_km,
+--     g.lat, g.lng, g.live_started_at, g.ended_at, g.visibility, g.ends_at,
+--     g.duration_minutes,
+--     -- Same promise as created_by, kept in SQL rather than in JSX. The client
+--     -- renders no host row because there is no host name, not because it checked.
+--     null::text as host_name,
+--     null::text as host_avatar_url,
+--     null::double precision as host_sportsmanship
+--   from public.get_games_nearby(lat, lng, radius_km) g
+--   where coalesce(g.visibility, 'public') = 'public';
+-- $function$;
+--
+-- revoke execute on function public.get_guest_games_nearby(double precision, double precision, double precision) from public;
+-- grant execute on function public.get_guest_games_nearby(double precision, double precision, double precision) to anon;
+--
+-- drop function if exists public.get_suggested_games(double precision, double precision, double precision, int);
+--
+-- create function public.get_suggested_games(
+--   p_lat double precision, p_lng double precision,
+--   p_radius_km double precision default 25, p_limit int default 20
+-- )
+-- returns table (
+--   id uuid, title text, sport text, spots_needed int, starts_at timestamptz,
+--   created_by uuid, created_at timestamptz, status text, location_label text,
+--   description text, requirements jsonb, participant_count int, substitute_count int,
+--   spots_remaining int, distance_km double precision, lat double precision,
+--   lng double precision, live_started_at timestamptz, ended_at timestamptz,
+--   visibility text, ends_at timestamptz, duration_minutes int,
+--   match_score double precision, sport_match boolean,
+--   host_sportsmanship double precision, host_name text, host_avatar_url text
+-- )
+-- language plpgsql
+-- stable
+-- security definer
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_uid    uuid := auth.uid();
+--   v_origin geography := st_point(p_lng, p_lat)::geography;
+--   v_radius double precision := greatest(1.0, least(200.0, coalesce(p_radius_km, 25.0)));
+--   v_limit  int := greatest(1, least(100, coalesce(p_limit, 20)));
+--   v_gender text;
+--   v_primary   text[];
+--   v_secondary text[];
+-- begin
+--   if v_uid is null then
+--     return;
+--   end if;
+--
+--   select
+--     p.gender,
+--     coalesce(array(select distinct x from jsonb_array_elements_text(
+--       coalesce(nullif(p.athlete_profile->'primarySports', 'null'::jsonb), '[]'::jsonb)) x), array[]::text[]),
+--     coalesce(array(select distinct x from jsonb_array_elements_text(
+--       coalesce(nullif(p.athlete_profile->'secondarySports', 'null'::jsonb), '[]'::jsonb)) x), array[]::text[])
+--     into v_gender, v_primary, v_secondary
+--   from public.profiles p where p.id = v_uid;
+--
+--   return query
+--   with candidates as (
+--     select
+--       g.*,
+--       coalesce(part.player_cnt, 0)::int as p_cnt,
+--       coalesce(part.sub_cnt, 0)::int    as s_cnt,
+--       (st_distance(g.location, v_origin) / 1000.0) as dist_km,
+--       host.sportsmanship_avg as host_trust,
+--       host.display_name      as host_nm,
+--       host.avatar_url        as host_av
+--     from public.games g
+--     left join lateral (
+--       select
+--         count(*) filter (where gp.role != 'substitute')::int as player_cnt,
+--         count(*) filter (where gp.role  = 'substitute')::int as sub_cnt
+--       from public.game_participants gp
+--       where gp.game_id = g.id
+--     ) part on true
+--     left join public.profiles host on host.id = g.created_by
+--     where st_dwithin(g.location, v_origin, v_radius * 1000.0)
+--       and g.status in ('open', 'full', 'live')
+--       and (g.status <> 'live'
+--         or (coalesce(g.live_started_at, g.updated_at, g.created_at) > now() - interval '24 hours'))
+--       and ((g.ends_at is not null and g.ends_at > now())
+--         or (g.ends_at is null and g.created_at > now() - interval '3 days'))
+--       and (g.live_started_at is null
+--         or g.live_started_at + make_interval(mins => coalesce(g.duration_minutes, 90)) > now())
+--       and public.can_view_game_for_gender(v_gender, host.gender, g.requirements->>'matchType')
+--       and coalesce(g.created_by, '00000000-0000-0000-0000-000000000000'::uuid) <> v_uid
+--       and not exists (
+--         select 1 from public.game_participants gp
+--          where gp.game_id = g.id and gp.user_id = v_uid
+--       )
+--   ),
+--   scored as (
+--     select
+--       c.*,
+--       (lower(btrim(c.sport)) = any(select lower(btrim(x)) from unnest(v_primary) x))   as is_primary,
+--       (lower(btrim(c.sport)) = any(select lower(btrim(x)) from unnest(v_secondary) x)) as is_secondary,
+--       case when c.starts_at is null then null::double precision
+--            else extract(epoch from (c.starts_at - now())) / 3600.0 end as hours_out
+--     from candidates c
+--   )
+--   select
+--     s.id, s.title, s.sport, s.spots_needed, s.starts_at, s.created_by, s.created_at,
+--     s.status, s.location_label, s.description, coalesce(s.requirements, '{}'::jsonb),
+--     s.p_cnt, s.s_cnt, greatest(s.spots_needed - s.p_cnt, 0)::int, s.dist_km,
+--     st_y(s.location::geometry), st_x(s.location::geometry),
+--     s.live_started_at, s.ended_at, s.visibility, s.ends_at, s.duration_minutes,
+--     (
+--         0.40 * (case when s.is_primary then 1.0 when s.is_secondary then 0.7 else 0.0 end)
+--       + 0.25 * (case
+--             when s.hours_out is null then 0.5
+--             when s.hours_out < 0 then 0.55
+--             when s.hours_out <= 1 then 0.8 + 0.2 * s.hours_out
+--             when s.hours_out <= 12 then greatest(0.15, 1.0 - (s.hours_out - 1) / 13.0)
+--             else greatest(0.05, 0.15 - (s.hours_out - 12) / 400.0) end)
+--       + 0.20 * greatest(0.0, 1.0 - (s.dist_km / nullif(v_radius, 0)))
+--       + 0.10 * (case
+--             when greatest(s.spots_needed - s.p_cnt, 0) = 0 then 0.15
+--             when s.spots_needed <= 0 then 0.5
+--             else 0.4 + 0.6 * (greatest(s.spots_needed - s.p_cnt, 0)::double precision / s.spots_needed) end)
+--       + 0.05 * ((coalesce(s.host_trust, 3.0) - 1.0) / 4.0)
+--     )::double precision as match_score,
+--     (s.is_primary or s.is_secondary) as sport_match,
+--     s.host_trust, s.host_nm, s.host_av
+--   from scored s
+--   order by match_score desc, s.dist_km asc
+--   limit v_limit;
+-- end;
+-- $function$;
+--
+-- comment on function public.get_suggested_games(double precision, double precision, double precision, int) is
+--   'Games near a point, ranked for the caller: sport match 40%, time-to-start 25%, '
+--   'distance 20%, spots left 10%, host reputation 5%. Carries the host denormalised. '
+--   'Returns nothing for a guest — suggestions are personal.';
+--
+-- revoke execute on function public.get_suggested_games(double precision, double precision, double precision, int) from public, anon;
+-- grant execute on function public.get_suggested_games(double precision, double precision, double precision, int) to authenticated, service_role;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927163600  name saved_venues  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260928110000_saved_venues.sql
+-- ----------------------------------------------------------------------------
+-- -- Save a venue.
+-- -- Repo file: supabase/migrations/20260928110000_saved_venues.sql
+--
+-- create table if not exists public.saved_venues (
+--   user_id    uuid not null references auth.users(id) on delete cascade,
+--   venue_id   text not null,
+--   created_at timestamptz not null default now(),
+--   primary key (user_id, venue_id)
+-- );
+--
+-- create index if not exists saved_venues_venue_idx on public.saved_venues (venue_id);
+--
+-- comment on table public.saved_venues is
+--   'Venues a member bookmarked. venue_id is an OSM id (text) with no FK — the OSM '
+--   'importer replaces rows and a cascade would erase saves.';
+--
+-- alter table public.saved_venues enable row level security;
+--
+-- drop policy if exists "saved_venues: read own"  on public.saved_venues;
+-- drop policy if exists "saved_venues: write own" on public.saved_venues;
+--
+-- create policy "saved_venues: read own"
+--   on public.saved_venues as permissive for select to authenticated
+--   using (user_id = (select auth.uid()));
+--
+-- create policy "saved_venues: write own"
+--   on public.saved_venues as permissive for all to authenticated
+--   using (user_id = (select auth.uid()))
+--   with check (user_id = (select auth.uid()));
+--
+-- revoke all on public.saved_venues from public, anon;
+-- grant select, insert, delete on public.saved_venues to authenticated;
+-- grant all on public.saved_venues to service_role;
+--
+-- create or replace function public.toggle_saved_venue(p_venue_id text)
+-- returns boolean
+-- language plpgsql
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+-- declare
+--   v_uid uuid := (select auth.uid());
+--   v_n   int;
+-- begin
+--   if v_uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
+--   if coalesce(btrim(p_venue_id), '') = '' then
+--     raise exception 'missing_venue' using errcode = '22023';
+--   end if;
+--
+--   delete from public.saved_venues
+--    where user_id = v_uid and venue_id = p_venue_id;
+--   get diagnostics v_n = row_count;
+--   if v_n > 0 then return false; end if;
+--
+--   insert into public.saved_venues (user_id, venue_id)
+--   values (v_uid, p_venue_id)
+--   on conflict do nothing;
+--   return true;
+-- end $function$;
+--
+-- revoke execute on function public.toggle_saved_venue(text) from public, anon;
+-- grant execute on function public.toggle_saved_venue(text) to authenticated, service_role;
+--
+-- create or replace function public.get_my_saved_venues(p_limit int default 100)
+-- returns table (
+--   venue_id   text,
+--   saved_at   timestamptz,
+--   name       text,
+--   sport      text,
+--   leisure    text,
+--   lat        double precision,
+--   lng        double precision
+-- )
+-- language sql
+-- stable
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+--   select
+--     s.venue_id,
+--     s.created_at as saved_at,
+--     v.name,
+--     v.sport,
+--     v.leisure,
+--     v.lat,
+--     v.lng
+--   from public.saved_venues s
+--   join public.osm_sports_venues v on v.id = s.venue_id
+--   where s.user_id = (select auth.uid())
+--   order by s.created_at desc
+--   limit greatest(1, least(500, coalesce(p_limit, 100)));
+-- $function$;
+--
+-- revoke execute on function public.get_my_saved_venues(int) from public, anon;
+-- grant execute on function public.get_my_saved_venues(int) to authenticated, service_role;
+--
+-- create or replace function public.get_saved_venue_ids(p_venue_ids text[])
+-- returns table (venue_id text)
+-- language sql
+-- stable
+-- security invoker
+-- set search_path to 'public'
+-- as $function$
+--   select s.venue_id
+--     from public.saved_venues s
+--    where s.user_id = (select auth.uid())
+--      and s.venue_id = any(p_venue_ids);
+-- $function$;
+--
+-- revoke execute on function public.get_saved_venue_ids(text[]) from public, anon;
+-- grant execute on function public.get_saved_venue_ids(text[]) to authenticated, service_role;
+--
+-- notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- version 20260927215211  name chat_reads  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260928120000_chat_reads.sql
+-- ----------------------------------------------------------------------------
+-- create table if not exists public.chat_reads (
+--   thread_kind  text not null check (thread_kind in ('game','dm','note')),
+--   thread_id    uuid not null,
+--   user_id      uuid not null references auth.users(id) on delete cascade,
+--   last_read_at timestamptz not null default now(),
+--   primary key (thread_kind, thread_id, user_id)
+-- );
+--
+-- alter table public.chat_reads replica identity full;
+--
+-- create index if not exists chat_reads_thread_idx
+--   on public.chat_reads (thread_kind, thread_id);
+--
+-- alter table public.chat_reads enable row level security;
+--
+-- create or replace function public.viewer_is_dm_thread_member(p_thread_id uuid)
+-- returns boolean
+-- language sql stable security definer set search_path = public
+-- as $$
+--   select exists (
+--     select 1 from public.dm_thread_members m
+--     where m.thread_id = p_thread_id and m.user_id = auth.uid()
+--   );
+-- $$;
+--
+-- drop policy if exists "chat_reads: read own" on public.chat_reads;
+-- create policy "chat_reads: read own"
+--   on public.chat_reads for select to authenticated
+--   using (user_id = auth.uid());
+--
+-- drop policy if exists "chat_reads: read your game thread" on public.chat_reads;
+-- create policy "chat_reads: read your game thread"
+--   on public.chat_reads for select to authenticated
+--   using (thread_kind = 'game' and public.viewer_is_game_participant(thread_id));
+--
+-- drop policy if exists "chat_reads: read your dm thread" on public.chat_reads;
+-- create policy "chat_reads: read your dm thread"
+--   on public.chat_reads for select to authenticated
+--   using (thread_kind = 'dm' and public.viewer_is_dm_thread_member(thread_id));
+--
+-- drop policy if exists "chat_reads: write own" on public.chat_reads;
+-- create policy "chat_reads: write own"
+--   on public.chat_reads for insert to authenticated
+--   with check (user_id = auth.uid());
+--
+-- drop policy if exists "chat_reads: update own" on public.chat_reads;
+-- create policy "chat_reads: update own"
+--   on public.chat_reads for update to authenticated
+--   using (user_id = auth.uid())
+--   with check (user_id = auth.uid());
+--
+-- revoke all on public.chat_reads from anon;
+-- grant select, insert, update on public.chat_reads to authenticated;
+--
+-- create or replace function public.mark_thread_read(
+--   p_kind text, p_thread_id uuid, p_at timestamptz default now()
+-- )
+-- returns timestamptz
+-- language plpgsql security definer set search_path = public
+-- as $$
+-- declare
+--   v_uid uuid := auth.uid();
+--   v_at  timestamptz;
+--   v_out timestamptz;
+-- begin
+--   if v_uid is null then
+--     raise exception 'Not signed in' using errcode = '42501';
+--   end if;
+--   if p_kind not in ('game','dm','note') then
+--     raise exception 'Unknown thread kind: %', p_kind using errcode = '22023';
+--   end if;
+--
+--   v_at := least(coalesce(p_at, now()), now());
+--
+--   if p_kind = 'game' and not public.viewer_is_game_participant(p_thread_id) then
+--     raise exception 'Not a participant in this game' using errcode = '42501';
+--   elsif p_kind = 'dm' and not public.viewer_is_dm_thread_member(p_thread_id) then
+--     raise exception 'Not a member of this thread' using errcode = '42501';
+--   elsif p_kind = 'note'
+--         and not exists (select 1 from public.map_notes n where n.id = p_thread_id) then
+--     raise exception 'No such note' using errcode = '42501';
+--   end if;
+--
+--   insert into public.chat_reads (thread_kind, thread_id, user_id, last_read_at)
+--   values (p_kind, p_thread_id, v_uid, v_at)
+--   on conflict (thread_kind, thread_id, user_id) do update
+--     set last_read_at = excluded.last_read_at
+--     where chat_reads.last_read_at < excluded.last_read_at;
+--
+--   select last_read_at into v_out
+--     from public.chat_reads
+--    where thread_kind = p_kind and thread_id = p_thread_id and user_id = v_uid;
+--   return v_out;
+-- end;
+-- $$;
+--
+-- revoke all on function public.mark_thread_read(text, uuid, timestamptz) from public, anon;
+-- grant execute on function public.mark_thread_read(text, uuid, timestamptz) to authenticated;
+--
+-- create or replace function public.get_thread_read_receipts(
+--   p_kind text, p_thread_id uuid
+-- )
+-- returns table (
+--   user_id      uuid,
+--   display_name text,
+--   avatar_url   text,
+--   last_read_at timestamptz
+-- )
+-- language sql stable security definer set search_path = public
+-- as $$
+--   select r.user_id, p.display_name, p.avatar_url, r.last_read_at
+--   from public.chat_reads r
+--   left join public.profiles p on p.id = r.user_id
+--   where r.thread_kind = p_kind
+--     and r.thread_id = p_thread_id
+--     and r.user_id is distinct from auth.uid()
+--     and (
+--       (p_kind = 'game' and public.viewer_is_game_participant(p_thread_id))
+--       or (p_kind = 'dm' and public.viewer_is_dm_thread_member(p_thread_id))
+--     )
+--   order by r.last_read_at desc
+--   limit 50;
+-- $$;
+--
+-- revoke all on function public.get_thread_read_receipts(text, uuid) from public, anon;
+-- grant execute on function public.get_thread_read_receipts(text, uuid) to authenticated;
+--
+-- create or replace function public.get_my_unread_counts()
+-- returns table (
+--   thread_kind   text,
+--   thread_id     uuid,
+--   unread_count  int,
+--   unread_capped boolean
+-- )
+-- language sql stable security definer set search_path = public
+-- as $$
+--   with me as (select auth.uid() as uid),
+--   watermark as (
+--     select r.thread_kind, r.thread_id, r.last_read_at
+--     from public.chat_reads r, me
+--     where r.user_id = me.uid
+--   ),
+--   games as (
+--     select gp.game_id as tid from public.game_participants gp, me where gp.user_id = me.uid
+--   ),
+--   dms as (
+--     select tm.thread_id as tid from public.dm_thread_members tm, me where tm.user_id = me.uid
+--   ),
+--   notes as (
+--     select n.id as tid from public.map_notes n, me where n.created_by = me.uid
+--     union
+--     select c.note_id from public.map_note_comments c, me where c.user_id = me.uid
+--   )
+--   select 'game'::text, g.tid, x.n::int, x.n >= 100
+--   from games g, me
+--   cross join lateral (
+--     select count(*) as n from (
+--       select 1 from public.game_messages m
+--       where m.game_id = g.tid
+--         and m.user_id is distinct from me.uid
+--         and m.created_at > coalesce(
+--           (select w.last_read_at from watermark w where w.thread_kind = 'game' and w.thread_id = g.tid),
+--           '-infinity'::timestamptz)
+--       order by m.created_at desc limit 100
+--     ) s
+--   ) x
+--   where x.n > 0
+--   union all
+--   select 'dm'::text, d.tid, x.n::int, x.n >= 100
+--   from dms d, me
+--   cross join lateral (
+--     select count(*) as n from (
+--       select 1 from public.dm_messages m
+--       where m.thread_id = d.tid
+--         and m.user_id is distinct from me.uid
+--         and m.created_at > coalesce(
+--           (select w.last_read_at from watermark w where w.thread_kind = 'dm' and w.thread_id = d.tid),
+--           '-infinity'::timestamptz)
+--       order by m.created_at desc limit 100
+--     ) s
+--   ) x
+--   where x.n > 0
+--   union all
+--   select 'note'::text, nt.tid, x.n::int, x.n >= 100
+--   from notes nt, me
+--   cross join lateral (
+--     select count(*) as n from (
+--       select 1 from public.map_note_comments c
+--       where c.note_id = nt.tid
+--         and c.user_id is distinct from me.uid
+--         and c.created_at > coalesce(
+--           (select w.last_read_at from watermark w where w.thread_kind = 'note' and w.thread_id = nt.tid),
+--           '-infinity'::timestamptz)
+--       order by c.created_at desc limit 100
+--     ) s
+--   ) x
+--   where x.n > 0;
+-- $$;
+--
+-- revoke all on function public.get_my_unread_counts() from public, anon;
+-- grant execute on function public.get_my_unread_counts() to authenticated;
+--
+-- create or replace function public.chat_reads_touch_sender()
+-- returns trigger
+-- language plpgsql security definer set search_path = public
+-- as $$
+-- declare
+--   v_kind   text;
+--   v_thread uuid;
+-- begin
+--   if tg_table_name = 'game_messages' then
+--     v_kind := 'game'; v_thread := new.game_id;
+--   elsif tg_table_name = 'dm_messages' then
+--     v_kind := 'dm'; v_thread := new.thread_id;
+--   elsif tg_table_name = 'map_note_comments' then
+--     v_kind := 'note'; v_thread := new.note_id;
+--   else
+--     return new;
+--   end if;
+--
+--   if new.user_id is null then return new; end if;
+--
+--   insert into public.chat_reads (thread_kind, thread_id, user_id, last_read_at)
+--   values (v_kind, v_thread, new.user_id, new.created_at)
+--   on conflict (thread_kind, thread_id, user_id) do update
+--     set last_read_at = excluded.last_read_at
+--     where chat_reads.last_read_at < excluded.last_read_at;
+--
+--   return new;
+-- end;
+-- $$;
+--
+-- drop trigger if exists game_messages_touch_read on public.game_messages;
+-- create trigger game_messages_touch_read
+--   after insert on public.game_messages
+--   for each row execute function public.chat_reads_touch_sender();
+--
+-- drop trigger if exists dm_messages_touch_read on public.dm_messages;
+-- create trigger dm_messages_touch_read
+--   after insert on public.dm_messages
+--   for each row execute function public.chat_reads_touch_sender();
+--
+-- drop trigger if exists map_note_comments_touch_read on public.map_note_comments;
+-- create trigger map_note_comments_touch_read
+--   after insert on public.map_note_comments
+--   for each row execute function public.chat_reads_touch_sender();
+--
+-- insert into public.chat_reads (thread_kind, thread_id, user_id, last_read_at)
+-- select 'game', gp.game_id, gp.user_id, now()
+-- from public.game_participants gp
+-- on conflict do nothing;
+--
+-- insert into public.chat_reads (thread_kind, thread_id, user_id, last_read_at)
+-- select 'dm', tm.thread_id, tm.user_id, now()
+-- from public.dm_thread_members tm
+-- on conflict do nothing;
+--
+-- insert into public.chat_reads (thread_kind, thread_id, user_id, last_read_at)
+-- select distinct 'note', n.id, n.created_by, now()
+-- from public.map_notes n
+-- where n.created_by is not null
+-- on conflict do nothing;
+--
+-- insert into public.chat_reads (thread_kind, thread_id, user_id, last_read_at)
+-- select distinct 'note', c.note_id, c.user_id, now()
+-- from public.map_note_comments c
+-- where c.user_id is not null
+-- on conflict do nothing;
+--
+-- alter publication supabase_realtime add table public.chat_reads;
+
+-- ----------------------------------------------------------------------------
+-- version 20260927215248  name chat_reads_tighten_grants  recorded by tchowdhury29@gmail.com
+-- now recorded as: (no file: folded into 20260928120000_chat_reads.sql)
+-- ----------------------------------------------------------------------------
+-- -- The schema-wide Supabase default hands `authenticated` DELETE, TRUNCATE,
+-- -- REFERENCES and TRIGGER on every public table. Nothing deletes a read
+-- -- watermark — it only ever moves forward — so take the ones this table has no
+-- -- use for. RLS already denies DELETE here (no policy grants it); this makes the
+-- -- intent explicit rather than relying on the absence of a policy.
+-- revoke delete, truncate, references, trigger on public.chat_reads from authenticated;
+
+-- ----------------------------------------------------------------------------
+-- version 20260927215355  name chat_message_client_id  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260928130000_chat_message_client_id.sql
+-- ----------------------------------------------------------------------------
+-- -- A client-chosen id on every message, so an optimistic bubble can be matched to
+-- -- the row that comes back.
+-- --
+-- -- Without it, reconciling a pending bubble means matching on body plus timestamp,
+-- -- which mis-merges two identical "ok"s sent seconds apart — the pending one
+-- -- disappears onto the wrong row and the real one is never drawn.
+-- --
+-- -- The partial unique index buys idempotency for free: a retry over a flaky
+-- -- connection raises 23505, which the client can treat as success rather than
+-- -- sending the message twice. That is what makes "Failed — tap to retry" safe.
+-- --
+-- -- `edited_at` / `deleted_at` are added here rather than in a later migration
+-- -- because adding three nullable columns costs one catalogue update and no table
+-- -- rewrite, and because a message the sender deleted should stop rendering long
+-- -- before there is UI to delete one.
+--
+-- alter table public.game_messages     add column if not exists client_id  text;
+-- alter table public.game_messages     add column if not exists edited_at  timestamptz;
+-- alter table public.game_messages     add column if not exists deleted_at timestamptz;
+--
+-- alter table public.dm_messages       add column if not exists client_id  text;
+-- alter table public.dm_messages       add column if not exists edited_at  timestamptz;
+-- alter table public.dm_messages       add column if not exists deleted_at timestamptz;
+--
+-- alter table public.map_note_comments add column if not exists client_id  text;
+-- alter table public.map_note_comments add column if not exists edited_at  timestamptz;
+-- alter table public.map_note_comments add column if not exists deleted_at timestamptz;
+--
+-- -- Scoped to the sender, not global: two people may generate the same client id
+-- -- and neither should be able to block the other's send.
+-- create unique index if not exists game_messages_client_id_uniq
+--   on public.game_messages (user_id, client_id) where client_id is not null;
+-- create unique index if not exists dm_messages_client_id_uniq
+--   on public.dm_messages (user_id, client_id) where client_id is not null;
+-- create unique index if not exists map_note_comments_client_id_uniq
+--   on public.map_note_comments (user_id, client_id) where client_id is not null;
+
+-- ----------------------------------------------------------------------------
+-- version 20260927215402  name chat_realtime_publication  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260928140000_chat_realtime_publication.sql
+-- ----------------------------------------------------------------------------
+-- -- Turn the notification bell on.
+-- --
+-- -- `supabase_realtime` has contained exactly two tables since it was created:
+-- -- dm_messages and game_messages. No migration ever added `notifications`, so
+-- -- `subscribeToNotifications` has never fired a single event, in production or
+-- -- anywhere — the bell has been decorative for its entire life.
+-- --
+-- -- Safe to subscribe to unfiltered: the only SELECT policy on the table is
+-- -- "notifications: read own" (`auth.uid() = user_id`, to authenticated), and
+-- -- Realtime evaluates that policy with the subscriber's own JWT. A subscriber
+-- -- therefore receives their own rows and nobody else's.
+--
+-- alter publication supabase_realtime add table public.notifications;
+
+-- ----------------------------------------------------------------------------
+-- version 20260927225556  name note_comment_write_visibility  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260928150000_note_comment_write_visibility.sql
+-- ----------------------------------------------------------------------------
+-- -- `add_note_comment` let anyone post into any note, including a private one.
+-- --
+-- -- The RLS policies on `map_note_comments` are correct. Both of them delegate to
+-- -- `exists (select 1 from map_notes n where n.id = note_id)`, which looks like a
+-- -- missing visibility check but is not: Postgres applies `map_notes`' own RLS to
+-- -- that subquery, so an invisible note makes the EXISTS false. Reading a private
+-- -- note's comments is already refused, and so is inserting one directly.
+-- --
+-- -- `add_note_comment` is SECURITY DEFINER, so it runs as the table owner and that
+-- -- inheritance does not happen. It inserted with no check at all. Verified before
+-- -- this migration: user B, who cannot see A's private note and cannot insert into
+-- -- it directly, could call the RPC and land a comment in A's private thread.
+-- --
+-- -- Not reachable at random — note ids are v4 uuids — but it needs no more than a
+-- -- leaked id, and it is a one-line fix.
+--
+-- -- The visibility rule, callable from a definer context.
+-- --
+-- -- This duplicates the expression in the `map_notes: read visible` policy, which
+-- -- is a real drift risk and a deliberate trade: the policy keeps its inlined form
+-- -- because it runs per row on the map's bbox read, where a per-row function call
+-- -- is the wrong shape. Equivalence was verified across all twelve
+-- -- (public|friends|private) x (owner|follower|stranger|anon) cases before this
+-- -- was applied. Change one, change the other, and re-run that matrix.
+-- create or replace function public.map_note_visible_to(p_note_id uuid, p_viewer uuid)
+-- returns boolean
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select exists (
+--     select 1 from public.map_notes n
+--     where n.id = p_note_id
+--       and (
+--         n.visibility = 'public'
+--         or (p_viewer is not null and n.created_by = p_viewer)
+--         or (n.visibility = 'friends' and p_viewer is not null and (
+--               exists (select 1 from public.user_follows f
+--                        where f.follower_id = p_viewer and f.followed_id = n.created_by)
+--            or exists (select 1 from public.user_follows f
+--                        where f.follower_id = n.created_by and f.followed_id = p_viewer)))
+--       )
+--   );
+-- $$;
+--
+-- revoke all on function public.map_note_visible_to(uuid, uuid) from public, anon;
+-- grant execute on function public.map_note_visible_to(uuid, uuid) to authenticated;
+--
+-- create or replace function public.add_note_comment(p_note_id uuid, p_body text)
+-- returns public.map_note_comments
+-- language plpgsql
+-- security definer
+-- set search_path = public
+-- as $function$
+-- declare
+--   v_uid uuid := auth.uid();
+--   v_row public.map_note_comments;
+--   v_body text := coalesce(p_body, '');
+-- begin
+--   if v_uid is null then
+--     raise exception 'not_signed_in' using errcode = '42501';
+--   end if;
+--
+--   -- The check this function never had. One error for "no such note" and for
+--   -- "not yours to see", so the RPC cannot be used to probe which note ids exist.
+--   if not public.map_note_visible_to(p_note_id, v_uid) then
+--     raise exception 'note_not_found' using errcode = '42501';
+--   end if;
+--
+--   v_body := trim(v_body);
+--   if v_body = '' then
+--     raise exception 'empty_body' using errcode = '22023';
+--   end if;
+--   if length(v_body) > 2000 then
+--     v_body := left(v_body, 2000);
+--   end if;
+--
+--   insert into public.map_note_comments (note_id, user_id, body)
+--   values (p_note_id, v_uid, v_body)
+--   returning * into v_row;
+--
+--   return v_row;
+-- end $function$;
+
+-- ----------------------------------------------------------------------------
+-- version 20260927231621  name note_comment_authors_and_paging  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260928160000_note_comment_authors_and_paging.sql
+-- ----------------------------------------------------------------------------
+-- -- Note replies never said who wrote them.
+-- --
+-- -- `get_note_comments_with_likes` returned a bare `user_id` and nothing else, so
+-- -- the one surface where "you cannot tell who wrote what" was still true after the
+-- -- chat rebuild was the map-note thread. This is the last piece of that.
+-- --
+-- -- Both functions are DROP + CREATE because the signature changes, and **dropping
+-- -- a function drops its grants**. The re-grants below are load-bearing: miss one
+-- -- and note threads 403 for everybody.
+-- --
+-- -- Safe to widen with names: this function is granted to `authenticated` only, so
+-- -- no identity reaches a guest. `profiles` SELECT is `to authenticated using
+-- -- (true)`, and this function is SECURITY INVOKER, so the join resolves for a
+-- -- signed-in caller and could not resolve for anyone else.
+--
+-- drop function if exists public.get_note_comments_with_likes(uuid);
+--
+-- create function public.get_note_comments_with_likes(
+--   p_note_id uuid,
+--   p_limit   int default 50,
+--   p_before  timestamptz default null
+-- )
+-- returns table (
+--   id                uuid,
+--   created_at        timestamptz,
+--   note_id           uuid,
+--   user_id           uuid,
+--   body              text,
+--   like_count        int,
+--   liked_by_me       boolean,
+--   author_name       text,
+--   author_avatar_url text
+-- )
+-- language sql
+-- stable
+-- set search_path to 'public', 'extensions'
+-- as $$
+--   -- Newest page first, then flipped back to reading order. The read was
+--   -- previously unbounded; a thread is now capped and pageable like the other two.
+--   --
+--   -- The cursor is inclusive (`<=`), matching the message fetchers: two rows can
+--   -- share a created_at to the microsecond and an exclusive cursor would skip one
+--   -- of them forever. The caller drops the repeated boundary row by id.
+--   with page as (
+--     select c.*
+--       from public.map_note_comments c
+--      where c.note_id = p_note_id
+--        and (p_before is null or c.created_at <= p_before)
+--      order by c.created_at desc, c.id desc
+--      limit greatest(1, least(coalesce(p_limit, 50), 200))
+--   )
+--   select p.id, p.created_at, p.note_id, p.user_id, p.body,
+--          coalesce(l.cnt, 0) as like_count,
+--          exists (
+--            select 1 from public.map_note_comment_likes mine
+--             where mine.comment_id = p.id and mine.user_id = auth.uid()
+--          ) as liked_by_me,
+--          pr.display_name, pr.avatar_url
+--     from page p
+--     left join (
+--       select comment_id, count(*)::int as cnt
+--         from public.map_note_comment_likes
+--        group by comment_id
+--     ) l on l.comment_id = p.id
+--     left join public.profiles pr on pr.id = p.user_id
+--    order by p.created_at asc, p.id asc;
+-- $$;
+--
+-- revoke all on function public.get_note_comments_with_likes(uuid, int, timestamptz) from public, anon;
+-- grant execute on function public.get_note_comments_with_likes(uuid, int, timestamptz) to authenticated;
+--
+-- -- And let a note reply carry a client id, so it gets the same optimistic send
+-- -- and safe retry as a game message or a DM. The visibility check added in
+-- -- 20260928150000 is preserved exactly.
+-- drop function if exists public.add_note_comment(uuid, text);
+--
+-- create function public.add_note_comment(
+--   p_note_id   uuid,
+--   p_body      text,
+--   p_client_id text default null
+-- )
+-- returns public.map_note_comments
+-- language plpgsql
+-- security definer
+-- set search_path = public
+-- as $function$
+-- declare
+--   v_uid uuid := auth.uid();
+--   v_row public.map_note_comments;
+--   v_body text := coalesce(p_body, '');
+-- begin
+--   if v_uid is null then
+--     raise exception 'not_signed_in' using errcode = '42501';
+--   end if;
+--
+--   -- One error for "no such note" and for "not yours to see", so the RPC cannot
+--   -- be used to probe which note ids exist.
+--   if not public.map_note_visible_to(p_note_id, v_uid) then
+--     raise exception 'note_not_found' using errcode = '42501';
+--   end if;
+--
+--   v_body := trim(v_body);
+--   if v_body = '' then
+--     raise exception 'empty_body' using errcode = '22023';
+--   end if;
+--   if length(v_body) > 2000 then
+--     v_body := left(v_body, 2000);
+--   end if;
+--
+--   insert into public.map_note_comments (note_id, user_id, body, client_id)
+--   values (p_note_id, v_uid, v_body, nullif(trim(coalesce(p_client_id, '')), ''))
+--   returning * into v_row;
+--
+--   return v_row;
+-- end $function$;
+--
+-- revoke all on function public.add_note_comment(uuid, text, text) from public, anon;
+-- grant execute on function public.add_note_comment(uuid, text, text) to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- version 20260930020808  name invite_preview  recorded by tchowdhury29@gmail.com
+-- now recorded as: 20260929120000_invite_preview.sql
+-- ----------------------------------------------------------------------------
+-- -- What a share link may say about a game, before anyone signs in.
+-- --
+-- -- `/g/<token>` links currently unfurl as the same static card everywhere,
+-- -- because a crawler hitting that route gets the SPA shell. This is the data
+-- -- behind a real preview.
+-- --
+-- -- The projection is the whole point, and it is the app's existing rule applied
+-- -- to a new surface: a share preview says **what** is happening, **where**,
+-- -- **when** and **how many** are in — never **who**. No `created_by`, no host
+-- -- name, no participant names, no `id`, no coordinates, and no `description`
+-- -- (the host writes that freely and it is not worth handing to a crawler).
+-- -- `location_label` is the same human label a guest already reads off the map.
+-- --
+-- -- Granted to `anon` because the callers are unauthenticated: Facebook, iMessage,
+-- -- WhatsApp and Slack fetch the page with no session. Enumeration is not a
+-- -- concern — `games.invite_token` is a v4 uuid, so guessing one is 122 bits of
+-- -- work — and the token is already the credential: whoever holds it can redeem
+-- -- it and join, at which point they see everything anyway. Showing them the
+-- -- sport and the kickoff time first is strictly less than that.
+--
+-- create or replace function public.get_invite_preview(p_token uuid)
+-- returns table (
+--   title             text,
+--   sport             text,
+--   starts_at         timestamptz,
+--   ends_at           timestamptz,
+--   status            text,
+--   visibility        text,
+--   spots_needed      int,
+--   participant_count int,
+--   spots_remaining   int,
+--   location_label    text
+-- )
+-- language sql
+-- stable
+-- security definer
+-- set search_path = public
+-- as $$
+--   select g.title,
+--          g.sport,
+--          g.starts_at,
+--          g.ends_at,
+--          g.status,
+--          g.visibility,
+--          g.spots_needed,
+--          g.participant_count,
+--          greatest(0, coalesce(g.spots_needed, 0) - coalesce(g.participant_count, 0))::int,
+--          g.location_label
+--   from public.games g
+--   where g.invite_token = p_token
+--   limit 1;
+-- $$;
+--
+-- revoke all on function public.get_invite_preview(uuid) from public;
+-- grant execute on function public.get_invite_preview(uuid) to anon, authenticated;
+

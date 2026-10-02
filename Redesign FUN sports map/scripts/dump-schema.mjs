@@ -221,32 +221,98 @@ section(
   )
 );
 
-// ------------------------------------------------------------------- grants
+// --------------------------------------------------------------- privileges
+// Exact privileges for the API roles (anon, authenticated, service_role) and PUBLIC,
+// read from the ACLs themselves.
+//
+// Grants alone are not enough. Supabase's default privileges hand ALL on every new
+// table, and EXECUTE on every new function, to all three API roles, so a replay that
+// only adds grants silently undoes every migration that revoked something: anon would
+// get SELECT on games.invite_token back, and every member-only RPC would be callable by
+// guests. So each object is reset for those roles first, then granted exactly what
+// production has. REVOKE on a table also clears its column privileges, which is why
+// the column grants come after the table ones.
+const API_ROLES = `('public', 'anon', 'authenticated', 'service_role')`;
+const ROLE_NAME = (oidExpr) =>
+  `case when ${oidExpr} = 0 then 'public' else (select quote_ident(rolname) from pg_roles where oid = ${oidExpr}) end`;
+const PUBLIC_TABLES = `
+  select c.oid, c.relname, c.relowner, c.relacl
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public' and c.relkind = 'r'
+    and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype = 'e')`;
+
 section(
-  "Grants — tables",
+  "Privileges — tables",
   col(
-    q(`select 'grant ' || string_agg(distinct lower(privilege_type), ', ')
-         || ' on public.' || quote_ident(table_name) || ' to ' || quote_ident(grantee) || ';' as ddl
-       from information_schema.role_table_grants
-       where table_schema = 'public' and grantee in ('anon', 'authenticated', 'service_role')
-       group by table_name, grantee order by table_name, grantee;`),
+    q(`with t as (${PUBLIC_TABLES}),
+       granted as (
+         select t.relname, a.privilege_type, ${ROLE_NAME("a.grantee")} as role
+         from t cross join lateral aclexplode(coalesce(t.relacl, acldefault('r', t.relowner))) a
+       )
+       select ddl from (
+         select relname, 0 as ord, '' as role,
+                'revoke all on table public.' || quote_ident(relname)
+                  || ' from public, anon, authenticated, service_role;' as ddl
+         from t
+         union all
+         select relname, 1, role,
+                'grant ' || string_agg(lower(privilege_type), ', ' order by privilege_type)
+                  || ' on table public.' || quote_ident(relname) || ' to ' || role || ';'
+         from granted where role in ${API_ROLES}
+         group by relname, role
+       ) s
+       order by relname, ord, role;`),
     "ddl"
   )
 );
 
 section(
-  "Grants — functions",
+  "Privileges — columns",
   col(
-    q(`select 'grant execute on function public.' || p.proname
-         || '(' || pg_get_function_identity_arguments(p.oid) || ') to ' || quote_ident(g.grantee) || ';' as ddl
-       from pg_proc p
-       join pg_namespace n on n.oid = p.pronamespace
-       cross join lateral (
-         select unnest(array['anon','authenticated','service_role']) as grantee
-       ) g
-       where n.nspname = 'public' and p.prokind = 'f' and ${NOT_FROM_EXTENSION}
-         and has_function_privilege(g.grantee, p.oid, 'execute')
-       order by p.proname, g.grantee;`),
+    q(`with t as (${PUBLIC_TABLES}),
+       granted as (
+         select t.relname, att.attname, att.attnum, a.privilege_type, ${ROLE_NAME("a.grantee")} as role
+         from t
+         join pg_attribute att
+           on att.attrelid = t.oid and att.attnum > 0 and not att.attisdropped and att.attacl is not null
+         cross join lateral aclexplode(att.attacl) a
+       )
+       select 'grant ' || lower(privilege_type)
+                || ' (' || string_agg(quote_ident(attname), ', ' order by attnum) || ')'
+                || ' on table public.' || quote_ident(relname) || ' to ' || role || ';' as ddl
+       from granted where role in ${API_ROLES}
+       group by relname, privilege_type, role
+       order by relname, privilege_type, role;`),
+    "ddl"
+  )
+);
+
+section(
+  "Privileges — functions",
+  col(
+    q(`with f as (
+         select p.oid, p.proowner, p.proacl,
+                'public.' || quote_ident(p.proname)
+                  || '(' || pg_get_function_identity_arguments(p.oid) || ')' as sig
+         from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.prokind = 'f' and ${NOT_FROM_EXTENSION}
+       ),
+       granted as (
+         select f.sig, ${ROLE_NAME("a.grantee")} as role
+         from f cross join lateral aclexplode(coalesce(f.proacl, acldefault('f', f.proowner))) a
+         where a.privilege_type = 'EXECUTE'
+       )
+       select ddl from (
+         select sig, 0 as ord, '' as role,
+                'revoke all on function ' || sig || ' from public, anon, authenticated, service_role;' as ddl
+         from f
+         union all
+         select sig, 1, role, 'grant execute on function ' || sig || ' to ' || role || ';'
+         from granted where role in ${API_ROLES}
+       ) s
+       order by sig, ord, role;`),
     "ddl"
   )
 );
