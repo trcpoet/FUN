@@ -557,6 +557,26 @@ is done.
   orphan row (`20261002043655`) and an unrecorded file. Repaired both ways, so
   the ledger is 64 rows against 64 files with zero mismatches.
 
+- **`20261002140000_search_profiles_browse_all.sql` — ✅ APPLIED 2026-10-02.**
+  `search_profiles` gains a browse mode so the feed's search button can open on
+  the full list of players.
+
+  It previously hard-filtered on `length(q) >= 2`, so an empty query returned
+  nothing. A second "list everyone" function would have duplicated the
+  eligibility rules — not anonymous, email or phone confirmed, never yourself —
+  and those are exactly the rules you do not want in two places, so the existing
+  function gained two modes instead: **no query** lists everyone eligible
+  (nearest first, then alphabetical), **one character** uses a plain substring
+  match because trigram similarity needs two and returning nothing while someone
+  types the first letter reads as broken, and **two or more** is unchanged.
+
+  `rank_score` is 0 in the first two modes, so the ORDER BY falls through to
+  distance then name. The result ceiling moves 25 → 100; `searchPeople` caps
+  itself at 25 before calling, so the map's search bar is unaffected.
+
+  Still `to authenticated` only — verified in production that `anon` gets
+  `401 permission denied for function search_profiles`.
+
 ## Resolved 2026-09-28 — anonymous sign-ins were enabled
 
 **Resolved.** Re-checked 2026-09-28: `GET /auth/v1/settings` reports
