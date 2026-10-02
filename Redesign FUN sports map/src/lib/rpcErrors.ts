@@ -100,6 +100,34 @@ export function isTransientRpcError(err: RpcErrorLike): boolean {
   return kind === "unavailable" || kind === "network";
 }
 
+/**
+ * The HTTP status of a supabase-js result, which is where the status actually lives.
+ *
+ * postgrest-js builds its error by parsing the response *body* and returns the
+ * status alongside it — `{ error, data, count, status, statusText }` — so an
+ * error object from a real call never carries `.status`. `classifyRpcError`'s
+ * 5xx branch therefore could not fire for an RPC: a transient 500 was only
+ * caught when its body text happened to match one of the substrings below it,
+ * and a pooler or gateway 500 often carries no useful text at all.
+ *
+ * That is the gap this closes, and it is why the shape is checked here rather
+ * than inside `classifyRpcError`: the status belongs to the response, not the
+ * error.
+ */
+export type RpcResultLike = { error: RpcErrorLike; status?: number };
+
+/**
+ * Worth trying again, judged on the whole response rather than the error body.
+ *
+ * Prefer this over `isTransientRpcError` anywhere a supabase-js result is in
+ * hand — it sees the 5xx that the error object cannot carry.
+ */
+export function isTransientRpcResult(res: RpcResultLike): boolean {
+  const status = res?.status;
+  if (typeof status === "number" && status >= 500 && status <= 599) return true;
+  return isTransientRpcError(res?.error ?? null);
+}
+
 /** True when the RPC is genuinely absent from the DB (pre-migration), not merely denied. */
 export function isMissingRpc(err: RpcErrorLike): boolean {
   const kind = classifyRpcError(err);

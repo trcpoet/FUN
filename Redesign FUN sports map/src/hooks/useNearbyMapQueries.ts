@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase";
 import type { GameRow, ProfileNearbyRow } from "../lib/supabase";
 import { planNearbyQueries } from "../lib/nearbyQueryPlan";
 import { retryTransient } from "../lib/retryTransient";
-import { isMissingRpc, isTransientRpcError } from "../lib/rpcErrors";
+import { isMissingRpc, isTransientRpcResult } from "../lib/rpcErrors";
 
 const PROFILES_LIMIT = 50;
 
@@ -195,7 +195,7 @@ export function useNearbyMapQueries(params: {
             // still don't know what is out there, and `setGames([])` would state, in the only
             // language the map has, that there is nothing — which is what made a brief API
             // outage look like an empty city.
-            if (!isTransientRpcError(gamesRes.error)) setGames([]);
+            if (!isTransientRpcResult(gamesRes)) setGames([]);
           } else {
             setGamesError(null);
             nextGames = (gamesRes.data as GameRow[]) ?? [];
@@ -207,7 +207,7 @@ export function useNearbyMapQueries(params: {
 
         if (needProfiles) {
           if (profilesRes.error) {
-            if (!isTransientRpcError(profilesRes.error)) setProfiles([]);
+            if (!isTransientRpcResult(profilesRes)) setProfiles([]);
           } else {
             nextProfiles = (profilesRes.data as ProfileNearbyRow[]) ?? [];
             setProfiles(nextProfiles);

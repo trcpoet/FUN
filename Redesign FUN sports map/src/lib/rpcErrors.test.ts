@@ -4,8 +4,7 @@ import {
   isPermissionDenied,
   isTransientRpcError,
   friendlyRpcError,
-  mapAuthError,
-} from "./rpcErrors";
+  mapAuthError, isTransientRpcResult } from "./rpcErrors";
 
 describe("transient server failures", () => {
   // 2026-08-11: the API layer returned 500s then a wall of 503s across every endpoint while
@@ -201,5 +200,51 @@ describe("mapAuthError", () => {
   });
   it("passes through unknown messages", () => {
     expect(mapAuthError("Some brand new error")).toBe("Some brand new error");
+  });
+});
+
+describe("isTransientRpcResult — the shape supabase-js actually returns", () => {
+  /**
+   * postgrest-js parses the response body into `error` and returns the status
+   * beside it, so a real error object never carries `.status`. These use that
+   * shape rather than the convenient one, because the convenient one is what
+   * let a transient 500 read as a final answer in production.
+   */
+  it("retries a 5xx whose body says nothing useful", () => {
+    // A pooler or gateway 500 often has no PostgREST code and no matching text.
+    const res = { error: { message: "" }, status: 500 };
+    expect(isTransientRpcResult(res)).toBe(true);
+    // ...and the old error-only check cannot see it, which was the bug.
+    expect(isTransientRpcError(res.error)).toBe(false);
+  });
+
+  it("retries 502, 503 and 504 the same way", () => {
+    for (const status of [500, 502, 503, 504]) {
+      expect(isTransientRpcResult({ error: { message: "upstream" }, status })).toBe(true);
+    }
+  });
+
+  it("treats a non-JSON gateway body as transient on status alone", () => {
+    // postgrest-js falls back to `{ message: body }` when the body is not JSON.
+    const res = { error: { message: "<html><body>502 Bad Gateway</body></html>" }, status: 502 };
+    expect(isTransientRpcResult(res)).toBe(true);
+  });
+
+  it("does not retry a 4xx, whatever the body says", () => {
+    expect(isTransientRpcResult({ error: { message: "permission denied" }, status: 403 })).toBe(false);
+    expect(isTransientRpcResult({ error: { code: "PGRST202", message: "Could not find the function" }, status: 404 })).toBe(false);
+    expect(isTransientRpcResult({ error: { code: "42501", message: "permission denied" }, status: 401 })).toBe(false);
+  });
+
+  it("still catches a network failure, which has no status at all", () => {
+    expect(isTransientRpcResult({ error: { message: "TypeError: Failed to fetch" } })).toBe(true);
+  });
+
+  it("is false when there is no error", () => {
+    expect(isTransientRpcResult({ error: null, status: 200 })).toBe(false);
+  });
+
+  it("does not treat a 200 as transient even if the body mentions an outage", () => {
+    expect(isTransientRpcResult({ error: null, status: 200 })).toBe(false);
   });
 });
