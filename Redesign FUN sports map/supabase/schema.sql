@@ -10,7 +10,7 @@
 -- Extension-owned objects (PostGIS, pg_trgm) are intentionally excluded — the
 -- `create extension` statements below bring them back.
 --
--- Generated: 2026-10-02T04:08:15.254Z
+-- Generated: 2026-10-02T04:37:49.436Z
 
 set search_path = public;
 
@@ -6068,10 +6068,6 @@ grant execute on function public.can_view_game_for_gender(p_viewer_gender text, 
 
 revoke all on function public.chat_reads_touch_sender() from public, anon, authenticated, service_role;
 
-grant execute on function public.chat_reads_touch_sender() to authenticated;
-
-grant execute on function public.chat_reads_touch_sender() to public;
-
 grant execute on function public.chat_reads_touch_sender() to service_role;
 
 revoke all on function public.check_nearby_similar_games(p_sport text, p_lat double precision, p_lng double precision, p_starts_at timestamp with time zone, p_radius_km double precision) from public, anon, authenticated, service_role;
@@ -6781,8 +6777,6 @@ grant execute on function public.upsert_venue_review(p_venue_id text, p_rating i
 revoke all on function public.viewer_is_dm_thread_member(p_thread_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.viewer_is_dm_thread_member(p_thread_id uuid) to authenticated;
-
-grant execute on function public.viewer_is_dm_thread_member(p_thread_id uuid) to public;
 
 grant execute on function public.viewer_is_dm_thread_member(p_thread_id uuid) to service_role;
 
