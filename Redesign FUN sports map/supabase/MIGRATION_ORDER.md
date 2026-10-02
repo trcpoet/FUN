@@ -525,6 +525,38 @@ is done.
   build leaves the *previous* deployment serving — which is indistinguishable
   from the rewrite quietly not working. That cost one deploy cycle to diagnose.
 
+- **`20261002120000_chat_reads_revoke_internal_rpcs.sql` — ✅ APPLIED 2026-10-02.**
+  Takes two helpers from `20260928120000_chat_reads.sql` back off the REST surface.
+
+  `chat_reads_touch_sender()` is a **trigger function** and was reachable at
+  `/rest/v1/rpc/chat_reads_touch_sender`. Calling a trigger function directly
+  raises rather than doing damage, so this is less a hole closed than an endpoint
+  that should never have existed. Revoked from everyone including `authenticated`,
+  because PostgreSQL checks EXECUTE when a trigger is *created*, not when it
+  fires — verified in a rolled-back transaction: with EXECUTE revoked from
+  public, anon and authenticated, inserting a game message still advanced the
+  sender's watermark.
+
+  `viewer_is_dm_thread_member(uuid)` kept the default PUBLIC execute, so `anon`
+  could call it. Harmless on its own — it answers "is auth.uid() in this thread",
+  always false for anon — but the guest surface is meant to be exactly the
+  `get_guest_*` functions. `authenticated` keeps it, because the
+  `chat_reads: read your dm thread` policy calls it and a policy's function runs
+  with the querying role's privileges; verified the policy still evaluates.
+
+  Grant matrix after, confirmed with `has_function_privilege`:
+
+  | function | anon | authenticated |
+  |---|---|---|
+  | `chat_reads_touch_sender` | ✗ | ✗ (trigger only) |
+  | `viewer_is_dm_thread_member` | ✗ | ✓ (policy needs it) |
+  | `mark_thread_read`, `get_my_unread_counts`, `get_thread_read_receipts`, `map_note_visible_to` | ✗ | ✓ |
+  | `get_invite_preview` | ✓ | ✓ (crawlers are unauthenticated — intended) |
+
+  Ledger note: `apply_migration` records under its own timestamp, which left an
+  orphan row (`20261002043655`) and an unrecorded file. Repaired both ways, so
+  the ledger is 64 rows against 64 files with zero mismatches.
+
 ## Resolved 2026-09-28 — anonymous sign-ins were enabled
 
 **Resolved.** Re-checked 2026-09-28: `GET /auth/v1/settings` reports
