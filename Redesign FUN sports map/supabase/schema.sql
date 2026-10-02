@@ -10,7 +10,7 @@
 -- Extension-owned objects (PostGIS, pg_trgm) are intentionally excluded — the
 -- `create extension` statements below bring them back.
 --
--- Generated: 2026-10-02T04:37:49.436Z
+-- Generated: 2026-10-02T09:16:05.397Z
 
 set search_path = public;
 
@@ -4500,98 +4500,64 @@ CREATE OR REPLACE FUNCTION public.search_profiles(q text, p_lat double precision
  STABLE SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
-  with qn as (
-    select nullif(trim(lower(coalesce(q, ''))), '') as n
-  ),
+  with qn as (select nullif(trim(lower(coalesce(q, ''))), '') as n),
   ref as (
-    select case
-      when p_lat is not null and p_lng is not null
+    select case when p_lat is not null and p_lng is not null
       then st_setsrid(st_makepoint(p_lng, p_lat), 4326)::geography
-      else null::geography
-    end as g
+      else null::geography end as g
   ),
   base as (
-    select
-      p.id as pid,
-      p.display_name as dname,
-      p.avatar_url as aurl,
-      nullif(trim(both '@' from trim(coalesce(p.athlete_profile->>'handle', ''))), '') as h,
-      nullif(trim(coalesce(p.athlete_profile->>'city', '')), '') as c,
-      nullif(trim(coalesce(p.athlete_profile->>'favoriteSport', '')), '') as fs,
-      p.display_name_search as dns,
-      p.handle_search as hs,
-      case
-        when r.g is not null and pl.profile_id is not null
-        then (
-          st_distance(
-            st_setsrid(st_makepoint(pl.lng, pl.lat), 4326)::geography,
-            r.g
-          ) / 1000.0
-        )
-        else null::double precision
-      end as dist_km
+    select p.id as pid, p.display_name as dname, p.avatar_url as aurl,
+      nullif(trim(both '@' from trim(coalesce(p.athlete_profile->>'handle',''))),'') as h,
+      nullif(trim(coalesce(p.athlete_profile->>'city','')),'') as c,
+      nullif(trim(coalesce(p.athlete_profile->>'favoriteSport','')),'') as fs,
+      p.display_name_search as dns, p.handle_search as hs,
+      case when r.g is not null and pl.profile_id is not null
+        then (st_distance(st_setsrid(st_makepoint(pl.lng, pl.lat),4326)::geography, r.g)/1000.0)
+        else null::double precision end as dist_km
     from public.profiles p
     join auth.users u on u.id = p.id
-    cross join qn
-    cross join ref r
+    cross join qn cross join ref r
     left join public.profile_locations pl on pl.profile_id = p.id
     where (p_exclude is null or p.id <> p_exclude)
       and not coalesce(u.is_anonymous, false)
+      and (u.email_confirmed_at is not null or u.phone_confirmed_at is not null
+           or coalesce((p.athlete_profile->>'verified')::boolean,false) = true)
       and (
-        u.email_confirmed_at is not null
-        or u.phone_confirmed_at is not null
-        or coalesce((p.athlete_profile->>'verified')::boolean, false) = true
+        qn.n is null
+        or (length(qn.n) = 1 and (
+              p.display_name_search like '%' || qn.n || '%'
+           or (length(p.handle_search) > 0 and p.handle_search like '%' || qn.n || '%')))
+        or (length(qn.n) >= 2 and (
+              p.display_name_search % qn.n
+           or (length(p.handle_search) > 0 and p.handle_search % qn.n)
+           or p.display_name_search like qn.n || '%'
+           or (length(p.handle_search) > 0 and p.handle_search like qn.n || '%')
+           or p.display_name_search like '%' || qn.n || '%'
+           or (length(p.handle_search) > 0 and p.handle_search like '%' || qn.n || '%')))
       )
-      and qn.n is not null
-      and length(qn.n) >= 2
-      and (
-        p.display_name_search % qn.n
-        or (length(p.handle_search) > 0 and p.handle_search % qn.n)
-        or p.display_name_search like qn.n || '%'
-        or (length(p.handle_search) > 0 and p.handle_search like qn.n || '%')
-        or p.display_name_search like '%' || qn.n || '%'
-        or (length(p.handle_search) > 0 and p.handle_search like '%' || qn.n || '%')
-      )
-      and (
-        r.g is null
-        or pl.profile_id is null
-        or st_dwithin(
-          st_setsrid(st_makepoint(pl.lng, pl.lat), 4326)::geography,
-          r.g,
-          radius_km * 1000.0
-        )
-      )
+      and (r.g is null or pl.profile_id is null
+           or st_dwithin(st_setsrid(st_makepoint(pl.lng, pl.lat),4326)::geography,
+                         r.g, radius_km * 1000.0))
   ),
   scored as (
-    select
-      b.*,
-      greatest(
+    select b.*,
+      case when qn.n is null or length(qn.n) < 2 then 0::double precision else greatest(
         case when b.dns = qn.n then 1.0::double precision else 0.0 end,
         case when length(b.hs) > 0 and b.hs = qn.n then 1.0::double precision else 0.0 end,
         similarity(b.dns, qn.n),
         case when length(b.hs) > 0 then similarity(b.hs, qn.n) else 0.0::double precision end
-      ) as rnk,
-      case
-        when r.g is not null and b.dist_km is not null and b.dist_km <= 25 then 0.08::double precision
-        when r.g is not null and b.dist_km is not null and b.dist_km <= 80 then 0.04::double precision
-        else 0::double precision
-      end as near_boost
-    from base b
-    cross join qn
-    cross join ref r
+      ) end as rnk,
+      case when r.g is not null and b.dist_km is not null and b.dist_km <= 25 then 0.08::double precision
+           when r.g is not null and b.dist_km is not null and b.dist_km <= 80 then 0.04::double precision
+           else 0::double precision end as near_boost
+    from base b cross join qn cross join ref r
   )
-  select
-    s.pid as profile_id,
-    s.dname as display_name,
-    s.aurl as avatar_url,
-    s.h as handle,
-    s.c as city,
-    s.fs as favorite_sport,
-    s.dist_km as distance_km,
-    (s.rnk + s.near_boost)::double precision as rank_score
+  select s.pid, s.dname, s.aurl, s.h, s.c, s.fs, s.dist_km,
+         (s.rnk + s.near_boost)::double precision
   from scored s
-  order by rank_score desc, distance_km asc nulls last
-  limit least(coalesce(nullif(limit_n, 0), 15), 25);
+  order by (s.rnk + s.near_boost) desc, s.dist_km asc nulls last, lower(coalesce(s.dname,'')) asc
+  limit least(coalesce(nullif(limit_n, 0), 15), 100);
 $function$;
 
 CREATE OR REPLACE FUNCTION public.spatial_ref_sys_read_only()

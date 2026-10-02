@@ -7,13 +7,21 @@
  * the failure as data: `get_games_nearby` erroring meant `setGames([])`, which is pixel-for-pixel
  * "there are no games near you". A transient 5xx should cost a second, not a blank map.
  *
- * Scope is deliberately small: reads only, and only the kinds `isTransientRpcError` admits.
+ * Scope is deliberately small: reads only, and only the kinds `isTransientRpcResult` admits.
  * Retrying a write risks doing it twice, and retrying a permission or missing-function error
  * just hammers a server that has already given its final answer.
  */
-import { isTransientRpcError, type RpcErrorLike } from "./rpcErrors";
+import { isTransientRpcResult, type RpcErrorLike } from "./rpcErrors";
 
-export type SupabaseLikeResult<T> = { data: T; error: RpcErrorLike };
+export type SupabaseLikeResult<T> = {
+  data: T;
+  error: RpcErrorLike;
+  /**
+   * The HTTP status. postgrest-js returns it beside the error rather than on
+   * it, so without reading it here a transient 500 looks like a final answer.
+   */
+  status?: number;
+};
 
 export type RetryOptions = {
   /** Attempts after the first. Two extra tries covers a restart without stampeding. */
@@ -55,7 +63,7 @@ export async function retryTransient<T>(
   let result = await run();
 
   for (let attempt = 0; attempt < retries; attempt++) {
-    if (!result.error || !isTransientRpcError(result.error)) return result;
+    if (!result.error || !isTransientRpcResult(result)) return result;
     if (shouldContinue && !shouldContinue()) return result;
     await sleep(backoffMs(attempt, baseDelayMs, random));
     if (shouldContinue && !shouldContinue()) return result;

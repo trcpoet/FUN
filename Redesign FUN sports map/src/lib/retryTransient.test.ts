@@ -94,3 +94,58 @@ describe("retryTransient", () => {
     expect(a[0]).not.toEqual(b[0]);
   });
 });
+
+describe("the shape a real supabase-js call returns", () => {
+  /**
+   * The existing tests above put `status` on the error. postgrest-js never does
+   * — it parses the body into `error` and returns the status beside it. Under
+   * that real shape the retry used to be skipped entirely, so a cold-start 500
+   * blanked the map instead of costing a second.
+   */
+  const fiveHundred = () =>
+    ({ data: null, error: { message: "" }, status: 500 }) as SupabaseLikeResult<unknown>;
+  const ok = () => ({ data: ["a game"], error: null, status: 200 }) as SupabaseLikeResult<unknown>;
+
+  it("retries a 500 that carries its status on the result, not the error", async () => {
+    let calls = 0;
+    const res = await retryTransient(
+      () => {
+        calls += 1;
+        return Promise.resolve(calls === 1 ? fiveHundred() : ok());
+      },
+      { sleep: async () => {}, random: () => 0.5 },
+    );
+    expect(calls).toBe(2);
+    expect(res.error).toBeNull();
+    expect(res.data).toEqual(["a game"]);
+  });
+
+  it("gives up after the configured retries and reports the last failure", async () => {
+    let calls = 0;
+    const res = await retryTransient(
+      () => {
+        calls += 1;
+        return Promise.resolve(fiveHundred());
+      },
+      { sleep: async () => {}, random: () => 0.5 },
+    );
+    expect(calls).toBe(3); // the first attempt plus two retries
+    expect(res.status).toBe(500);
+  });
+
+  it("does not retry a 404 carried the same way", async () => {
+    let calls = 0;
+    await retryTransient(
+      () => {
+        calls += 1;
+        return Promise.resolve({
+          data: null,
+          error: { code: "PGRST202", message: "Could not find the function" },
+          status: 404,
+        } as SupabaseLikeResult<unknown>);
+      },
+      { sleep: async () => {}, random: () => 0.5 },
+    );
+    expect(calls).toBe(1);
+  });
+});
