@@ -53,8 +53,12 @@ as $function$
   );
 $function$;
 
-revoke execute on function public.viewer_is_game_participant(uuid) from public;
-grant execute on function public.viewer_is_game_participant(uuid) to authenticated;
+-- `anon` is named as well as PUBLIC: Supabase's default privileges grant EXECUTE on
+-- every new function to anon directly, so revoking PUBLIC alone leaves guests able to
+-- call it. This is the form production received on 2026-09-27; the file said
+-- `from public` / `to authenticated` until 2026-10-01.
+revoke execute on function public.viewer_is_game_participant(uuid) from public, anon;
+grant execute on function public.viewer_is_game_participant(uuid) to authenticated, service_role;
 
 -- 2) Games: read what the viewer is allowed to see ----------------------------
 -- Order matters for cost, not just for logic: the two cheap identity tests come

@@ -10,7 +10,7 @@
 -- Extension-owned objects (PostGIS, pg_trgm) are intentionally excluded — the
 -- `create extension` statements below bring them back.
 --
--- Generated: 2026-09-28T16:04:17.676Z
+-- Generated: 2026-10-02T04:08:15.254Z
 
 set search_path = public;
 
@@ -2506,6 +2506,27 @@ AS $function$
     false as is_mine,
     r.total_count, r.avg_rating
   from public.get_venue_reviews(p_venue_id, p_limit, p_offset) r;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_invite_preview(p_token uuid)
+ RETURNS TABLE(title text, sport text, starts_at timestamp with time zone, ends_at timestamp with time zone, status text, visibility text, spots_needed integer, participant_count integer, spots_remaining integer, location_label text)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select g.title,
+         g.sport,
+         g.starts_at,
+         g.ends_at,
+         g.status,
+         g.visibility,
+         g.spots_needed,
+         g.participant_count,
+         greatest(0, coalesce(g.spots_needed, 0) - coalesce(g.participant_count, 0))::int,
+         g.location_label
+  from public.games g
+  where g.invite_token = p_token
+  limit 1;
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_latest_status(p_user uuid)
@@ -5610,324 +5631,434 @@ comment on function public.get_unified_feed(p_lat double precision, p_lng double
 comment on function public.get_venues_in_bbox(p_min_lat double precision, p_min_lng double precision, p_max_lat double precision, p_max_lng double precision, p_limit integer) is 'Venues inside a bbox, nearest-first from the bbox centre, private and residential excluded. Projection is deliberately the nine columns the map draws with — the venue card reads the rest one row at a time through fetchVenueById. Do not widen it: every column here is multiplied by up to 1000 pins on every map load.';
 
 -- ======================================================================
--- Grants — tables
+-- Privileges — tables
 -- ======================================================================
 
-grant delete, insert, references, select, trigger, truncate, update on public.app_flags to service_role;
+revoke all on table public.app_flags from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.athlete_endorsements to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.app_flags to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.athlete_endorsements to authenticated;
+revoke all on table public.athlete_endorsements from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.athlete_endorsements to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.athlete_endorsements to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.badges to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.athlete_endorsements to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.badges to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.athlete_endorsements to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.badges to service_role;
+revoke all on table public.badges from public, anon, authenticated, service_role;
 
-grant insert, select, update on public.chat_reads to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.badges to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.chat_reads to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.badges to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.dm_messages to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.badges to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.dm_messages to authenticated;
+revoke all on table public.chat_reads from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.dm_messages to service_role;
+grant insert, maintain, select, update on table public.chat_reads to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.dm_thread_members to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.chat_reads to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.dm_thread_members to authenticated;
+revoke all on table public.dm_messages from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.dm_thread_members to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.dm_messages to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.dm_threads to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.dm_messages to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.dm_threads to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.dm_messages to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.dm_threads to service_role;
+revoke all on table public.dm_thread_members from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.feed_media_post_comments to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.dm_thread_members to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.feed_media_post_comments to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.dm_thread_members to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.feed_media_post_comments to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.dm_thread_members to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.feed_media_post_likes to anon;
+revoke all on table public.dm_threads from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.feed_media_post_likes to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.dm_threads to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.feed_media_post_likes to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.dm_threads to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.feed_media_posts to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.dm_threads to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.feed_media_posts to authenticated;
+revoke all on table public.feed_media_post_comments from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.feed_media_posts to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.feed_media_post_comments to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_chat_invites to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.feed_media_post_comments to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_chat_invites to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.feed_media_post_comments to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_chat_invites to service_role;
+revoke all on table public.feed_media_post_likes from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_comment_likes to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.feed_media_post_likes to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_comment_likes to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.feed_media_post_likes to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_comments to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.feed_media_post_likes to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_comments to service_role;
+revoke all on table public.feed_media_posts from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_likes to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.feed_media_posts to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_likes to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.feed_media_posts to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_messages to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.feed_media_posts to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_messages to authenticated;
+revoke all on table public.game_chat_invites from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_messages to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_chat_invites to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_outcome_reports to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_chat_invites to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_outcome_reports to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_chat_invites to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_participants to anon;
+revoke all on table public.game_comment_likes from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_participants to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_comment_likes to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_participants to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_comment_likes to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_poll_votes to authenticated;
+revoke all on table public.game_comments from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_poll_votes to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_comments to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_polls to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_comments to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_polls to service_role;
+revoke all on table public.game_likes from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_results to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_likes to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_results to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_likes to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.game_results to service_role;
+revoke all on table public.game_messages from public, anon, authenticated, service_role;
 
-grant delete, insert, references, trigger, truncate, update on public.games to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_messages to anon;
 
-grant delete, insert, references, trigger, truncate, update on public.games to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_messages to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.games to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_messages to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.geography_columns to anon;
+revoke all on table public.game_outcome_reports from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.geography_columns to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_outcome_reports to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.geography_columns to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_outcome_reports to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.geometry_columns to anon;
+revoke all on table public.game_participants from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.geometry_columns to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_participants to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.geometry_columns to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_participants to authenticated;
 
-grant select on public.legal_acceptances to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_participants to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.legal_acceptances to service_role;
+revoke all on table public.game_poll_votes from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.legal_documents to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_poll_votes to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_note_comment_likes to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_poll_votes to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_note_comment_likes to authenticated;
+revoke all on table public.game_polls from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_note_comment_likes to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_polls to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_note_comments to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_polls to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_note_comments to authenticated;
+revoke all on table public.game_results from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_note_comments to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_results to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_note_likes to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_results to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_note_likes to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.game_results to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_note_likes to service_role;
+revoke all on table public.games from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_notes to anon;
+grant delete, insert, maintain, references, trigger, truncate, update on table public.games to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_notes to authenticated;
+grant delete, insert, maintain, references, trigger, truncate, update on table public.games to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.map_notes to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.games to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.min_age_by_country to service_role;
+revoke all on table public.legal_acceptances from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.notifications to anon;
+grant select on table public.legal_acceptances to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.notifications to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.legal_acceptances to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.notifications to service_role;
+revoke all on table public.legal_documents from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.osm_sports_venues to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.legal_documents to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.osm_sports_venues to authenticated;
+revoke all on table public.map_note_comment_likes from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.osm_sports_venues to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_note_comment_likes to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.profile_locations to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_note_comment_likes to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.profile_locations to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_note_comment_likes to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.profile_locations to service_role;
+revoke all on table public.map_note_comments from public, anon, authenticated, service_role;
 
-grant select on public.profile_private to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_note_comments to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.profile_private to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_note_comments to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.profiles to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_note_comments to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.profiles to authenticated;
+revoke all on table public.map_note_likes from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.profiles to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_note_likes to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.push_notifications_sent to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_note_likes to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.saved_venues to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_note_likes to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.saved_venues to service_role;
+revoke all on table public.map_notes from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.spatial_ref_sys to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_notes to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.spatial_ref_sys to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_notes to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.spatial_ref_sys to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.map_notes to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.status_comments to anon;
+revoke all on table public.min_age_by_country from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.status_comments to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.min_age_by_country to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.status_comments to service_role;
+revoke all on table public.notifications from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.status_likes to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.notifications to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.status_likes to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.notifications to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.status_likes to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.notifications to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.status_updates to anon;
+revoke all on table public.osm_sports_venues from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.status_updates to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.osm_sports_venues to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.status_updates to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.osm_sports_venues to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_badges to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.osm_sports_venues to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_badges to authenticated;
+revoke all on table public.profile_locations from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_badges to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.profile_locations to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_follows to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.profile_locations to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_follows to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.profile_locations to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_follows to service_role;
+revoke all on table public.profile_private from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_push_tokens to authenticated;
+grant select on table public.profile_private to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_push_tokens to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.profile_private to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_stats to anon;
+revoke all on table public.profiles from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_stats to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.profiles to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_stats to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.profiles to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_statuses to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.profiles to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_statuses to authenticated;
+revoke all on table public.push_notifications_sent from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.user_statuses to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.push_notifications_sent to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_comment_likes to anon;
+revoke all on table public.saved_venues from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_comment_likes to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.saved_venues to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_comment_likes to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.saved_venues to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_comments to anon;
+revoke all on table public.status_comments from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_comments to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.status_comments to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_comments to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.status_comments to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_coverage to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.status_comments to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_coverage to authenticated;
+revoke all on table public.status_likes from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_coverage to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.status_likes to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_photo_reports to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.status_likes to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_photo_reports to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.status_likes to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_photo_reports to service_role;
+revoke all on table public.status_updates from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_photos to anon;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.status_updates to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_photos to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.status_updates to authenticated;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_photos to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.status_updates to service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_reviews to anon;
+revoke all on table public.user_badges from public, anon, authenticated, service_role;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_reviews to authenticated;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_badges to anon;
 
-grant delete, insert, references, select, trigger, truncate, update on public.venue_reviews to service_role;
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_badges to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_badges to service_role;
+
+revoke all on table public.user_follows from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_follows to anon;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_follows to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_follows to service_role;
+
+revoke all on table public.user_push_tokens from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_push_tokens to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_push_tokens to service_role;
+
+revoke all on table public.user_stats from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_stats to anon;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_stats to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_stats to service_role;
+
+revoke all on table public.user_statuses from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_statuses to anon;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_statuses to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.user_statuses to service_role;
+
+revoke all on table public.venue_comment_likes from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_comment_likes to anon;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_comment_likes to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_comment_likes to service_role;
+
+revoke all on table public.venue_comments from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_comments to anon;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_comments to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_comments to service_role;
+
+revoke all on table public.venue_coverage from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_coverage to anon;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_coverage to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_coverage to service_role;
+
+revoke all on table public.venue_photo_reports from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_photo_reports to anon;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_photo_reports to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_photo_reports to service_role;
+
+revoke all on table public.venue_photos from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_photos to anon;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_photos to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_photos to service_role;
+
+revoke all on table public.venue_reviews from public, anon, authenticated, service_role;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_reviews to anon;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_reviews to authenticated;
+
+grant delete, insert, maintain, references, select, trigger, truncate, update on table public.venue_reviews to service_role;
 
 -- ======================================================================
--- Grants — functions
+-- Privileges — columns
 -- ======================================================================
+
+grant select (id, title, sport, spots_needed, starts_at, location, created_by, created_at, status, updated_at, location_label, description, requirements, live_started_at, ended_at, participant_count, lat, lng, duration_minutes, ends_at, visibility) on table public.games to anon;
+
+grant select (id, title, sport, spots_needed, starts_at, location, created_by, created_at, status, updated_at, location_label, description, requirements, live_started_at, ended_at, participant_count, lat, lng, duration_minutes, ends_at, visibility) on table public.games to authenticated;
+
+-- ======================================================================
+-- Privileges — functions
+-- ======================================================================
+
+revoke all on function public._athlete_sports_array(profile_json jsonb) from public, anon, authenticated, service_role;
 
 grant execute on function public._athlete_sports_array(profile_json jsonb) to authenticated;
 
 grant execute on function public._athlete_sports_array(profile_json jsonb) to service_role;
 
+revoke all on function public._fun_apply_account_setup(p_uid uuid, p_birthdate date, p_gender text, p_country text, p_accepted jsonb) from public, anon, authenticated, service_role;
+
 grant execute on function public._fun_apply_account_setup(p_uid uuid, p_birthdate date, p_gender text, p_country text, p_accepted jsonb) to service_role;
+
+revoke all on function public.add_game_comment(p_game_id uuid, p_body text) from public, anon, authenticated, service_role;
 
 grant execute on function public.add_game_comment(p_game_id uuid, p_body text) to authenticated;
 
 grant execute on function public.add_game_comment(p_game_id uuid, p_body text) to service_role;
 
+revoke all on function public.add_note_comment(p_note_id uuid, p_body text, p_client_id text) from public, anon, authenticated, service_role;
+
 grant execute on function public.add_note_comment(p_note_id uuid, p_body text, p_client_id text) to authenticated;
 
 grant execute on function public.add_note_comment(p_note_id uuid, p_body text, p_client_id text) to service_role;
+
+revoke all on function public.add_post_comment(p_post_id uuid, p_body text) from public, anon, authenticated, service_role;
 
 grant execute on function public.add_post_comment(p_post_id uuid, p_body text) to authenticated;
 
 grant execute on function public.add_post_comment(p_post_id uuid, p_body text) to service_role;
 
+revoke all on function public.add_status_comment(p_status_id uuid, p_body text) from public, anon, authenticated, service_role;
+
 grant execute on function public.add_status_comment(p_status_id uuid, p_body text) to authenticated;
 
 grant execute on function public.add_status_comment(p_status_id uuid, p_body text) to service_role;
+
+revoke all on function public.add_venue_comment(p_venue_id text, p_body text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) from public, anon, authenticated, service_role;
 
 grant execute on function public.add_venue_comment(p_venue_id text, p_body text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to authenticated;
 
 grant execute on function public.add_venue_comment(p_venue_id text, p_body text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to service_role;
 
+revoke all on function public.add_venue_photo(p_venue_id text, p_storage_path text, p_caption text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) from public, anon, authenticated, service_role;
+
 grant execute on function public.add_venue_photo(p_venue_id text, p_storage_path text, p_caption text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to authenticated;
 
 grant execute on function public.add_venue_photo(p_venue_id text, p_storage_path text, p_caption text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to service_role;
+
+revoke all on function public.archive_game_chat(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.archive_game_chat(p_game_id uuid) to authenticated;
 
 grant execute on function public.archive_game_chat(p_game_id uuid) to service_role;
 
+revoke all on function public.can_dm(p_other_user_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.can_dm(p_other_user_id uuid) to authenticated;
 
 grant execute on function public.can_dm(p_other_user_id uuid) to service_role;
+
+revoke all on function public.can_view_game_for_gender(p_viewer_gender text, p_host_gender text, p_match_type text) from public, anon, authenticated, service_role;
 
 grant execute on function public.can_view_game_for_gender(p_viewer_gender text, p_host_gender text, p_match_type text) to anon;
 
@@ -5935,137 +6066,213 @@ grant execute on function public.can_view_game_for_gender(p_viewer_gender text, 
 
 grant execute on function public.can_view_game_for_gender(p_viewer_gender text, p_host_gender text, p_match_type text) to service_role;
 
-grant execute on function public.chat_reads_touch_sender() to anon;
+revoke all on function public.chat_reads_touch_sender() from public, anon, authenticated, service_role;
 
 grant execute on function public.chat_reads_touch_sender() to authenticated;
 
+grant execute on function public.chat_reads_touch_sender() to public;
+
 grant execute on function public.chat_reads_touch_sender() to service_role;
+
+revoke all on function public.check_nearby_similar_games(p_sport text, p_lat double precision, p_lng double precision, p_starts_at timestamp with time zone, p_radius_km double precision) from public, anon, authenticated, service_role;
 
 grant execute on function public.check_nearby_similar_games(p_sport text, p_lat double precision, p_lng double precision, p_starts_at timestamp with time zone, p_radius_km double precision) to authenticated;
 
 grant execute on function public.check_nearby_similar_games(p_sport text, p_lat double precision, p_lng double precision, p_starts_at timestamp with time zone, p_radius_km double precision) to service_role;
 
+revoke all on function public.close_rematch_poll(p_poll_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.close_rematch_poll(p_poll_id uuid) to authenticated;
 
 grant execute on function public.close_rematch_poll(p_poll_id uuid) to service_role;
+
+revoke all on function public.complete_account_setup(p_birthdate date, p_gender text, p_country text, p_accepted jsonb) from public, anon, authenticated, service_role;
 
 grant execute on function public.complete_account_setup(p_birthdate date, p_gender text, p_country text, p_accepted jsonb) to authenticated;
 
 grant execute on function public.complete_account_setup(p_birthdate date, p_gender text, p_country text, p_accepted jsonb) to service_role;
 
+revoke all on function public.complete_game(p_game_id uuid, p_winner_team_or_user text, p_score jsonb) from public, anon, authenticated, service_role;
+
 grant execute on function public.complete_game(p_game_id uuid, p_winner_team_or_user text, p_score jsonb) to authenticated;
 
 grant execute on function public.complete_game(p_game_id uuid, p_winner_team_or_user text, p_score jsonb) to service_role;
+
+revoke all on function public.create_game(p_title text, p_sport text, p_spots_needed integer, p_lat double precision, p_lng double precision, p_starts_at timestamp with time zone, p_location_label text, p_description text, p_requirements jsonb, p_duration_minutes integer, p_visibility text) from public, anon, authenticated, service_role;
 
 grant execute on function public.create_game(p_title text, p_sport text, p_spots_needed integer, p_lat double precision, p_lng double precision, p_starts_at timestamp with time zone, p_location_label text, p_description text, p_requirements jsonb, p_duration_minutes integer, p_visibility text) to authenticated;
 
 grant execute on function public.create_game(p_title text, p_sport text, p_spots_needed integer, p_lat double precision, p_lng double precision, p_starts_at timestamp with time zone, p_location_label text, p_description text, p_requirements jsonb, p_duration_minutes integer, p_visibility text) to service_role;
 
+revoke all on function public.create_map_note(p_lat double precision, p_lng double precision, p_body text, p_visibility text, p_place_name text) from public, anon, authenticated, service_role;
+
 grant execute on function public.create_map_note(p_lat double precision, p_lng double precision, p_body text, p_visibility text, p_place_name text) to authenticated;
 
 grant execute on function public.create_map_note(p_lat double precision, p_lng double precision, p_body text, p_visibility text, p_place_name text) to service_role;
+
+revoke all on function public.create_rematch_poll(p_game_id uuid, p_question text) from public, anon, authenticated, service_role;
 
 grant execute on function public.create_rematch_poll(p_game_id uuid, p_question text) to authenticated;
 
 grant execute on function public.create_rematch_poll(p_game_id uuid, p_question text) to service_role;
 
+revoke all on function public.delete_game_comment(p_comment_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.delete_game_comment(p_comment_id uuid) to authenticated;
 
 grant execute on function public.delete_game_comment(p_comment_id uuid) to service_role;
+
+revoke all on function public.delete_my_status(p_status_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.delete_my_status(p_status_id uuid) to authenticated;
 
 grant execute on function public.delete_my_status(p_status_id uuid) to service_role;
 
+revoke all on function public.delete_push_token(p_token text) from public, anon, authenticated, service_role;
+
 grant execute on function public.delete_push_token(p_token text) to authenticated;
 
 grant execute on function public.delete_push_token(p_token text) to service_role;
+
+revoke all on function public.delete_venue_comment(p_comment_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.delete_venue_comment(p_comment_id uuid) to authenticated;
 
 grant execute on function public.delete_venue_comment(p_comment_id uuid) to service_role;
 
+revoke all on function public.delete_venue_photo(p_photo_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.delete_venue_photo(p_photo_id uuid) to authenticated;
 
 grant execute on function public.delete_venue_photo(p_photo_id uuid) to service_role;
+
+revoke all on function public.delete_venue_review(p_venue_id text) from public, anon, authenticated, service_role;
 
 grant execute on function public.delete_venue_review(p_venue_id text) to authenticated;
 
 grant execute on function public.delete_venue_review(p_venue_id text) to service_role;
 
+revoke all on function public.end_game(p_game_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.end_game(p_game_id uuid) to authenticated;
 
 grant execute on function public.end_game(p_game_id uuid) to service_role;
+
+revoke all on function public.endorse_athlete(p_athlete uuid, p_game uuid, p_rating integer, p_tags text[]) from public, anon, authenticated, service_role;
 
 grant execute on function public.endorse_athlete(p_athlete uuid, p_game uuid, p_rating integer, p_tags text[]) to authenticated;
 
 grant execute on function public.endorse_athlete(p_athlete uuid, p_game uuid, p_rating integer, p_tags text[]) to service_role;
 
+revoke all on function public.enforce_game_participants_visibility() from public, anon, authenticated, service_role;
+
 grant execute on function public.enforce_game_participants_visibility() to service_role;
+
+revoke all on function public.enqueue_notification(p_user_id uuid, p_type text, p_payload jsonb) from public, anon, authenticated, service_role;
 
 grant execute on function public.enqueue_notification(p_user_id uuid, p_type text, p_payload jsonb) to service_role;
 
+revoke all on function public.ensure_venue_row(p_venue_id text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) from public, anon, authenticated, service_role;
+
 grant execute on function public.ensure_venue_row(p_venue_id text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to service_role;
+
+revoke all on function public.fun_account_setup_complete(p_uid uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.fun_account_setup_complete(p_uid uuid) to service_role;
 
+revoke all on function public.fun_age_tier(p_birthdate date) from public, anon, authenticated, service_role;
+
 grant execute on function public.fun_age_tier(p_birthdate date) to service_role;
 
+revoke all on function public.fun_age_years(p_birthdate date) from public, anon, authenticated, service_role;
+
 grant execute on function public.fun_age_years(p_birthdate date) to service_role;
+
+revoke all on function public.fun_games_sync_lat_lng() from public, anon, authenticated, service_role;
 
 grant execute on function public.fun_games_sync_lat_lng() to anon;
 
 grant execute on function public.fun_games_sync_lat_lng() to authenticated;
 
+grant execute on function public.fun_games_sync_lat_lng() to public;
+
 grant execute on function public.fun_games_sync_lat_lng() to service_role;
 
+revoke all on function public.fun_min_age(p_country text) from public, anon, authenticated, service_role;
+
 grant execute on function public.fun_min_age(p_country text) to service_role;
+
+revoke all on function public.games_set_ends_at() from public, anon, authenticated, service_role;
 
 grant execute on function public.games_set_ends_at() to anon;
 
 grant execute on function public.games_set_ends_at() to authenticated;
 
+grant execute on function public.games_set_ends_at() to public;
+
 grant execute on function public.games_set_ends_at() to service_role;
+
+revoke all on function public.get_active_hosted_games_count(p_user_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_active_hosted_games_count(p_user_id uuid) to authenticated;
 
 grant execute on function public.get_active_hosted_games_count(p_user_id uuid) to service_role;
 
+revoke all on function public.get_athlete_reputation(p_athlete uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_athlete_reputation(p_athlete uuid) to authenticated;
 
 grant execute on function public.get_athlete_reputation(p_athlete uuid) to service_role;
+
+revoke all on function public.get_follow_requests() from public, anon, authenticated, service_role;
 
 grant execute on function public.get_follow_requests() to authenticated;
 
 grant execute on function public.get_follow_requests() to service_role;
 
+revoke all on function public.get_game_comments_with_likes(p_game_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_game_comments_with_likes(p_game_id uuid) to authenticated;
 
 grant execute on function public.get_game_comments_with_likes(p_game_id uuid) to service_role;
+
+revoke all on function public.get_game_invite_token(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_game_invite_token(p_game_id uuid) to authenticated;
 
 grant execute on function public.get_game_invite_token(p_game_id uuid) to service_role;
 
+revoke all on function public.get_game_lat_lng(p_game_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_game_lat_lng(p_game_id uuid) to authenticated;
 
 grant execute on function public.get_game_lat_lng(p_game_id uuid) to service_role;
+
+revoke all on function public.get_game_outcome_summary(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_game_outcome_summary(p_game_id uuid) to authenticated;
 
 grant execute on function public.get_game_outcome_summary(p_game_id uuid) to service_role;
 
+revoke all on function public.get_game_social_counts(p_game_ids uuid[]) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_game_social_counts(p_game_ids uuid[]) to authenticated;
 
 grant execute on function public.get_game_social_counts(p_game_ids uuid[]) to service_role;
+
+revoke all on function public.get_games_at_venue(p_lat double precision, p_lng double precision, p_radius_m double precision, p_include_completed boolean, p_limit integer) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_games_at_venue(p_lat double precision, p_lng double precision, p_radius_m double precision, p_include_completed boolean, p_limit integer) to authenticated;
 
 grant execute on function public.get_games_at_venue(p_lat double precision, p_lng double precision, p_radius_m double precision, p_include_completed boolean, p_limit integer) to service_role;
 
+revoke all on function public.get_games_nearby(lat double precision, lng double precision, radius_km double precision) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_games_nearby(lat double precision, lng double precision, radius_km double precision) to authenticated;
 
 grant execute on function public.get_games_nearby(lat double precision, lng double precision, radius_km double precision) to service_role;
+
+revoke all on function public.get_guest_game_comments(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_guest_game_comments(p_game_id uuid) to anon;
 
@@ -6073,11 +6280,15 @@ grant execute on function public.get_guest_game_comments(p_game_id uuid) to auth
 
 grant execute on function public.get_guest_game_comments(p_game_id uuid) to service_role;
 
+revoke all on function public.get_guest_games_at_venue(p_lat double precision, p_lng double precision, p_radius_m double precision, p_limit integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_guest_games_at_venue(p_lat double precision, p_lng double precision, p_radius_m double precision, p_limit integer) to anon;
 
 grant execute on function public.get_guest_games_at_venue(p_lat double precision, p_lng double precision, p_radius_m double precision, p_limit integer) to authenticated;
 
 grant execute on function public.get_guest_games_at_venue(p_lat double precision, p_lng double precision, p_radius_m double precision, p_limit integer) to service_role;
+
+revoke all on function public.get_guest_games_nearby(lat double precision, lng double precision, radius_km double precision) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_guest_games_nearby(lat double precision, lng double precision, radius_km double precision) to anon;
 
@@ -6085,11 +6296,15 @@ grant execute on function public.get_guest_games_nearby(lat double precision, ln
 
 grant execute on function public.get_guest_games_nearby(lat double precision, lng double precision, radius_km double precision) to service_role;
 
+revoke all on function public.get_guest_note_by_id(p_note_id uuid, p_lat double precision, p_lng double precision) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_guest_note_by_id(p_note_id uuid, p_lat double precision, p_lng double precision) to anon;
 
 grant execute on function public.get_guest_note_by_id(p_note_id uuid, p_lat double precision, p_lng double precision) to authenticated;
 
 grant execute on function public.get_guest_note_by_id(p_note_id uuid, p_lat double precision, p_lng double precision) to service_role;
+
+revoke all on function public.get_guest_notes_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_guest_notes_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to anon;
 
@@ -6097,11 +6312,15 @@ grant execute on function public.get_guest_notes_nearby(p_lat double precision, 
 
 grant execute on function public.get_guest_notes_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to service_role;
 
+revoke all on function public.get_guest_signup_rules() from public, anon, authenticated, service_role;
+
 grant execute on function public.get_guest_signup_rules() to anon;
 
 grant execute on function public.get_guest_signup_rules() to authenticated;
 
 grant execute on function public.get_guest_signup_rules() to service_role;
+
+revoke all on function public.get_guest_venue_comments(p_venue_id text, p_limit integer, p_offset integer) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_guest_venue_comments(p_venue_id text, p_limit integer, p_offset integer) to anon;
 
@@ -6109,11 +6328,15 @@ grant execute on function public.get_guest_venue_comments(p_venue_id text, p_lim
 
 grant execute on function public.get_guest_venue_comments(p_venue_id text, p_limit integer, p_offset integer) to service_role;
 
+revoke all on function public.get_guest_venue_photos(p_venue_id text, p_limit integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_guest_venue_photos(p_venue_id text, p_limit integer) to anon;
 
 grant execute on function public.get_guest_venue_photos(p_venue_id text, p_limit integer) to authenticated;
 
 grant execute on function public.get_guest_venue_photos(p_venue_id text, p_limit integer) to service_role;
+
+revoke all on function public.get_guest_venue_reviews(p_venue_id text, p_limit integer, p_offset integer) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_guest_venue_reviews(p_venue_id text, p_limit integer, p_offset integer) to anon;
 
@@ -6121,123 +6344,193 @@ grant execute on function public.get_guest_venue_reviews(p_venue_id text, p_limi
 
 grant execute on function public.get_guest_venue_reviews(p_venue_id text, p_limit integer, p_offset integer) to service_role;
 
+revoke all on function public.get_invite_preview(p_token uuid) from public, anon, authenticated, service_role;
+
+grant execute on function public.get_invite_preview(p_token uuid) to anon;
+
+grant execute on function public.get_invite_preview(p_token uuid) to authenticated;
+
+grant execute on function public.get_invite_preview(p_token uuid) to service_role;
+
+revoke all on function public.get_latest_status(p_user uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_latest_status(p_user uuid) to authenticated;
 
 grant execute on function public.get_latest_status(p_user uuid) to service_role;
+
+revoke all on function public.get_live_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_live_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to authenticated;
 
 grant execute on function public.get_live_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to service_role;
 
+revoke all on function public.get_my_account_status() from public, anon, authenticated, service_role;
+
 grant execute on function public.get_my_account_status() to authenticated;
 
 grant execute on function public.get_my_account_status() to service_role;
+
+revoke all on function public.get_my_dm_inbox() from public, anon, authenticated, service_role;
 
 grant execute on function public.get_my_dm_inbox() to authenticated;
 
 grant execute on function public.get_my_dm_inbox() to service_role;
 
+revoke all on function public.get_my_game_inbox() from public, anon, authenticated, service_role;
+
 grant execute on function public.get_my_game_inbox() to authenticated;
 
 grant execute on function public.get_my_game_inbox() to service_role;
+
+revoke all on function public.get_my_note_inbox() from public, anon, authenticated, service_role;
 
 grant execute on function public.get_my_note_inbox() to authenticated;
 
 grant execute on function public.get_my_note_inbox() to service_role;
 
+revoke all on function public.get_my_pending_invites() from public, anon, authenticated, service_role;
+
 grant execute on function public.get_my_pending_invites() to authenticated;
 
 grant execute on function public.get_my_pending_invites() to service_role;
+
+revoke all on function public.get_my_saved_venues(p_limit integer) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_my_saved_venues(p_limit integer) to authenticated;
 
 grant execute on function public.get_my_saved_venues(p_limit integer) to service_role;
 
+revoke all on function public.get_my_unread_counts() from public, anon, authenticated, service_role;
+
 grant execute on function public.get_my_unread_counts() to authenticated;
 
 grant execute on function public.get_my_unread_counts() to service_role;
+
+revoke all on function public.get_note_by_id(p_note_id uuid, p_lat double precision, p_lng double precision) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_note_by_id(p_note_id uuid, p_lat double precision, p_lng double precision) to authenticated;
 
 grant execute on function public.get_note_by_id(p_note_id uuid, p_lat double precision, p_lng double precision) to service_role;
 
+revoke all on function public.get_note_comments(p_note_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_note_comments(p_note_id uuid) to authenticated;
 
 grant execute on function public.get_note_comments(p_note_id uuid) to service_role;
+
+revoke all on function public.get_note_comments_with_likes(p_note_id uuid, p_limit integer, p_before timestamp with time zone) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_note_comments_with_likes(p_note_id uuid, p_limit integer, p_before timestamp with time zone) to authenticated;
 
 grant execute on function public.get_note_comments_with_likes(p_note_id uuid, p_limit integer, p_before timestamp with time zone) to service_role;
 
+revoke all on function public.get_notes_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_notes_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to authenticated;
 
 grant execute on function public.get_notes_nearby(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to service_role;
+
+revoke all on function public.get_or_create_dm_thread(p_other uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_or_create_dm_thread(p_other uuid) to authenticated;
 
 grant execute on function public.get_or_create_dm_thread(p_other uuid) to service_role;
 
+revoke all on function public.get_post_comments(p_post_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_post_comments(p_post_id uuid) to authenticated;
 
 grant execute on function public.get_post_comments(p_post_id uuid) to service_role;
+
+revoke all on function public.get_profiles_nearby(lat double precision, lng double precision, radius_km double precision, limit_count integer) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_profiles_nearby(lat double precision, lng double precision, radius_km double precision, limit_count integer) to authenticated;
 
 grant execute on function public.get_profiles_nearby(lat double precision, lng double precision, radius_km double precision, limit_count integer) to service_role;
 
+revoke all on function public.get_push_targets(p_since timestamp with time zone, p_radius_km double precision, p_limit integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_push_targets(p_since timestamp with time zone, p_radius_km double precision, p_limit integer) to service_role;
+
+revoke all on function public.get_rateable_teammates(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_rateable_teammates(p_game_id uuid) to authenticated;
 
 grant execute on function public.get_rateable_teammates(p_game_id uuid) to service_role;
 
+revoke all on function public.get_recent_statuses(p_limit integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_recent_statuses(p_limit integer) to authenticated;
 
 grant execute on function public.get_recent_statuses(p_limit integer) to service_role;
+
+revoke all on function public.get_rematch_poll(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_rematch_poll(p_game_id uuid) to authenticated;
 
 grant execute on function public.get_rematch_poll(p_game_id uuid) to service_role;
 
+revoke all on function public.get_saved_venue_ids(p_venue_ids text[]) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_saved_venue_ids(p_venue_ids text[]) to authenticated;
 
 grant execute on function public.get_saved_venue_ids(p_venue_ids text[]) to service_role;
+
+revoke all on function public.get_shared_completed_games(p_other uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_shared_completed_games(p_other uuid) to authenticated;
 
 grant execute on function public.get_shared_completed_games(p_other uuid) to service_role;
 
+revoke all on function public.get_similar_athletes(lat double precision, lng double precision, radius_km double precision, limit_count integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_similar_athletes(lat double precision, lng double precision, radius_km double precision, limit_count integer) to authenticated;
 
 grant execute on function public.get_similar_athletes(lat double precision, lng double precision, radius_km double precision, limit_count integer) to service_role;
+
+revoke all on function public.get_status_comments(p_status_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_status_comments(p_status_id uuid) to authenticated;
 
 grant execute on function public.get_status_comments(p_status_id uuid) to service_role;
 
+revoke all on function public.get_suggested_games(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_suggested_games(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to authenticated;
 
 grant execute on function public.get_suggested_games(p_lat double precision, p_lng double precision, p_radius_km double precision, p_limit integer) to service_role;
+
+revoke all on function public.get_thread_read_receipts(p_kind text, p_thread_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_thread_read_receipts(p_kind text, p_thread_id uuid) to authenticated;
 
 grant execute on function public.get_thread_read_receipts(p_kind text, p_thread_id uuid) to service_role;
 
+revoke all on function public.get_unified_feed(p_lat double precision, p_lng double precision, p_map_radius_km double precision, p_limit integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_unified_feed(p_lat double precision, p_lng double precision, p_map_radius_km double precision, p_limit integer) to authenticated;
 
 grant execute on function public.get_unified_feed(p_lat double precision, p_lng double precision, p_map_radius_km double precision, p_limit integer) to service_role;
+
+revoke all on function public.get_venue_comments_with_likes(p_venue_id text, p_limit integer, p_offset integer) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_venue_comments_with_likes(p_venue_id text, p_limit integer, p_offset integer) to authenticated;
 
 grant execute on function public.get_venue_comments_with_likes(p_venue_id text, p_limit integer, p_offset integer) to service_role;
 
+revoke all on function public.get_venue_photos(p_venue_id text, p_limit integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_venue_photos(p_venue_id text, p_limit integer) to authenticated;
 
 grant execute on function public.get_venue_photos(p_venue_id text, p_limit integer) to service_role;
 
+revoke all on function public.get_venue_reviews(p_venue_id text, p_limit integer, p_offset integer) from public, anon, authenticated, service_role;
+
 grant execute on function public.get_venue_reviews(p_venue_id text, p_limit integer, p_offset integer) to authenticated;
 
 grant execute on function public.get_venue_reviews(p_venue_id text, p_limit integer, p_offset integer) to service_role;
+
+revoke all on function public.get_venues_in_bbox(p_min_lat double precision, p_min_lng double precision, p_max_lat double precision, p_max_lng double precision, p_limit integer) from public, anon, authenticated, service_role;
 
 grant execute on function public.get_venues_in_bbox(p_min_lat double precision, p_min_lng double precision, p_max_lat double precision, p_max_lng double precision, p_limit integer) to anon;
 
@@ -6245,23 +6538,37 @@ grant execute on function public.get_venues_in_bbox(p_min_lat double precision, 
 
 grant execute on function public.get_venues_in_bbox(p_min_lat double precision, p_min_lng double precision, p_max_lat double precision, p_max_lng double precision, p_limit integer) to service_role;
 
+revoke all on function public.handle_new_user() from public, anon, authenticated, service_role;
+
 grant execute on function public.handle_new_user() to service_role;
+
+revoke all on function public.haversine_km(p_lat1 double precision, p_lng1 double precision, p_lat2 double precision, p_lng2 double precision) from public, anon, authenticated, service_role;
 
 grant execute on function public.haversine_km(p_lat1 double precision, p_lng1 double precision, p_lat2 double precision, p_lng2 double precision) to anon;
 
 grant execute on function public.haversine_km(p_lat1 double precision, p_lng1 double precision, p_lat2 double precision, p_lng2 double precision) to authenticated;
 
+grant execute on function public.haversine_km(p_lat1 double precision, p_lng1 double precision, p_lat2 double precision, p_lng2 double precision) to public;
+
 grant execute on function public.haversine_km(p_lat1 double precision, p_lng1 double precision, p_lat2 double precision, p_lng2 double precision) to service_role;
+
+revoke all on function public.is_eligible_to_join_game(p_game_id uuid, p_user_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.is_eligible_to_join_game(p_game_id uuid, p_user_id uuid) to authenticated;
 
 grant execute on function public.is_eligible_to_join_game(p_game_id uuid, p_user_id uuid) to service_role;
 
+revoke all on function public.is_game_visible_on_map(p_game_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.is_game_visible_on_map(p_game_id uuid) to anon;
 
 grant execute on function public.is_game_visible_on_map(p_game_id uuid) to authenticated;
 
+grant execute on function public.is_game_visible_on_map(p_game_id uuid) to public;
+
 grant execute on function public.is_game_visible_on_map(p_game_id uuid) to service_role;
+
+revoke all on function public.is_squad(p_viewer uuid, p_owner uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.is_squad(p_viewer uuid, p_owner uuid) to anon;
 
@@ -6269,141 +6576,223 @@ grant execute on function public.is_squad(p_viewer uuid, p_owner uuid) to authen
 
 grant execute on function public.is_squad(p_viewer uuid, p_owner uuid) to service_role;
 
+revoke all on function public.join_game(p_game_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.join_game(p_game_id uuid) to authenticated;
 
 grant execute on function public.join_game(p_game_id uuid) to service_role;
+
+revoke all on function public.leave_game(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.leave_game(p_game_id uuid) to authenticated;
 
 grant execute on function public.leave_game(p_game_id uuid) to service_role;
 
+revoke all on function public.maintain_game_participant_count() from public, anon, authenticated, service_role;
+
 grant execute on function public.maintain_game_participant_count() to anon;
 
 grant execute on function public.maintain_game_participant_count() to authenticated;
 
+grant execute on function public.maintain_game_participant_count() to public;
+
 grant execute on function public.maintain_game_participant_count() to service_role;
+
+revoke all on function public.maintain_profile_endorsement_stats() from public, anon, authenticated, service_role;
 
 grant execute on function public.maintain_profile_endorsement_stats() to anon;
 
 grant execute on function public.maintain_profile_endorsement_stats() to authenticated;
 
+grant execute on function public.maintain_profile_endorsement_stats() to public;
+
 grant execute on function public.maintain_profile_endorsement_stats() to service_role;
+
+revoke all on function public.map_note_visible_to(p_note_id uuid, p_viewer uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.map_note_visible_to(p_note_id uuid, p_viewer uuid) to authenticated;
 
 grant execute on function public.map_note_visible_to(p_note_id uuid, p_viewer uuid) to service_role;
 
+revoke all on function public.mark_ended_games_completed() from public, anon, authenticated, service_role;
+
 grant execute on function public.mark_ended_games_completed() to service_role;
+
+revoke all on function public.mark_thread_read(p_kind text, p_thread_id uuid, p_at timestamp with time zone) from public, anon, authenticated, service_role;
 
 grant execute on function public.mark_thread_read(p_kind text, p_thread_id uuid, p_at timestamp with time zone) to authenticated;
 
 grant execute on function public.mark_thread_read(p_kind text, p_thread_id uuid, p_at timestamp with time zone) to service_role;
 
+revoke all on function public.prune_push_token(p_token text) from public, anon, authenticated, service_role;
+
 grant execute on function public.prune_push_token(p_token text) to service_role;
 
+revoke all on function public.record_push_sent(p_rows jsonb) from public, anon, authenticated, service_role;
+
 grant execute on function public.record_push_sent(p_rows jsonb) to service_role;
+
+revoke all on function public.redeem_invite_token(p_token uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.redeem_invite_token(p_token uuid) to authenticated;
 
 grant execute on function public.redeem_invite_token(p_token uuid) to service_role;
 
+revoke all on function public.report_game_outcome(p_game_id uuid, p_outcome text) from public, anon, authenticated, service_role;
+
 grant execute on function public.report_game_outcome(p_game_id uuid, p_outcome text) to authenticated;
 
 grant execute on function public.report_game_outcome(p_game_id uuid, p_outcome text) to service_role;
+
+revoke all on function public.report_venue_photo(p_photo_id uuid, p_reason text) from public, anon, authenticated, service_role;
 
 grant execute on function public.report_venue_photo(p_photo_id uuid, p_reason text) to authenticated;
 
 grant execute on function public.report_venue_photo(p_photo_id uuid, p_reason text) to service_role;
 
+revoke all on function public.request_chat_invite(p_game_id uuid, p_invitee_user_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.request_chat_invite(p_game_id uuid, p_invitee_user_id uuid) to authenticated;
 
 grant execute on function public.request_chat_invite(p_game_id uuid, p_invitee_user_id uuid) to service_role;
+
+revoke all on function public.request_follow(p_target uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.request_follow(p_target uuid) to authenticated;
 
 grant execute on function public.request_follow(p_target uuid) to service_role;
 
+revoke all on function public.respond_chat_invite(p_invite_id uuid, p_action text) from public, anon, authenticated, service_role;
+
 grant execute on function public.respond_chat_invite(p_invite_id uuid, p_action text) to authenticated;
 
 grant execute on function public.respond_chat_invite(p_invite_id uuid, p_action text) to service_role;
+
+revoke all on function public.respond_follow_request(p_follower uuid, p_accept boolean) from public, anon, authenticated, service_role;
 
 grant execute on function public.respond_follow_request(p_follower uuid, p_accept boolean) to authenticated;
 
 grant execute on function public.respond_follow_request(p_follower uuid, p_accept boolean) to service_role;
 
+revoke all on function public.save_push_token(p_token text, p_platform text) from public, anon, authenticated, service_role;
+
 grant execute on function public.save_push_token(p_token text, p_platform text) to authenticated;
 
 grant execute on function public.save_push_token(p_token text, p_platform text) to service_role;
+
+revoke all on function public.search_profiles(q text, p_lat double precision, p_lng double precision, radius_km double precision, limit_n integer, p_exclude uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.search_profiles(q text, p_lat double precision, p_lng double precision, radius_km double precision, limit_n integer, p_exclude uuid) to authenticated;
 
 grant execute on function public.search_profiles(q text, p_lat double precision, p_lng double precision, radius_km double precision, limit_n integer, p_exclude uuid) to service_role;
 
+revoke all on function public.spatial_ref_sys_read_only() from public, anon, authenticated, service_role;
+
 grant execute on function public.spatial_ref_sys_read_only() to service_role;
+
+revoke all on function public.start_game(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.start_game(p_game_id uuid) to authenticated;
 
 grant execute on function public.start_game(p_game_id uuid) to service_role;
 
+revoke all on function public.toggle_game_comment_like(p_comment_id uuid) from public, anon, authenticated, service_role;
+
 grant execute on function public.toggle_game_comment_like(p_comment_id uuid) to authenticated;
 
 grant execute on function public.toggle_game_comment_like(p_comment_id uuid) to service_role;
+
+revoke all on function public.toggle_game_like(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.toggle_game_like(p_game_id uuid) to authenticated;
 
 grant execute on function public.toggle_game_like(p_game_id uuid) to service_role;
 
+revoke all on function public.toggle_saved_venue(p_venue_id text) from public, anon, authenticated, service_role;
+
 grant execute on function public.toggle_saved_venue(p_venue_id text) to authenticated;
 
 grant execute on function public.toggle_saved_venue(p_venue_id text) to service_role;
+
+revoke all on function public.toggle_venue_comment_like(p_comment_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.toggle_venue_comment_like(p_comment_id uuid) to authenticated;
 
 grant execute on function public.toggle_venue_comment_like(p_comment_id uuid) to service_role;
 
+revoke all on function public.trg_notify_game_invite() from public, anon, authenticated, service_role;
+
 grant execute on function public.trg_notify_game_invite() to service_role;
+
+revoke all on function public.trg_notify_nearby_on_game() from public, anon, authenticated, service_role;
 
 grant execute on function public.trg_notify_nearby_on_game() to service_role;
 
+revoke all on function public.trg_notify_nearby_on_map_note() from public, anon, authenticated, service_role;
+
 grant execute on function public.trg_notify_nearby_on_map_note() to service_role;
+
+revoke all on function public.trg_notify_note_comment_liked() from public, anon, authenticated, service_role;
 
 grant execute on function public.trg_notify_note_comment_liked() to service_role;
 
+revoke all on function public.trg_notify_note_thread_participants() from public, anon, authenticated, service_role;
+
 grant execute on function public.trg_notify_note_thread_participants() to service_role;
+
+revoke all on function public.trg_notify_on_follow() from public, anon, authenticated, service_role;
 
 grant execute on function public.trg_notify_on_follow() to service_role;
 
+revoke all on function public.trg_venue_photo_report_applied() from public, anon, authenticated, service_role;
+
 grant execute on function public.trg_venue_photo_report_applied() to service_role;
+
+revoke all on function public.unarchive_game_chat(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.unarchive_game_chat(p_game_id uuid) to authenticated;
 
 grant execute on function public.unarchive_game_chat(p_game_id uuid) to service_role;
 
+revoke all on function public.update_my_location(p_lat double precision, p_lng double precision) from public, anon, authenticated, service_role;
+
 grant execute on function public.update_my_location(p_lat double precision, p_lng double precision) to authenticated;
 
 grant execute on function public.update_my_location(p_lat double precision, p_lng double precision) to service_role;
+
+revoke all on function public.update_my_presence(p_lat double precision, p_lng double precision, p_mode text) from public, anon, authenticated, service_role;
 
 grant execute on function public.update_my_presence(p_lat double precision, p_lng double precision, p_mode text) to authenticated;
 
 grant execute on function public.update_my_presence(p_lat double precision, p_lng double precision, p_mode text) to service_role;
 
+revoke all on function public.upsert_my_status(p_body text) from public, anon, authenticated, service_role;
+
 grant execute on function public.upsert_my_status(p_body text) to authenticated;
 
 grant execute on function public.upsert_my_status(p_body text) to service_role;
+
+revoke all on function public.upsert_venue_review(p_venue_id text, p_rating integer, p_body text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) from public, anon, authenticated, service_role;
 
 grant execute on function public.upsert_venue_review(p_venue_id text, p_rating integer, p_body text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to authenticated;
 
 grant execute on function public.upsert_venue_review(p_venue_id text, p_rating integer, p_body text, p_lat double precision, p_lng double precision, p_name text, p_sport text, p_leisure text) to service_role;
 
-grant execute on function public.viewer_is_dm_thread_member(p_thread_id uuid) to anon;
+revoke all on function public.viewer_is_dm_thread_member(p_thread_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.viewer_is_dm_thread_member(p_thread_id uuid) to authenticated;
 
+grant execute on function public.viewer_is_dm_thread_member(p_thread_id uuid) to public;
+
 grant execute on function public.viewer_is_dm_thread_member(p_thread_id uuid) to service_role;
+
+revoke all on function public.viewer_is_game_participant(p_game_id uuid) from public, anon, authenticated, service_role;
 
 grant execute on function public.viewer_is_game_participant(p_game_id uuid) to authenticated;
 
 grant execute on function public.viewer_is_game_participant(p_game_id uuid) to service_role;
+
+revoke all on function public.vote_rematch_poll(p_poll_id uuid, p_choice text) from public, anon, authenticated, service_role;
 
 grant execute on function public.vote_rematch_poll(p_poll_id uuid, p_choice text) to authenticated;
 
