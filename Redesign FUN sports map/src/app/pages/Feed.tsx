@@ -567,6 +567,10 @@ export default function Feed() {
             pulsating={false}
             fadeDistance={1}
             saturation={1.15}
+            // Seen only through the backdrop-blur-2xl layer above, so the shader
+            // fills a sixteenth of a retina screen's pixels, 30 times a second.
+            maxDpr={0.5}
+            maxFps={30}
           />
         </div>
         <div
