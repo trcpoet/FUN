@@ -56,63 +56,7 @@ import { glassMessengerPage } from "../styles/glass";
 import { useAuth } from "../contexts/AuthContext";
 import { reverseGeocodeLabel } from "../../lib/geocoding";
 import { friendlyRpcError } from "../../lib/rpcErrors";
-
-function notificationLabel(n: { type: string; payload?: unknown }): string {
-  const p = (n.payload ?? {}) as Record<string, unknown>;
-  if (n.type === "badge_earned") {
-    return `Badge earned: ${(p.badge_slug as string | undefined) ?? "?"}`;
-  }
-  if (n.type === "game_completed") return "A game you joined was completed.";
-  if (n.type === "new_follower") return "Someone new is following you.";
-  if (n.type === "game_nearby") return `New game nearby: ${(p.sport as string | undefined)?.trim() || "Pickup"}`;
-  if (n.type === "map_note_nearby") return "New map note near you.";
-  if (n.type === "game_invite") return "You were invited to a game.";
-  if (n.type === "note_new_activity") return "New replies on a note you follow.";
-  if (n.type === "note_comment_liked") return "Someone liked your comment.";
-  return "New notification";
-}
-
-function notificationActorUserId(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const p = payload as Record<string, unknown>;
-  const v =
-    p.user_id ??
-    p.profile_id ??
-    p.actor_id ??
-    p.from_user_id ??
-    p.follower_id ??
-    p.invited_by ??
-    p.created_by;
-  return typeof v === "string" && v.trim() ? v : null;
-}
-
-function handleNotificationNavigate(
-  navigate: (to: string) => void,
-  n: { type: string; payload?: unknown },
-): void {
-  const p = (n.payload ?? {}) as Record<string, unknown>;
-  if (n.type === "game_nearby" || n.type === "game_invite") {
-    const gid = typeof p.game_id === "string" ? p.game_id : null;
-    if (gid) navigate(`/?focusGameId=${encodeURIComponent(gid)}`);
-    return;
-  }
-  if (
-    n.type === "map_note_nearby" ||
-    n.type === "note_new_activity" ||
-    n.type === "note_comment_liked"
-  ) {
-    const nid = typeof p.note_id === "string" ? p.note_id : null;
-    if (nid) navigate(`/?focusNoteId=${encodeURIComponent(nid)}`);
-    return;
-  }
-  if (n.type === "new_follower") {
-    const fid = typeof p.follower_id === "string" ? p.follower_id : null;
-    if (fid) navigate(`/athlete/${encodeURIComponent(fid)}`);
-    return;
-  }
-  const actorId = notificationActorUserId(n.payload);
-  if (actorId) navigate(`/athlete/${encodeURIComponent(actorId)}`);
-}
+import { notificationHref, notificationLabel } from "../../lib/notificationText";
 
 type TabId = "discovery" | "activity" | "similar" | "friends" | "notifications";
 
@@ -1062,13 +1006,15 @@ export default function Feed() {
                     </div>
                   </li>
                 ) : (
-                  notifications.map((n) => (
+                  notifications.map((n) => {
+                    const href = notificationHref(n);
+                    return (
                     <li key={n.id}>
                       <button
                         type="button"
                         onClick={() => {
                           if (!n.is_read) markRead(n.id);
-                          handleNotificationNavigate(navigate, n);
+                          if (href) navigate(href);
                         }}
                         className={cn(
                           "flex w-full items-center gap-4 px-6 py-5 text-left transition-all hover:bg-white/[0.03]",
@@ -1102,10 +1048,12 @@ export default function Feed() {
                             })}
                           </span>
                         </div>
-                        <ChevronRight className="size-4 text-muted-foreground ml-auto" />
+                        {/* Only when the tap goes somewhere; otherwise it just marks it read. */}
+                        {href ? <ChevronRight className="size-4 text-muted-foreground ml-auto" aria-hidden /> : null}
                       </button>
                     </li>
-                  ))
+                    );
+                  })
                 )}
               </ul>
             </div>

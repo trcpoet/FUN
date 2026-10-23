@@ -25,8 +25,15 @@ type Props = {
   onOpenFollowers?: () => void;
   onOpenFollowing?: () => void;
   homeBaseLabel?: string | null;
+  /** Omitted, the About button is too: a button with nothing behind it reads as broken. */
   onAbout?: () => void;
   onShare?: () => void;
+  /**
+   * The hero's own Follow button. It used to render on every other player's
+   * profile with no handler at all; now it renders only when given one.
+   */
+  onFollow?: () => void;
+  followLabel?: string;
   discoverExpanded?: boolean;
   onDiscoverPeople?: () => void;
   isOwnProfile?: boolean;
@@ -63,6 +70,8 @@ export function ProfileHubHero({
   homeBaseLabel,
   onAbout,
   onShare,
+  onFollow,
+  followLabel = "Follow",
   discoverExpanded,
   onDiscoverPeople,
   isOwnProfile,
@@ -142,24 +151,27 @@ export function ProfileHubHero({
               {/* Action Buttons */}
               <div className="flex items-center justify-between pt-1 sm:pt-2">
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                  <Button
-                    onClick={onAbout}
-                    className="rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6"
-                  >
-                    <Info className="mr-1.5 sm:mr-2 size-3 sm:size-3.5" /> About
-                  </Button>
+                  {onAbout ? (
+                    <Button
+                      onClick={onAbout}
+                      className="rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6"
+                    >
+                      <Info className="mr-1.5 sm:mr-2 size-3 sm:size-3.5" /> About
+                    </Button>
+                  ) : null}
                   <Button
                     onClick={onShare}
                     className="rounded-xl sm:rounded-2xl bg-white/[0.03] border border-white/10 text-white hover:bg-white/[0.08] font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6"
                   >
                     <Share2 className="mr-1.5 sm:mr-2 size-3 sm:size-3.5" /> Share
                   </Button>
-                  {!isOwnProfile && (
+                  {!isOwnProfile && onFollow && (
                     <Button
                       variant="ghost"
+                      onClick={onFollow}
                       className="rounded-xl sm:rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all font-black uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6 group"
                     >
-                      Follow <ChevronRight className="ml-1 size-3 sm:size-3.5 group-hover:translate-x-1 transition-transform" />
+                      {followLabel} <ChevronRight className="ml-1 size-3 sm:size-3.5 group-hover:translate-x-1 transition-transform" />
                     </Button>
                   )}
                 </div>

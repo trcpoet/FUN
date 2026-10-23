@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { MessageCircle, Heart, Repeat, Share, Grid3X3, PlaySquare, Mail, UserSquare2, Play, Share2 } from "lucide-react";
+import { Grid3X3, PlaySquare, Mail, UserSquare2, Play } from "lucide-react";
 import type { ActivityPost, HighlightEntry } from "../../../lib/athleteProfile";
 import { HighlightsGrid } from "./HighlightsGrid";
 import { PostGrid, PinnedProfileRibbon } from "./PostGrid";
@@ -15,8 +15,13 @@ type Props = {
   reels: HighlightEntry[];
   posts: ActivityPost[];
   pinnedPost: ActivityPost | null;
-  onAddReel: () => void;
-  onAddPost: () => void;
+  /**
+   * Your own profile passes these; someone else's does not, and then the "Add"
+   * affordances are replaced by plain empty states. They used to render on every
+   * profile with no-op handlers, inviting a visitor to post to a stranger's page.
+   */
+  onAddReel?: () => void;
+  onAddPost?: () => void;
   /** Performance Hub layout: Instagram-style tabs + cyan accent. */
   variant?: "default" | "hub";
   userMeta?: { name?: string; handle?: string; avatarUrl?: string | null };
@@ -75,36 +80,14 @@ function StatusFeedItem({ post, userMeta }: { post: ActivityPost; userMeta?: Pro
               {post.timeAgo || "now"}
             </span>
           </div>
-          <button className="text-slate-600 hover:text-white transition-colors">
-            <Share2 className="size-3.5" />
-          </button>
         </div>
-        
+
+        {/* Like, comment, repost and share buttons sat here with no handlers and a
+            like count read off a field these posts do not have, so they always
+            said 0 and did nothing. Removed until profile posts have engagement. */}
         <p className="text-base font-medium text-slate-300 leading-relaxed italic">
           "{post.caption}"
         </p>
-        
-        <div className="flex items-center gap-8 mt-4">
-          <button type="button" className="flex items-center gap-2 group/btn text-slate-500 hover:text-rose-500 transition-colors">
-            <div className="p-2 rounded-xl bg-white/[0.03] group-hover/btn:bg-rose-500/10 transition-colors">
-              <Heart className="size-4 group-hover/btn:fill-rose-500 transition-all" />
-            </div>
-            <span className="text-[11px] font-black tabular-nums">{(post as any).likes || 0}</span>
-          </button>
-          
-          <button type="button" className="flex items-center gap-2 group/btn text-slate-500 hover:text-blue-500 transition-colors">
-            <div className="p-2 rounded-xl bg-white/[0.03] group-hover/btn:bg-blue-500/10 transition-colors">
-              <MessageCircle className="size-4 transition-all" />
-            </div>
-            <span className="text-[11px] font-black tabular-nums">{(post as any).comments || 0}</span>
-          </button>
-
-          <button type="button" className="flex items-center gap-2 group/btn text-slate-500 hover:text-emerald-500 transition-colors ml-auto">
-            <div className="p-2 rounded-xl bg-white/[0.03] group-hover/btn:bg-emerald-500/10 transition-colors">
-              <Repeat className="size-4 transition-all" />
-            </div>
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -141,6 +124,9 @@ export function PostsReelsSection({
               key={t.id}
               type="button"
               onClick={() => setHubTab(t.id)}
+              // Icon-only below `sm`, so the name has to come from here.
+              aria-label={t.id}
+              aria-pressed={hubTab === t.id}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 py-3 rounded-[18px] transition-all duration-300",
                 hubTab === t.id 
@@ -174,8 +160,13 @@ export function PostsReelsSection({
 
         {hubTab === "reels" && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {reels.length === 0 ? (
+            {reels.length === 0 && !onAddReel ? (
+              <p className="col-span-2 md:col-span-3 py-16 text-center text-[10px] font-black uppercase tracking-widest text-slate-500">
+                No highlights yet
+              </p>
+            ) : reels.length === 0 ? (
               <button
+                type="button"
                 onClick={onAddReel}
                 className="aspect-[9/16] col-span-2 md:col-span-1 rounded-3xl border-2 border-dashed border-white/5 bg-white/[0.01] flex flex-col items-center justify-center gap-3 hover:bg-white/[0.03] hover:border-primary/30 transition-all"
               >
@@ -200,9 +191,15 @@ export function PostsReelsSection({
                 <div className="space-y-1">
                   <p className="text-sm font-bold text-slate-300 uppercase tracking-widest">Quiet Field</p>
                   <p className="text-xs text-slate-500">No status updates yet.</p>
-                  <button onClick={onAddPost} className="mt-4 text-[10px] font-black uppercase tracking-widest text-primary hover:underline">
-                    Broadcast Update
-                  </button>
+                  {onAddPost ? (
+                    <button
+                      type="button"
+                      onClick={onAddPost}
+                      className="mt-4 text-[10px] font-black uppercase tracking-widest text-primary hover:underline"
+                    >
+                      Broadcast Update
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : (

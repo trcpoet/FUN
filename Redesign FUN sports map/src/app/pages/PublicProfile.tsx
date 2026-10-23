@@ -2,15 +2,19 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useAuth } from "../contexts/AuthContext";
 import { getPublicProfileById, followUser, unfollowUser, getMyFollowState, getFollowCounts, type FollowState } from "../../lib/api";
-import type { AthleteProfilePayload } from "../../lib/athleteProfile";
+import { AVAILABILITY_OPTIONS, type AthleteProfilePayload } from "../../lib/athleteProfile";
 import { useIsMobile } from "../components/ui/use-mobile";
 import {
+  AboutSheet,
+  ExperienceTimeline,
   ProfileHubHero,
   ProfileHubHeader,
   PostsReelsSection,
   FollowersFollowingModal,
   type FollowTab,
 } from "../components/athlete-profile";
+import { toast } from "sonner";
+import { useGoBack } from "../../hooks/useGoBack";
 import { cn } from "../components/ui/utils";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
@@ -32,6 +36,9 @@ export default function PublicProfile() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isMobile = useIsMobile();
+  /** Back to wherever their name was tapped — the feed, a chat, the map — not always the map. */
+  const goBack = useGoBack("/");
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
@@ -124,6 +131,27 @@ export default function PublicProfile() {
   const isPrivate = !!ap?.is_private;
   const hideContent = isPrivate && followState !== "accepted";
 
+  /** The phone's share sheet where there is one; otherwise copy, and say so — it used to copy silently. */
+  const shareProfile = async () => {
+    if (!userId) return;
+    const url = `${window.location.origin}/athlete/${userId}`;
+    const title = `${displayName?.trim() || "A player"} · FUN`;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title, url });
+        return;
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Profile link copied");
+    } catch {
+      window.prompt("Copy this profile link:", url);
+    }
+  };
+
   return (
     <div className="min-h-screen w-full bg-[#050505] text-white selection:bg-primary selection:text-white">
       {/* Dynamic Background Elements */}
@@ -132,13 +160,8 @@ export default function PublicProfile() {
         <div className="absolute bottom-[5%] -left-[5%] size-[40%] rounded-full bg-blue-500/5 blur-[100px]" />
       </div>
 
-      <ProfileHubHeader
-        onBack={() => navigate("/")}
-        onOpenSettings={() => {}}
-        notifications={[]}
-        unreadCount={0}
-        onMarkRead={() => {}}
-      />
+      {/* No settings or alerts here: they are yours, and this is someone else's page. */}
+      <ProfileHubHeader onBack={goBack} backTo="back" />
 
       <FollowersFollowingModal
         open={followModal.open}
@@ -146,6 +169,98 @@ export default function PublicProfile() {
         userId={userId ?? null}
         initialTab={followModal.tab}
       />
+
+      {/*
+        Their "About". The button used to do nothing here. This shows what their
+        public profile already shares — sports, how they play, their record, their
+        own words — and none of the body stats, which are only on your own.
+      */}
+      {ap && !hideContent ? (
+        <AboutSheet
+          open={aboutOpen}
+          onOpenChange={setAboutOpen}
+          side={isMobile ? "bottom" : "right"}
+          performanceMetrics={ap.performanceMetrics ?? []}
+          primarySports={primarySports}
+          description="What they play, how they play it, and their record."
+        >
+          <div className="p-6 md:p-8 space-y-10">
+            <header className="space-y-2">
+              <h2 className="text-3xl font-black italic uppercase tracking-tighter text-white">
+                {displayName?.trim() || "Player"}
+              </h2>
+              {ap.handle ? (
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">@{ap.handle.replace(/^@/, "")}</p>
+              ) : null}
+            </header>
+
+            {primarySports.length > 0 ? (
+              <section className="space-y-4">
+                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">Plays</h3>
+                <div className="flex flex-wrap gap-2">
+                  {primarySports.map((sport) => (
+                    <span key={sport} className="rounded-full bg-white/[0.05] px-3 py-1.5 text-xs font-bold text-white">
+                      {sport}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <section className="space-y-4">
+              <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">On court</h3>
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Sportsmanship</span>
+                  <span className="text-sm font-black text-white">
+                    {rating != null ? `${rating.toFixed(1)} / 5` : "No ratings yet"}
+                    {repCount > 0 ? <span className="ml-1 text-xs font-bold text-slate-500">({repCount})</span> : null}
+                  </span>
+                </div>
+                {ap.availability ? (
+                  <div className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Availability</span>
+                    <span className="text-sm font-black text-white">
+                      {AVAILABILITY_OPTIONS.find((a) => a.value === ap.availability)?.label ?? ap.availability.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                ) : null}
+                {ap.snapshot?.intensity ? (
+                  <div className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Intensity</span>
+                    <span className="text-sm font-black text-white capitalize">{ap.snapshot.intensity}</span>
+                  </div>
+                ) : null}
+                {ap.snapshot?.yearsExperience ? (
+                  <div className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Experience</span>
+                    <span className="text-sm font-black text-white">{ap.snapshot.yearsExperience} yrs</span>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+
+            {ap.bio?.trim() ? (
+              <section className="space-y-4">
+                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">In their words</h3>
+                <p className="text-base font-medium text-slate-300 leading-relaxed italic">"{ap.bio.trim()}"</p>
+              </section>
+            ) : null}
+
+            {/* Only when there is one: the empty timeline's copy is written to the owner. */}
+            {(ap.experience ?? []).length > 0 ? (
+              <section className="space-y-4">
+                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-primary">Journey</h3>
+                <ExperienceTimeline
+                  items={ap.experience ?? []}
+                  hideHeading
+                  className="border-0 rounded-none bg-transparent px-0"
+                />
+              </section>
+            ) : null}
+          </div>
+        </AboutSheet>
+      ) : null}
 
       <main className="relative mx-auto w-full max-w-6xl px-4 md:px-8 pb-32 pt-20">
         {loading ? (
@@ -188,11 +303,8 @@ export default function PublicProfile() {
               onOpenFollowers={() => setFollowModal({ open: true, tab: "followers" })}
               onOpenFollowing={() => setFollowModal({ open: true, tab: "following" })}
               homeBaseLabel={ap.city ?? null}
-              onAbout={() => {}}
-              onShare={() => {
-                const url = `${window.location.origin}/athlete/${userId}`;
-                void navigator.clipboard.writeText(url);
-              }}
+              onAbout={hideContent ? undefined : () => setAboutOpen(true)}
+              onShare={() => void shareProfile()}
               isOwnProfile={false}
               className="animate-in fade-in slide-in-from-top-4 duration-700"
             />
@@ -210,13 +322,27 @@ export default function PublicProfile() {
                   )}
                   onClick={() => {
                     if (!userId) return;
+                    const previous = followState;
                     if (followState === "none") {
                       // Optimistic: private targets become a pending request, public ones accept.
                       setFollowState(isPrivate ? "pending" : "accepted");
-                      void followUser(userId).then((r) => setFollowState(r.status ?? "none"));
+                      void followUser(userId).then((r) => {
+                        if (r.error || !r.status) {
+                          setFollowState(previous);
+                          toast.error("Couldn't follow", { description: r.error?.message ?? "Try again in a moment." });
+                          return;
+                        }
+                        setFollowState(r.status);
+                      });
                     } else {
                       setFollowState("none");
-                      void unfollowUser(userId);
+                      // This failure was ignored: the button said "Follow" while the
+                      // follow stood. Put it back and say why.
+                      void unfollowUser(userId).then((r) => {
+                        if (!r.error) return;
+                        setFollowState(previous);
+                        toast.error("Couldn't unfollow", { description: r.error.message });
+                      });
                     }
                   }}
                 >
@@ -296,8 +422,6 @@ export default function PublicProfile() {
                   reels={ap.highlights ?? []}
                   posts={ap.posts ?? []}
                   pinnedPost={(ap.posts ?? []).find(p => p.pinned) ?? null}
-                  onAddReel={() => {}}
-                  onAddPost={() => {}}
                   userMeta={{
                     name: displayName || undefined,
                     handle: ap.handle || undefined,

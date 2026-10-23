@@ -38,6 +38,16 @@ type Props = {
 export function PostGrid({ posts, onAdd, className }: Props) {
   const gridPosts = posts.filter((p) => !p.pinned);
 
+  if (gridPosts.length === 0 && !onAdd) {
+    // Someone else's empty profile: say so, rather than six "Add post" tiles
+    // that cannot add anything.
+    return (
+      <p className={cn("py-16 text-center text-[10px] font-black uppercase tracking-widest text-slate-500", className)}>
+        No posts yet
+      </p>
+    );
+  }
+
   if (gridPosts.length === 0) {
     return (
       <div className={cn("grid gap-[2px] rounded-lg overflow-hidden bg-white/[0.06] grid-cols-2 md:grid-cols-3", className)}>
