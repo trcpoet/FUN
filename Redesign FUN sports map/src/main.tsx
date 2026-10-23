@@ -15,6 +15,7 @@ import { Toaster } from "./app/components/ui/sonner";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import { reportError, startErrorReporting } from "./lib/errorReporting";
+import { isChunkLoadError, recoverFromStaleChunk } from "./lib/staleChunk";
 
 const sentryDsn = (import.meta.env.VITE_SENTRY_DSN || "").trim();
 if (sentryDsn) void startErrorReporting(sentryDsn);
@@ -68,30 +69,46 @@ function AuthAlias({ mode }: { mode: "signin" | "signup" }) {
 }
 
 type RouteErrorBoundaryProps = { children: React.ReactNode };
-type RouteErrorBoundaryState = { error: Error | null };
+type RouteErrorBoundaryState = { error: Error | null; reloadDeclined: boolean };
 
 class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBoundaryState> {
-  state: RouteErrorBoundaryState = { error: null };
+  state: RouteErrorBoundaryState = { error: null, reloadDeclined: false };
 
   static getDerivedStateFromError(error: Error): RouteErrorBoundaryState {
-    return { error };
+    return { error, reloadDeclined: false };
   }
 
   // In production React does not rethrow what a boundary catches, so Sentry's
   // global handlers never see it; this is the only way these crashes get reported.
   componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // A screen's file from before a deploy (see lib/staleChunk): expected, not a
+    // bug. Reload into the new version; report it only if that is not possible.
+    if (isChunkLoadError(error)) {
+      if (recoverFromStaleChunk(error)) return;
+      this.setState({ reloadDeclined: true });
+      if (navigator.onLine === false) return;
+    }
     reportError(error, { componentStack: info.componentStack });
   }
 
   render() {
-    if (this.state.error) {
+    const { error, reloadDeclined } = this.state;
+    if (error) {
+      const stale = isChunkLoadError(error);
+      // The reload is already under way: show the app's loader, not an error.
+      if (stale && !reloadDeclined) return <FunOrbitLoader tagline="Updating FUN…" />;
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      const title = stale ? (offline ? "You're offline" : "FUN was just updated") : "Something went wrong";
+      const body = stale
+        ? offline
+          ? "This screen hasn't downloaded yet. Reconnect, then reload."
+          : "Reload to get the latest version."
+        : error.message || "Failed to load this page.";
       return (
         <div className="flex h-screen w-full items-center justify-center bg-background px-6">
           <div className="max-w-md text-center">
-            <p className="text-lg font-semibold text-slate-100">Something went wrong</p>
-            <p className="mt-2 text-sm text-slate-400">
-              {this.state.error.message || "Failed to load this page."}
-            </p>
+            <p className="text-lg font-semibold text-slate-100">{title}</p>
+            <p className="mt-2 text-sm text-slate-400">{body}</p>
             <button
               type="button"
               className="mt-4 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary-container focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"

@@ -47,6 +47,7 @@ import * as MapCfg from "../map/mapConfig";
 import { quantize, steppedRgb, makeTicker, StyleWriteCache, EPS } from "../map/animationBudget";
 import { applyFunBasemapTheme } from "../map/mapTheme";
 import { loadMapboxGl } from "../lib/mapboxCached";
+import { isChunkLoadError, recoverFromStaleChunk } from "../../lib/staleChunk";
 import {
   registerGameSportImages,
   sportIconIdsForGames,
@@ -889,6 +890,8 @@ export function MapboxMap(props: MapboxMapProps) {
       });
     }).catch((err: unknown) => {
       if (cancelled) return;
+      // The map's file from before a deploy: reload into the new one, not an error.
+      if (isChunkLoadError(err) && recoverFromStaleChunk(err)) return;
       const msg = err instanceof Error ? err.message : String(err);
       setMapError(msg || "Failed to load mapbox-gl");
     });
