@@ -25,6 +25,14 @@ export interface LightRaysProps {
   noiseAmount?: number;
   distortion?: number;
   className?: string;
+  /**
+   * Cap on canvas pixels per CSS pixel. Behind a heavy blur the detail is never
+   * seen, so a fraction of 1 costs a fraction of the fill: 0.5 is 1/16th of the
+   * work of a retina screen's 2.
+   */
+  maxDpr?: number;
+  /** Frames per second to draw at most. The rays drift slowly; 60 is not visible. */
+  maxFps?: number;
 }
 
 const DEFAULT_COLOR = "#ffffff";
@@ -95,6 +103,8 @@ const LightRays: FC<LightRaysProps> = ({
   noiseAmount = 0.0,
   distortion = 0.0,
   className = "",
+  maxDpr = 2,
+  maxFps = 60,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const uniformsRef = useRef<Uniforms | null>(null);
@@ -144,7 +154,7 @@ const LightRays: FC<LightRaysProps> = ({
       if (!containerRef.current) return;
 
       const renderer = new Renderer({
-        dpr: Math.min(window.devicePixelRatio, 2),
+        dpr: Math.min(window.devicePixelRatio, maxDpr),
         alpha: true,
       });
       rendererRef.current = renderer;
@@ -293,7 +303,7 @@ void main() {
       const updatePlacement = () => {
         if (!containerRef.current || !renderer) return;
 
-        renderer.dpr = Math.min(window.devicePixelRatio, 2);
+        renderer.dpr = Math.min(window.devicePixelRatio, maxDpr);
 
         const { clientWidth: wCSS, clientHeight: hCSS } = containerRef.current;
         renderer.setSize(wCSS, hCSS);
@@ -309,10 +319,24 @@ void main() {
         uniforms.rayDir.value = dir;
       };
 
+      // Reduced motion gets one still frame. Otherwise the loop runs on a budget:
+      // every rAF is scheduled, but only frames `minFrameMs` apart are drawn.
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      const minFrameMs = 1000 / Math.max(1, maxFps);
+      let lastDrawn = -Infinity;
+
       const loop = (t: number) => {
         if (!rendererRef.current || !uniformsRef.current || !meshRef.current) {
           return;
         }
+
+        // A millisecond of slack, so 30 fps on a 60 Hz display is every other
+        // frame rather than every third when vsync lands a hair early.
+        if (!still && t - lastDrawn < minFrameMs - 1) {
+          animationIdRef.current = requestAnimationFrame(loop);
+          return;
+        }
+        lastDrawn = t;
 
         uniforms.iTime.value = t * 0.001;
 
@@ -329,7 +353,7 @@ void main() {
 
         try {
           renderer.render({ scene: mesh });
-          animationIdRef.current = requestAnimationFrame(loop);
+          if (!still) animationIdRef.current = requestAnimationFrame(loop);
         } catch (error) {
           console.warn("WebGL rendering error:", error);
           return;
@@ -392,6 +416,8 @@ void main() {
     mouseInfluence,
     noiseAmount,
     distortion,
+    maxDpr,
+    maxFps,
   ]);
 
   useEffect(() => {
