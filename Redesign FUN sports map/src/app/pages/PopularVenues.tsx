@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft, Clock, Globe, Loader2, MapPin, Radio } from "lucide-react";
-import { useGeolocation } from "../../hooks/useGeolocation";
+import { useApproxLocation } from "../../hooks/useGeolocation";
 import { bboxFromCenterRadius, fetchSportsVenuesFromDb } from "../lib/sportsVenues";
 import {
   rankHotPickVenues,
@@ -349,15 +349,23 @@ function RowSkeleton() {
 
 export default function PopularVenues() {
   const navigate = useNavigate();
-  const { coords } = useGeolocation();
+  const { coords, unavailable } = useApproxLocation();
   const [radiusKm, setRadiusKm] = useState(START_RADIUS_KM);
   const [venues, setVenues] = useState<HotPickVenue[]>([]);
   const [loading, setLoading] = useState(false);
   const [reachedEnd, setReachedEnd] = useState(false);
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  /** The first fetch has settled, so an empty list means "none", not "not yet". */
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const prevCountRef = useRef(0);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * State rather than a ref, so the observer below attaches when the sentinel first
+   * renders. It only renders once there are venues; with a ref, the effect ran on
+   * mount — during the skeleton — found nothing, and never ran again, so scrolling
+   * to the bottom never widened the search.
+   */
+  const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
 
   const groups = useMemo(() => groupVenuesBySport(venues), [venues]);
   // Expand the two nearest sport groups by default.
@@ -425,7 +433,9 @@ export default function PopularVenues() {
       })
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (cancelled) return;
+        setLoading(false);
+        setLoadedOnce(true);
       });
     return () => {
       cancelled = true;
@@ -441,7 +451,7 @@ export default function PopularVenues() {
   }, []);
 
   useEffect(() => {
-    const el = sentinelRef.current;
+    const el = sentinel;
     if (!el) return;
     const obs = new IntersectionObserver(
       (entries) => {
@@ -451,7 +461,7 @@ export default function PopularVenues() {
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [loadMore]);
+  }, [sentinel, loadMore]);
 
   const openVenue = useCallback(
     (id: string) => navigate(`/?focusVenueId=${encodeURIComponent(id)}`),
@@ -490,11 +500,11 @@ export default function PopularVenues() {
       </header>
 
       <main className="relative mx-auto w-full max-w-3xl px-4 py-8 pb-32">
-        {!coords ? (
+        {unavailable ? (
           <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90">
             Turn on location to find venues near you.
           </div>
-        ) : venues.length === 0 && loading ? (
+        ) : venues.length === 0 && (loading || !loadedOnce) ? (
           <div className="grid gap-3">
             {[0, 1, 2, 3, 4].map((i) => (
               <RowSkeleton key={i} />
@@ -583,7 +593,7 @@ export default function PopularVenues() {
               ))}
             </Accordion>
 
-            <div ref={sentinelRef} className="flex items-center justify-center py-8">
+            <div ref={setSentinel} className="flex items-center justify-center py-8">
               {loading ? (
                 <Loader2 className="size-5 animate-spin text-blue-400" aria-label="Loading more venues" />
               ) : reachedEnd ? (

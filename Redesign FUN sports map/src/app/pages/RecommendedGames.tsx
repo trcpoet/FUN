@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft, ChevronDown, MapPin } from "lucide-react";
-import { useGeolocation } from "../../hooks/useGeolocation";
+import { useApproxLocation } from "../../hooks/useGeolocation";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { getGamesNearby } from "../../lib/api";
 import type { GameRow } from "../../lib/supabase";
@@ -134,10 +134,9 @@ function Accordion({
 
 export default function RecommendedGames() {
   const navigate = useNavigate();
-  const { coords } = useGeolocation();
+  const { coords, unavailable } = useApproxLocation();
   const { athleteProfile } = useMyProfile();
   const [games, setGames] = useState<GameRow[]>([]);
-  const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [openLive, setOpenLive] = useState(true);
   const [openUpcoming, setOpenUpcoming] = useState(true);
@@ -147,16 +146,12 @@ export default function RecommendedGames() {
   useEffect(() => {
     if (!coords) return;
     let cancelled = false;
-    setLoading(true);
     void getGamesNearby(coords.lat, coords.lng, SEARCH_RADIUS_KM)
       .then((r) => {
         if (!cancelled) setGames(r.data ?? []);
       })
       .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-          setLoaded(true);
-        }
+        if (!cancelled) setLoaded(true);
       });
     return () => {
       cancelled = true;
@@ -216,11 +211,11 @@ export default function RecommendedGames() {
       </header>
 
       <main className="relative mx-auto w-full max-w-3xl px-4 py-8 pb-32">
-        {!coords ? (
+        {unavailable ? (
           <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90">
             Turn on location to find games near you.
           </div>
-        ) : loading && !loaded ? (
+        ) : !loaded ? (
           <div className="grid gap-3">
             {[0, 1, 2, 3].map((i) => (
               <div
