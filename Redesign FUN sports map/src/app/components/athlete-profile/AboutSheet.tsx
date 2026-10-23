@@ -14,6 +14,8 @@ type Props = {
   className?: string;
   performanceMetrics?: PerformanceMetricEntry[];
   primarySports?: string[];
+  /** Written to the owner by default; someone else's profile passes its own. */
+  description?: string;
 };
 
 export function AboutSheet({
@@ -25,6 +27,7 @@ export function AboutSheet({
   className,
   performanceMetrics = [],
   primarySports = [],
+  description = "Location, school, games you've played, and your journey.",
 }: Props) {
   const visibleMetricList = visibleMetrics(performanceMetrics, primarySports);
 
@@ -42,7 +45,7 @@ export function AboutSheet({
         <SheetHeader className="shrink-0 border-b border-white/10 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))] pr-12 text-left">
           <SheetTitle className="text-lg">About</SheetTitle>
           <SheetDescription className="text-slate-500">
-            Location, school, games you&apos;ve played, and your journey.
+            {description}
           </SheetDescription>
         </SheetHeader>
         <ScrollArea
