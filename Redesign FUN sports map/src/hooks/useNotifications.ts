@@ -1,62 +1,73 @@
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { getMyNotifications, markNotificationRead, subscribeToNotifications } from "../lib/api";
 import type { NotificationRow } from "../lib/supabase";
-import { getAuthUserDeduped } from "../lib/authDedup";
+import { useAuth } from "../app/contexts/AuthContext";
+import { useCachedQuery } from "./useCachedQuery";
+
+/**
+ * Notifications reach three screens — the map's bell, the feed's Alerts tab and the
+ * profile header — and each refetched on mount, so the Alerts tab opened on "you're
+ * all caught up" until the request landed. They share one cached list per user now:
+ * the map loads it while idle and the other two paint it at once.
+ */
+const NOTIFICATIONS_TTL_MS = 30_000;
+
+/** Every screen asks for twelve, so all three share one cache entry. */
+export const NOTIFICATIONS_LIMIT = 12;
+
+const NONE: NotificationRow[] = [];
 
 export function useNotifications(options?: { limit?: number; enabled?: boolean }) {
   const enabled = options?.enabled ?? true;
-  const [list, setList] = useState<NotificationRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const limit = options?.limit ?? 20;
+  const limit = options?.limit ?? NOTIFICATIONS_LIMIT;
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const key = supabase && enabled && userId ? `notifications:${userId}:${limit}` : null;
 
-  const refetch = useCallback(async () => {
-    if (!supabase) return;
-    setLoading(true);
-    setError(null);
-    const { data, error: err } = await getMyNotifications(limit);
-    if (err) console.warn("[FUN] notifications fetch failed:", err.message);
-    setList(data ?? []);
-    setError(err?.message ?? null);
-    setLoading(false);
-  }, [limit]);
-
-  useEffect(() => {
-    if (!supabase || !enabled) {
-      if (!enabled) setLoading(false);
-      return;
-    }
-    refetch();
-  }, [refetch, enabled]);
+  const query = useCachedQuery<NotificationRow[]>(
+    key,
+    async () => {
+      const { data, error } = await getMyNotifications(limit);
+      if (error) {
+        console.warn("[FUN] notifications fetch failed:", error.message);
+        throw error;
+      }
+      return data;
+    },
+    NOTIFICATIONS_TTL_MS
+  );
+  const { mutate } = query;
 
   useEffect(() => {
-    if (!supabase) return;
-    let cancelled = false;
-    let unsub: (() => void) | null = null;
-
-    void getAuthUserDeduped().then((user) => {
-      if (cancelled) return;
-      if (!user?.id) return;
-      unsub = subscribeToNotifications({
-        userId: user.id,
-        onInsert: (row) => {
-          setList((prev) => [row, ...prev].slice(0, limit));
-        },
-      });
+    if (!supabase || !userId) return;
+    const unsub = subscribeToNotifications({
+      userId,
+      onInsert: (row) => {
+        // By id, because two screens can hold this subscription at once and both
+        // write into the same cached list.
+        mutate((prev = []) => (prev.some((n) => n.id === row.id) ? prev : [row, ...prev].slice(0, limit)));
+      },
     });
-
     return () => {
-      cancelled = true;
       if (unsub) unsub();
     };
-  }, [limit]);
+  }, [userId, limit, mutate]);
 
-  const markRead = useCallback(async (id: string) => {
-    if (!supabase) return;
-    await markNotificationRead(id);
-    setList((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-  }, []);
+  const markRead = useCallback(
+    async (id: string) => {
+      if (!supabase) return;
+      mutate((prev = []) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+      await markNotificationRead(id);
+    },
+    [mutate]
+  );
 
-  return { notifications: list, loading, error, refetch, markRead };
+  return {
+    notifications: query.data ?? NONE,
+    loading: query.loading,
+    error: query.error?.message ?? null,
+    refetch: query.refetch,
+    markRead,
+  };
 }

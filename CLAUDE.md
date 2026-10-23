@@ -173,7 +173,12 @@ FUN treats performance as a feature. Key patterns:
 - **Nearest First**: Venue reads are ordered by distance, so PostgREST's 1,000-row cap keeps the closest venues rather than an arbitrary sample
 - **No Blocking on OSM**: The map never waits for Overpass; missing areas are imported in the background (`/api/warm-venues`)
 - **Let the Map Go Idle**: Nothing writes map style every frame. Animations run on a budget (`src/app/map/animationBudget.ts`) and stop when they settle, so an untouched map draws nothing
-- **Prefetching**: Chat inboxes prefetch on idle after sign-in
+- **Prefetching**: Chat inboxes prefetch on idle after sign-in; so do the feed's first lists
+  (`prefetchFeed` in `src/lib/feedQueries.ts`)
+- **Stale-While-Revalidate Lists**: Feed, its sub-pages, notifications and your own profile read
+  through `useCachedQuery` (`src/hooks/useCachedQuery.ts`): a revisit paints the cached copy on its
+  first frame and refreshes behind it, so a skeleton means "nothing cached yet", never "loading
+  again". A write that changes what the feed shows must call `expireFeed()` in `api.ts`
 - **Pause Venue Fetches When Chatting**: If the messenger is open, pause venue fetch kickoffs to prioritize chat bandwidth
 
 `venueCluster.worker.ts` is unreferenced: venue clustering is Mapbox's own, and moving the park

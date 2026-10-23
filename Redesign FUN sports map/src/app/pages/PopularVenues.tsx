@@ -2,6 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router";
 import { ArrowLeft, Clock, Globe, Loader2, MapPin, Radio } from "lucide-react";
 import { useApproxLocation } from "../../hooks/useGeolocation";
+import { useGoBack } from "../../hooks/useGoBack";
+import { cachedAsync, cachePeek } from "../../lib/requestCache";
+import { FEED_TTL_MS, venuesKey } from "../../lib/feedQueries";
+import { useAuth } from "../contexts/AuthContext";
 import { bboxFromCenterRadius, fetchSportsVenuesFromDb } from "../lib/sportsVenues";
 import {
   rankHotPickVenues,
@@ -350,14 +354,25 @@ function RowSkeleton() {
 export default function PopularVenues() {
   const navigate = useNavigate();
   const { coords, unavailable } = useApproxLocation();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const goBack = useGoBack("/feed");
   const [radiusKm, setRadiusKm] = useState(START_RADIUS_KM);
-  const [venues, setVenues] = useState<HotPickVenue[]>([]);
+  // The first ring's ranking from last time, if there is one: a revisit opens on the
+  // list while it refreshes, rather than on five grey rows.
+  const [venues, setVenues] = useState<HotPickVenue[]>(
+    () => (coords && cachePeek<HotPickVenue[]>(venuesKey(userId, coords, START_RADIUS_KM))) || [],
+  );
   const [loading, setLoading] = useState(false);
   const [reachedEnd, setReachedEnd] = useState(false);
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   /** The first fetch has settled, so an empty list means "none", not "not yet". */
-  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(
+    () => coords != null && cachePeek(venuesKey(userId, coords, START_RADIUS_KM)) !== undefined,
+  );
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   const prevCountRef = useRef(0);
   /**
    * State rather than a ref, so the observer below attaches when the sentinel first
@@ -402,36 +417,40 @@ export default function PopularVenues() {
     const bbox = bboxFromCenterRadius(coords.lat, coords.lng, radiusKm);
 
     // Games are advisory: if the RPC fails the page still renders as a place directory, which
-    // is the whole point of having place quality as the always-on layer.
-    void Promise.all([
-      fetchSportsVenuesFromDb(bbox).catch(() => null),
-      getGamesNearby(coords.lat, coords.lng, radiusKm).catch(() => ({ data: null, error: null })),
-    ])
-      .then(([outcome, gamesResult]) => {
+    // is the whole point of having place quality as the always-on layer. Venues are not: a
+    // failed read throws, so it is never cached as "nothing here".
+    void cachedAsync(venuesKey(userId, coords, radiusKm), FEED_TTL_MS, async () => {
+      const [outcome, gamesResult] = await Promise.all([
+        fetchSportsVenuesFromDb(bbox),
+        getGamesNearby(coords.lat, coords.lng, radiusKm).catch(() => ({ data: null, error: null })),
+      ]);
+      // "empty" and "uncached" are answers (nothing imported here yet); "unavailable" is not.
+      if (outcome.status === "unavailable") throw new Error(outcome.error);
+      const ranked = rankHotPickVenues(outcome.status === "ok" ? outcome.geojson : null, { center: coords });
+
+      // Same 120 m discovery radius the venue modal lists games at — not the tighter 42 m
+      // absorb radius, which is about pins covering each other on the map.
+      const { anchored } = partitionGamesByVenue(
+        gamesResult?.data ?? [],
+        ranked,
+        VENUE_GAME_LIST_RADIUS_METERS,
+        Date.now(),
+      );
+      return ranked.map((v) => (anchored.has(v.id) ? { ...v, games: anchored.get(v.id)! } : v));
+    })
+      .then((withGames) => {
         if (cancelled) return;
-        const fc = outcome?.status === "ok" ? outcome.geojson : null;
-        const ranked = rankHotPickVenues(fc, { center: coords });
-
-        // Same 120 m discovery radius the venue modal lists games at — not the tighter 42 m
-        // absorb radius, which is about pins covering each other on the map.
-        const { anchored } = partitionGamesByVenue(
-          gamesResult?.data ?? [],
-          ranked,
-          VENUE_GAME_LIST_RADIUS_METERS,
-          Date.now(),
-        );
-        const withGames = ranked.map((v) =>
-          anchored.has(v.id) ? { ...v, games: anchored.get(v.id)! } : v,
-        );
-
         // No growth after widening the radius => we've exhausted the area.
         if (radiusKm > START_RADIUS_KM && withGames.length <= prevCountRef.current) {
           setReachedEnd(true);
         }
         prevCountRef.current = withGames.length;
         setVenues(withGames);
+        setLoadFailed(false);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled) setLoadFailed(true);
+      })
       .finally(() => {
         if (cancelled) return;
         setLoading(false);
@@ -440,7 +459,7 @@ export default function PopularVenues() {
     return () => {
       cancelled = true;
     };
-  }, [coords?.lat, coords?.lng, radiusKm]);
+  }, [coords?.lat, coords?.lng, radiusKm, userId, retryNonce]);
 
   // Keep state readable from the (stable) observer callback.
   const stateRef = useRef({ loading, reachedEnd });
@@ -479,7 +498,7 @@ export default function PopularVenues() {
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-5">
           <button
             type="button"
-            onClick={() => navigate("/feed")}
+            onClick={goBack}
             className="flex size-10 items-center justify-center rounded-2xl border border-white/5 bg-white/[0.03] text-blue-400 transition-all hover:scale-110 hover:bg-blue-500 hover:text-white active:scale-95"
             aria-label="Back to Explore"
           >
@@ -503,6 +522,18 @@ export default function PopularVenues() {
         {unavailable ? (
           <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90">
             Turn on location to find venues near you.
+          </div>
+        ) : venues.length === 0 && loadFailed && !loading ? (
+          <div className="rounded-[28px] border border-white/[0.08] bg-white/[0.02] px-5 py-10 text-center">
+            <p className="text-sm font-bold text-slate-300">Couldn&apos;t load venues</p>
+            <p className="mt-1 text-xs text-slate-500">Check your connection and try again.</p>
+            <button
+              type="button"
+              onClick={() => setRetryNonce((n) => n + 1)}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-2xl bg-white/[0.06] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-white/[0.12]"
+            >
+              Try again
+            </button>
           </div>
         ) : venues.length === 0 && (loading || !loadedOnce) ? (
           <div className="grid gap-3">

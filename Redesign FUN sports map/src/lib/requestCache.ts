@@ -14,6 +14,39 @@ export function cacheGet<T>(key: string): T | undefined {
   return hit.value;
 }
 
+/**
+ * The last value stored under `key`, however old.
+ *
+ * For painting a screen on mount while a fresh copy loads behind it: a feed that
+ * was right a minute ago is a better first frame than a skeleton.
+ */
+export function cachePeek<T>(key: string): T | undefined {
+  return (store.get(key) as Entry<T> | undefined)?.value;
+}
+
+/** Still inside its TTL, so `cachedAsync` would answer without a request. */
+export function cacheIsFresh(key: string): boolean {
+  const hit = store.get(key);
+  return hit?.value !== undefined && Date.now() - hit.ts <= hit.ttlMs;
+}
+
+/** Replace a value in place (an optimistic edit), keeping its age. */
+export function cacheSet<T>(key: string, update: (prev: T | undefined) => T) {
+  const hit = store.get(key) as Entry<T> | undefined;
+  if (hit) hit.value = update(hit.value);
+}
+
+/**
+ * Expire every key starting with `prefix` without forgetting them: the next read
+ * revalidates, and `cachePeek` still answers meanwhile. Pass a whole key to expire
+ * just that one.
+ */
+export function cacheInvalidate(prefix: string) {
+  for (const [k, hit] of store) {
+    if (k.startsWith(prefix)) hit.ts = 0;
+  }
+}
+
 export function cacheClear(prefix: string) {
   for (const k of store.keys()) {
     if (k.startsWith(prefix)) store.delete(k);
@@ -23,6 +56,10 @@ export function cacheClear(prefix: string) {
 /**
  * Dedupe in-flight requests + cache results for ttlMs.
  * If a request is already running, callers share the same promise.
+ *
+ * A refresh keeps the previous value readable through `cachePeek` while it runs,
+ * and a failed one puts it back, so a transient error never blanks a screen that
+ * had something to show.
  */
 export function cachedAsync<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const now = Date.now();
@@ -33,7 +70,7 @@ export function cachedAsync<T>(key: string, ttlMs: number, fn: () => Promise<T>)
     if (hit.value !== undefined && now - hit.ts <= hit.ttlMs) return Promise.resolve(hit.value);
   }
 
-  const entry: Entry<T> = { ts: now, ttlMs };
+  const entry: Entry<T> = { ts: hit?.ts ?? now, ttlMs, value: hit?.value };
   const p = fn()
     .then((v) => {
       entry.value = v;
@@ -43,7 +80,8 @@ export function cachedAsync<T>(key: string, ttlMs: number, fn: () => Promise<T>)
       return v;
     })
     .catch((e) => {
-      store.delete(key);
+      entry.promise = undefined;
+      if (entry.value === undefined) store.delete(key);
       throw e;
     });
 
@@ -51,4 +89,3 @@ export function cachedAsync<T>(key: string, ttlMs: number, fn: () => Promise<T>)
   store.set(key, entry);
   return p;
 }
-

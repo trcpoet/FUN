@@ -8,6 +8,7 @@ import { RequireOnboarding } from "./app/components/RequireOnboarding";
 import { RequireMember } from "./app/components/RequireMember";
 import { PublicOnly } from "./app/components/PublicOnly";
 import { AccountSetupGate } from "./app/components/AccountSetupGate";
+import { ScrollManager } from "./app/components/ScrollManager";
 import "./styles/index.css";
 import { FunOrbitLoader } from "./app/components/FunOrbitLoader";
 import { Toaster } from "./app/components/ui/sonner";
@@ -151,6 +152,7 @@ root.render(
     */}
     <UnreadProvider>
     <BrowserRouter>
+      <ScrollManager />
       <RouteErrorBoundary>
         <Suspense fallback={<RouteFallback />}>
           <AccountSetupGate>

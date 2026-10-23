@@ -3,15 +3,20 @@ import { useNavigate } from "react-router";
 import { ArrowLeft, ChevronDown, MapPin } from "lucide-react";
 import { useApproxLocation } from "../../hooks/useGeolocation";
 import { useMyProfile } from "../../hooks/useMyProfile";
-import { getGamesNearby } from "../../lib/api";
+import { useGoBack } from "../../hooks/useGoBack";
+import { useQuery } from "../../hooks/useCachedQuery";
+import { FEED_TTL_MS, RECOMMENDED_GAMES_RADIUS_KM, feedQueries } from "../../lib/feedQueries";
 import type { GameRow } from "../../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
 import { splitGamesByLiveness, formatKm } from "../lib/hotPicks";
 import { sportEmoji } from "../../lib/sportVisuals";
 import { reverseGeocodeLabel } from "../../lib/geocoding";
 import { cn } from "../components/ui/utils";
 import { glassMessengerPage } from "../styles/glass";
 
-const SEARCH_RADIUS_KM = 50;
+const SEARCH_RADIUS_KM = RECOMMENDED_GAMES_RADIUS_KM;
+
+const NO_GAMES: GameRow[] = [];
 
 function gameTitle(g: GameRow): string {
   return g.title?.trim() || (g.sport?.trim() ? `${g.sport} game` : "Pickup game");
@@ -136,27 +141,19 @@ export default function RecommendedGames() {
   const navigate = useNavigate();
   const { coords, unavailable } = useApproxLocation();
   const { athleteProfile } = useMyProfile();
-  const [games, setGames] = useState<GameRow[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const { user } = useAuth();
+  const goBack = useGoBack("/feed");
+  // Cached per user and position, so returning from a game on the map is instant.
+  const nearby = useQuery(
+    coords ? feedQueries.nearbyGames(user?.id ?? null, coords, SEARCH_RADIUS_KM) : null,
+    FEED_TTL_MS,
+  );
+  const games = nearby.data ?? NO_GAMES;
+  const loaded = nearby.data !== undefined || nearby.error != null;
   const [openLive, setOpenLive] = useState(true);
   const [openUpcoming, setOpenUpcoming] = useState(true);
   const [openEnded, setOpenEnded] = useState(false);
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!coords) return;
-    let cancelled = false;
-    void getGamesNearby(coords.lat, coords.lng, SEARCH_RADIUS_KM)
-      .then((r) => {
-        if (!cancelled) setGames(r.data ?? []);
-      })
-      .finally(() => {
-        if (!cancelled) setLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [coords?.lat, coords?.lng]);
 
   useEffect(() => {
     if (!coords) {
@@ -190,7 +187,7 @@ export default function RecommendedGames() {
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-5">
           <button
             type="button"
-            onClick={() => navigate("/feed")}
+            onClick={goBack}
             className="flex size-10 items-center justify-center rounded-2xl border border-white/5 bg-white/[0.03] text-primary transition-all hover:scale-110 hover:bg-primary hover:text-white active:scale-95"
             aria-label="Back to Explore"
           >
@@ -230,6 +227,20 @@ export default function RecommendedGames() {
                 </div>
               </div>
             ))}
+          </div>
+        ) : nearby.error && !nearby.data ? (
+          // A failed load used to read as "No games nearby", which is a claim about
+          // the neighbourhood, not about the request.
+          <div className="rounded-[28px] border border-white/[0.08] bg-white/[0.02] px-5 py-10 text-center">
+            <p className="text-sm font-bold text-slate-300">Couldn&apos;t load games</p>
+            <p className="mt-1 text-xs text-slate-500">Check your connection and try again.</p>
+            <button
+              type="button"
+              onClick={nearby.refetch}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-2xl bg-white/[0.06] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-white/[0.12]"
+            >
+              Try again
+            </button>
           </div>
         ) : games.length === 0 ? (
           <div className="rounded-[28px] border border-white/[0.08] bg-white/[0.02] px-5 py-10 text-center">

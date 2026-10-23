@@ -14,7 +14,7 @@ import {
   Flame,
   Loader2,
 } from "lucide-react";
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { cn } from "../components/ui/utils";
 import { useNotifications } from "../../hooks/useNotifications";
@@ -24,22 +24,24 @@ import { useMyProfile } from "../../hooks/useMyProfile";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import {
-  fetchLiveNearby,
   fetchLocalNews,
-  fetchFeedMediaPosts,
-  fetchUnifiedFeed,
-  getSimilarAthletes,
-  fetchMyFollowedIds,
   joinGame,
   leaveGame,
   upsertMyStatus,
   mergeGlobalNetworkChronological,
   type GlobalNetworkItem,
-  type LiveFeedItem,
   type LocalNewsItem,
   type UnifiedFeedItem,
 } from "../../lib/api";
-import type { FeedMediaPostRow, GameRow, SimilarAthleteRow } from "../../lib/supabase";
+import {
+  FEED_TTL_MS,
+  RECOMMENDED_GAMES_RADIUS_KM,
+  feedQueries,
+  prefetchQuery,
+} from "../../lib/feedQueries";
+import { useIdleReady } from "../../hooks/useIdleReady";
+import { useQuery } from "../../hooks/useCachedQuery";
+import type { GameRow } from "../../lib/supabase";
 import { AVAILABILITY_OPTIONS } from "../../lib/athleteProfile";
 import {
   GameFeedCard,
@@ -114,6 +116,18 @@ function handleNotificationNavigate(
 
 type TabId = "discovery" | "activity" | "similar" | "friends" | "notifications";
 
+/** What the header says under "Discovery", per tab. */
+const TAB_SUBTITLE: Record<TabId, string> = {
+  discovery: "Explore · Global network",
+  activity: "Feed · Map notes near you",
+  similar: "Similar · Players like you",
+  friends: "Following · People you follow",
+  notifications: "Alerts · What happened",
+};
+
+/** One empty array for every "nothing yet", so the memos below see a stable input. */
+const EMPTY: never[] = [];
+
 function availabilityLabel(value: string | null): string | null {
   if (!value) return null;
   return AVAILABILITY_OPTIONS.find((a) => a.value === value)?.label ?? null;
@@ -156,6 +170,22 @@ function GlobalNetworkSkeleton() {
           <div className="h-40 w-full rounded-2xl bg-white/5" />
         </div>
       ))}
+    </div>
+  );
+}
+
+/** A failed load that can be tried again, instead of a skeleton that never resolves. */
+function ErrorRetry({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-16 text-center">
+      <p className="max-w-xs text-sm text-slate-400">{message}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="inline-flex min-h-10 items-center rounded-full bg-white/[0.06] px-5 text-xs font-bold uppercase tracking-widest text-white transition-colors hover:bg-white/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+      >
+        Try again
+      </button>
     </div>
   );
 }
@@ -231,6 +261,7 @@ function TabButton(props: {
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         "relative flex items-center gap-2 rounded-2xl px-4 py-2 text-xs font-bold uppercase tracking-widest transition-all duration-300",
         active
@@ -244,14 +275,43 @@ function TabButton(props: {
   );
 }
 
+const TAB_IDS: readonly TabId[] = ["discovery", "activity", "similar", "friends", "notifications"];
+
+function parseTab(value: string | null): TabId {
+  return TAB_IDS.find((t) => t === value) ?? "discovery";
+}
+
 export default function Feed() {
-  const [tab, setTab] = useState<TabId>("discovery");
+  /**
+   * The tab lives in the URL. It used to be component state that only *read*
+   * `?tab=`, so opening a player from Similar and pressing back landed on Explore,
+   * scrolled to wherever the profile had been.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = parseTab(searchParams.get("tab"));
+  const setTab = useCallback(
+    (next: TabId) => {
+      setSearchParams(
+        (prev) => {
+          const qs = new URLSearchParams(prev);
+          if (next === "discovery") qs.delete("tab");
+          else qs.set("tab", next);
+          return qs;
+        },
+        { replace: true },
+      );
+      // The header is sticky, so the tabs stay put; the new tab's content should
+      // start at its top, not at the old tab's scroll depth.
+      window.scrollTo({ top: 0 });
+    },
+    [setSearchParams],
+  );
   const navigate = useNavigate();
-  const location = useLocation();
   const { user } = useAuth();
+  const userId = user?.id ?? null;
   /** The players sheet, opened by the search button in the header. */
   const [peopleOpen, setPeopleOpen] = useState(false);
-  const { notifications, markRead } = useNotifications({ limit: 12 });
+  const { notifications, loading: notificationsLoading, markRead } = useNotifications({ limit: 12 });
   const { coords, locating, unavailable } = useApproxLocation();
   const {
     athleteProfile,
@@ -260,24 +320,48 @@ export default function Feed() {
     updateProfile: updateMyProfileFields,
   } = useMyProfile();
   const unreadCount = notifications.filter((n) => !n.is_read).length;
-  const [unified, setUnified] = useState<UnifiedFeedItem[]>([]);
-  // Start loading: the first fetch leaves in an effect, after the first paint, and
-  // "false" there flashed the empty-state copy for a frame on every visit.
-  const [unifiedLoading, setUnifiedLoading] = useState(true);
-  const [liveItems, setLiveItems] = useState<LiveFeedItem[]>([]);
-  const [liveLoading, setLiveLoading] = useState(true);
-  const [mediaPosts, setMediaPosts] = useState<FeedMediaPostRow[]>([]);
-  const [mediaLoading, setMediaLoading] = useState(true);
-  const [localNews, setLocalNews] = useState<LocalNewsItem[]>([]);
-  const [localNewsAvailable, setLocalNewsAvailable] = useState(0);
-  const [localNewsLoading, setLocalNewsLoading] = useState(true);
+
+  /*
+    Every list below reads through the request cache: a revisit paints what the
+    feed held last time on its first frame, then refreshes behind it. Skeletons
+    are only for a first visit, and the map prefetches these same keys while it
+    is idle, so even that is usually instant.
+  */
+  const media = useQuery(feedQueries.media(userId), FEED_TTL_MS);
+  const unifiedQuery = useQuery(coords ? feedQueries.unified(userId, coords) : null, FEED_TTL_MS);
+  const live = useQuery(coords ? feedQueries.live(userId, coords) : null, FEED_TTL_MS);
+  const mediaPosts = media.data ?? EMPTY;
+  const unified = unifiedQuery.data ?? EMPTY;
+  const liveItems = live.data ?? EMPTY;
+  /** Nothing to show yet: a fetch is out, or the position it needs is still coming. */
+  const unifiedLoading = coords ? unifiedQuery.loading : locating;
+  const liveLoading = coords ? live.loading : locating;
+  const refreshing = media.refreshing || unifiedQuery.refreshing || live.refreshing;
+
+  /** Deferred to the tabs that show them; most visits never open either. */
+  const similar = useQuery(
+    tab === "similar" && coords && discoverableForMatching ? feedQueries.similar(userId, coords) : null,
+    FEED_TTL_MS,
+  );
+  const following = useQuery(tab === "friends" && userId ? feedQueries.following(userId) : null, FEED_TTL_MS);
+  const followedIds = following.data ?? null;
+
+  const news = useQuery(coords ? feedQueries.news(coords) : null, FEED_TTL_MS);
+  /** "Show more" pages, kept against the first page they extend. */
+  const [newsMore, setNewsMore] = useState<{ key: string; items: LocalNewsItem[]; available: number } | null>(null);
   const [localNewsLoadingMore, setLocalNewsLoadingMore] = useState(false);
-  const [localNewsError, setLocalNewsError] = useState<Error | null>(null);
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
-  const [similarAthletes, setSimilarAthletes] = useState<SimilarAthleteRow[]>([]);
-  const [similarLoading, setSimilarLoading] = useState(false);
-  const [similarError, setSimilarError] = useState<Error | null>(null);
   const [enablingDiscovery, setEnablingDiscovery] = useState(false);
+
+  const newsKey = coords ? feedQueries.news(coords).key : null;
+  const extraNews = newsMore && newsMore.key === newsKey ? newsMore : null;
+  const localNews = useMemo(() => {
+    const first = news.data?.items ?? [];
+    if (!extraNews) return first;
+    const seen = new Set(first.map((item) => item.id));
+    return [...first, ...extraNews.items.filter((item) => !seen.has(item.id))];
+  }, [news.data, extraNews]);
+  const localNewsAvailable = extraNews?.available ?? news.data?.available ?? 0;
 
   /**
    * Join and leave, from the feed.
@@ -292,9 +376,6 @@ export default function Feed() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerDraft, setComposerDraft] = useState("");
   const [composerBusy, setComposerBusy] = useState(false);
-
-  /** Who you follow, so "Following" can be the people you follow. */
-  const [followedIds, setFollowedIds] = useState<Set<string> | null>(null);
 
   const handleJoinGame = useCallback(
     async (game: GameRow) => {
@@ -341,50 +422,12 @@ export default function Feed() {
     refreshFeedsRef.current?.();
   }, [composerDraft, composerBusy]);
 
+  /** Fetch again with the current rows left on screen — a refresh, never a skeleton. */
   const refreshFeeds = useCallback(() => {
-    setMediaLoading(true);
-    // Fetch the personal set (public + squad + own via RLS); Explore derives the public subset.
-    void fetchFeedMediaPosts({ limit: 28, viewerUserId: user?.id ?? null, scope: "personal" }).then((r) => {
-      setMediaLoading(false);
-      setMediaPosts(r.data ?? []);
-    });
-
-    if (!coords) {
-      setUnifiedLoading(false);
-      setLiveLoading(false);
-      setUnified([]);
-      setLiveItems([]);
-      return;
-    }
-
-    setUnifiedLoading(true);
-    setLiveLoading(true);
-    void fetchUnifiedFeed({ lat: coords.lat, lng: coords.lng, mapRadiusKm: 120, limit: 80 }).then((r) => {
-      setUnifiedLoading(false);
-      setUnified(r.data ?? []);
-    });
-    void fetchLiveNearby({ lat: coords.lat, lng: coords.lng, radiusKm: 25, limit: 40 }).then((r) => {
-      setLiveLoading(false);
-      setLiveItems(r.data ?? []);
-    });
-  }, [coords?.lat, coords?.lng, user?.id]);
-  /**
-   * The follow graph, loaded when the Following tab is first opened.
-   *
-   * Deferred rather than loaded on mount: most visits never open this tab, and
-   * the query is a round-trip the map already pays for elsewhere.
-   */
-  useEffect(() => {
-    if (tab !== "friends" || followedIds !== null || !user?.id) return;
-    let cancelled = false;
-    void fetchMyFollowedIds().then((r) => {
-      if (cancelled) return;
-      setFollowedIds(r.data);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, followedIds, user?.id]);
+    media.refetch();
+    unifiedQuery.refetch();
+    live.refetch();
+  }, [media.refetch, unifiedQuery.refetch, live.refetch]);
 
   /** Everything from the people you actually follow, newest first. */
   const followingStream = useMemo(() => {
@@ -438,37 +481,20 @@ export default function Feed() {
 
   const liveNotes = useMemo(() => liveItems.filter((it) => it.kind === "note"), [liveItems]);
 
-  const globalStreamLoading = (coords ? unifiedLoading : locating) || mediaLoading;
+  const globalStreamLoading = unifiedLoading || media.loading;
 
+  /**
+   * The pages one tap from here. Their code is lazy, and React Router holds the
+   * current screen while a chunk downloads, so an unfetched one made a tile feel
+   * dead for a beat. Fetch it while the feed is idle instead.
+   */
+  const idle = useIdleReady();
   useEffect(() => {
-    const qs = new URLSearchParams(location.search);
-    const t = qs.get("tab");
-    if (t === "notifications") setTab("notifications");
-    else if (t === "friends") setTab("friends");
-    else if (t === "similar") setTab("similar");
-    else if (t === "activity") setTab("activity");
-    else if (t === "discovery") setTab("discovery");
-  }, [location.search]);
-
-  useEffect(() => {
-    refreshFeeds();
-  }, [refreshFeeds]);
-
-  useEffect(() => {
-    if (tab !== "similar" || !coords || !discoverableForMatching) return;
-    let cancelled = false;
-    setSimilarLoading(true);
-    setSimilarError(null);
-    void getSimilarAthletes({ lat: coords.lat, lng: coords.lng, radiusKm: 25, limit: 20 }).then((r) => {
-      if (cancelled) return;
-      setSimilarLoading(false);
-      setSimilarAthletes(r.data ?? []);
-      setSimilarError(r.error);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, coords?.lat, coords?.lng, discoverableForMatching]);
+    if (!idle) return;
+    void import("./RecommendedGames");
+    void import("./PopularVenues");
+    void import("./PublicProfile");
+  }, [idle]);
 
   const handleEnableDiscovery = useCallback(async () => {
     setEnablingDiscovery(true);
@@ -479,11 +505,6 @@ export default function Feed() {
   useEffect(() => {
     if (!coords) {
       setPlaceLabel(null);
-      setLocalNews([]);
-      setLocalNewsAvailable(0);
-      setLocalNewsError(null);
-      setLocalNewsLoading(false);
-      setLocalNewsLoadingMore(false);
       return;
     }
     let cancelled = false;
@@ -495,27 +516,8 @@ export default function Feed() {
     };
   }, [coords?.lat, coords?.lng]);
 
-  useEffect(() => {
-    if (!coords) return;
-    let cancelled = false;
-    setLocalNewsLoading(true);
-    setLocalNewsError(null);
-    setLocalNews([]);
-    setLocalNewsAvailable(0);
-    void fetchLocalNews({ lat: coords.lat, lng: coords.lng, radiusKm: 25, limit: 10, offset: 0 }).then((r) => {
-      if (cancelled) return;
-      setLocalNewsLoading(false);
-      setLocalNews(r.data ?? []);
-      setLocalNewsAvailable(r.available);
-      setLocalNewsError(r.error);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [coords?.lat, coords?.lng]);
-
   const handleLoadMoreLocalNews = useCallback(() => {
-    if (!coords || localNewsLoadingMore) return;
+    if (!coords || !newsKey || localNewsLoadingMore) return;
     setLocalNewsLoadingMore(true);
     void fetchLocalNews({
       lat: coords.lat,
@@ -526,23 +528,17 @@ export default function Feed() {
     }).then((r) => {
       setLocalNewsLoadingMore(false);
       if (r.error) {
-        setLocalNewsError(r.error);
+        // A failed "show more" keeps the stories already on screen; it used to
+        // replace them with an error box.
+        toast.error("Couldn't load more stories", { description: "Try again in a moment." });
         return;
       }
-      setLocalNewsAvailable(r.available);
-      setLocalNews((prev) => {
-        const seen = new Set(prev.map((item) => item.id));
-        const next = [...prev];
-        for (const item of r.data ?? []) {
-          if (!seen.has(item.id)) {
-            seen.add(item.id);
-            next.push(item);
-          }
-        }
-        return next;
+      setNewsMore((prev) => {
+        const base = prev && prev.key === newsKey ? prev.items : [];
+        return { key: newsKey, items: [...base, ...(r.data ?? [])], available: r.available };
       });
     });
-  }, [coords, localNews.length, localNewsLoadingMore]);
+  }, [coords, newsKey, localNews.length, localNewsLoadingMore]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-foreground selection:bg-primary selection:text-white">
@@ -593,11 +589,15 @@ export default function Feed() {
                   Discovery
                 </h1>
                 <div className="flex items-center gap-1.5 mt-1">
-                  <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  {/* A cached feed is on screen while a newer one loads: say so quietly,
+                      in the spot the "live" dot already occupies, rather than with a skeleton. */}
+                  {refreshing ? (
+                    <Loader2 className="size-2.5 animate-spin text-emerald-400" aria-label="Updating" />
+                  ) : (
+                    <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  )}
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                    {tab === "activity"
-                      ? "Feed · Map notes near you"
-                      : "Explore · Global network"}
+                    {TAB_SUBTITLE[tab]}
                   </span>
                 </div>
               </div>
@@ -612,8 +612,11 @@ export default function Feed() {
               >
                 <Search className="size-5" />
               </button>
-              <button 
+              <button
+                type="button"
                 onClick={() => setTab("notifications")}
+                aria-label={unreadCount > 0 ? `Alerts, ${unreadCount} unread` : "Alerts"}
+                aria-pressed={tab === "notifications"}
                 className={cn(
                   "relative flex size-10 items-center justify-center rounded-2xl transition-all",
                   tab === "notifications" 
@@ -623,8 +626,11 @@ export default function Feed() {
               >
                 <Bell className="size-5" />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-rose-600 text-[10px] font-black ring-2 ring-black">
-                    {unreadCount}
+                  <span
+                    className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black tabular-nums ring-2 ring-black"
+                    aria-hidden
+                  >
+                    {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
                 )}
               </button>
@@ -685,6 +691,8 @@ export default function Feed() {
             <SuggestedGamesShelf
               lat={coords?.lat ?? null}
               lng={coords?.lng ?? null}
+              userId={userId}
+              locating={locating}
               mySports={athleteProfile?.primarySports ?? undefined}
               onOpenGame={(gameId) => navigate(`/?focusGameId=${encodeURIComponent(gameId)}`)}
               onHostGame={() => navigate("/?host=1")}
@@ -701,6 +709,9 @@ export default function Feed() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <button
                   type="button"
+                  onPointerDown={() => {
+                    if (coords) prefetchQuery(feedQueries.nearbyGames(userId, coords, RECOMMENDED_GAMES_RADIUS_KM));
+                  }}
                   onClick={() => navigate("/feed/games")}
                   className="group relative h-48 overflow-hidden rounded-[32px] border border-white/[0.08] bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-[0_20px_40px_-15px_rgba(225,29,72,0.18)]"
                 >
@@ -743,9 +754,9 @@ export default function Feed() {
 
             <LocalNewsSection
               items={localNews}
-              loading={localNewsLoading || locating}
+              loading={news.loading || locating}
               loadingMore={localNewsLoadingMore}
-              error={localNewsError}
+              error={news.error}
               locationLabel={placeLabel}
               available={localNewsAvailable}
               onLoadMore={handleLoadMoreLocalNews}
@@ -910,13 +921,11 @@ export default function Feed() {
                   {enablingDiscovery ? "Enabling…" : "Enable discovery"}
                 </button>
               </div>
-            ) : similarLoading ? (
+            ) : similar.loading ? (
               <LiveSectionSkeleton />
-            ) : similarError ? (
-              <p className="text-xs text-rose-300 px-1 text-center py-20">
-                {friendlyRpcError(similarError, "athlete matching")}
-              </p>
-            ) : similarAthletes.length === 0 ? (
+            ) : similar.error && !similar.data ? (
+              <ErrorRetry message={friendlyRpcError(similar.error, "athlete matching")} onRetry={similar.refetch} />
+            ) : (similar.data ?? EMPTY).length === 0 ? (
               <div className="text-center py-20">
                 <div className="size-20 bg-white/[0.03] border border-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
                   <Users className="size-8 text-muted-foreground" />
@@ -930,7 +939,7 @@ export default function Feed() {
               </div>
             ) : (
               <ul className="grid gap-4">
-                {similarAthletes.map((a) => (
+                {(similar.data ?? EMPTY).map((a) => (
                   <li key={a.profile_id}>
                     <button
                       type="button"
@@ -968,7 +977,9 @@ export default function Feed() {
 
         {tab === "friends" && (
           <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {followedIds === null ? (
+            {followedIds === null && following.error ? (
+              <ErrorRetry message="Couldn't load who you follow." onRetry={following.refetch} />
+            ) : followedIds === null || unifiedLoading || media.loading ? (
               <GlobalNetworkSkeleton />
             ) : followingStream.length === 0 ? (
               <div className="py-20 text-center">
@@ -1024,8 +1035,19 @@ export default function Feed() {
             </div>
 
             <div className="overflow-hidden rounded-[32px] border border-white/[0.08] bg-card/40 backdrop-blur-md">
-              <ul className="divide-y divide-white/[0.05]">
-                {notifications.length === 0 ? (
+              <ul className="divide-y divide-white/[0.05]" aria-busy={notificationsLoading}>
+                {notificationsLoading ? (
+                  // "Clear skies" used to show here while the list was still loading.
+                  [0, 1, 2].map((i) => (
+                    <li key={i} className="flex items-center gap-4 px-6 py-5 animate-pulse" aria-hidden>
+                      <div className="size-10 shrink-0 rounded-2xl bg-white/10" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-3 w-3/5 rounded bg-white/10" />
+                        <div className="h-2.5 w-24 rounded bg-white/5" />
+                      </div>
+                    </li>
+                  ))
+                ) : notifications.length === 0 ? (
                   <li className="px-6 py-20 text-center flex flex-col items-center gap-4">
                     <div className="size-16 rounded-full bg-white/[0.03] flex items-center justify-center">
                       <Bell className="size-6 text-slate-700" />

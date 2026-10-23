@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, Sparkles } from "lucide-react";
-import { getSuggestedGames, type SuggestedGameRow } from "../../../lib/api";
+import { useMemo } from "react";
+import { Plus, Sparkles } from "lucide-react";
+import { FEED_TTL_MS, feedQueries } from "../../../lib/feedQueries";
+import { friendlyRpcError } from "../../../lib/rpcErrors";
+import { useQuery } from "../../../hooks/useCachedQuery";
 import { GameHeadline } from "../game/GameHeadline";
 import { GameStatusChip } from "../game/GameStatusChip";
 import { spotsLabel } from "../game/SpotsBar";
@@ -20,9 +22,34 @@ import { useSharedNow } from "../../../hooks/useSharedNow";
  * useful reply is not a spinner or a shrug — it is "nobody is playing basketball
  * near you; be the one who is", with the button that does it.
  */
+/** Two card-shaped placeholders, so the row holds its height while it loads. */
+function ShelfSkeleton() {
+  return (
+    <div className="-mx-4 flex gap-3 overflow-hidden px-4 pb-2" role="status" aria-label="Loading games for you">
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="flex h-[148px] w-[220px] shrink-0 animate-pulse flex-col gap-3 rounded-3xl bg-surface-1 p-4"
+          style={{ animationDelay: `${i * 90}ms` }}
+          aria-hidden
+        >
+          <div className="h-4 w-16 rounded-full bg-white/10" />
+          <div className="h-3 w-3/4 rounded bg-white/10" />
+          <div className="h-3 w-1/2 rounded bg-white/5" />
+          <div className="mt-auto h-2.5 w-2/3 rounded bg-white/5" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SuggestedGamesShelf(props: {
   lat: number | null;
   lng: number | null;
+  /** Ranking depends on who is asking (their sports), so the cache is per user. */
+  userId: string | null;
+  /** No position yet but one is coming: hold the shelf's place instead of popping in later. */
+  locating?: boolean;
   radiusKm?: number;
   /** Open a game on the map. */
   onOpenGame: (gameId: string) => void;
@@ -32,27 +59,12 @@ export function SuggestedGamesShelf(props: {
   mySports?: string[];
 }) {
   const { lat, lng, onOpenGame } = props;
-  const [rows, setRows] = useState<SuggestedGameRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const nowMs = useSharedNow(30_000);
-
-  useEffect(() => {
-    if (lat == null || lng == null) return;
-    let cancelled = false;
-    setError(null);
-    void getSuggestedGames({ lat, lng, radiusKm: props.radiusKm ?? 25, limit: 12 }).then((r) => {
-      if (cancelled) return;
-      if (r.error) {
-        setError(r.error.message);
-        setRows([]);
-        return;
-      }
-      setRows(r.data);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [lat, lng, props.radiusKm]);
+  const query = useQuery(
+    lat != null && lng != null ? feedQueries.suggested(props.userId, { lat, lng }, props.radiusKm ?? 25) : null,
+    FEED_TTL_MS,
+  );
+  const rows = query.data ?? null;
 
   /**
    * Only games in your sports earn the "In your sports" heading. Everything else
@@ -62,7 +74,7 @@ export function SuggestedGamesShelf(props: {
   const inMySports = useMemo(() => (rows ?? []).filter((g) => g.sport_match), [rows]);
   const topSport = props.mySports?.[0];
 
-  if (lat == null || lng == null) return null;
+  if ((lat == null || lng == null) && !props.locating) return null;
 
   return (
     <section className="space-y-4">
@@ -78,13 +90,10 @@ export function SuggestedGamesShelf(props: {
         </div>
       </div>
 
-      {rows === null ? (
-        <div className="flex items-center gap-2 px-1 text-xs text-slate-500">
-          <Loader2 className="size-3.5 animate-spin" aria-hidden />
-          Looking for games you would actually go to…
-        </div>
-      ) : error ? (
-        <p className="px-1 text-xs text-slate-500">{error}</p>
+      {rows === null && query.error ? (
+        <p className="px-1 text-xs text-slate-500">{friendlyRpcError(query.error, "suggested games")}</p>
+      ) : rows === null ? (
+        <ShelfSkeleton />
       ) : rows.length === 0 ? (
         <div className="rounded-[28px] bg-surface-1 px-5 py-6">
           <p className="text-sm font-semibold text-white">
