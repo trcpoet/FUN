@@ -18,7 +18,7 @@ import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { cn } from "../components/ui/utils";
 import { useNotifications } from "../../hooks/useNotifications";
-import { useGeolocation } from "../../hooks/useGeolocation";
+import { useApproxLocation } from "../../hooks/useGeolocation";
 import { PeopleSearchSheet } from "../components/people/PeopleSearchSheet";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { Badge } from "../components/ui/badge";
@@ -252,7 +252,7 @@ export default function Feed() {
   /** The players sheet, opened by the search button in the header. */
   const [peopleOpen, setPeopleOpen] = useState(false);
   const { notifications, markRead } = useNotifications({ limit: 12 });
-  const { coords } = useGeolocation();
+  const { coords, locating, unavailable } = useApproxLocation();
   const {
     athleteProfile,
     discoverableForMatching,
@@ -261,14 +261,16 @@ export default function Feed() {
   } = useMyProfile();
   const unreadCount = notifications.filter((n) => !n.is_read).length;
   const [unified, setUnified] = useState<UnifiedFeedItem[]>([]);
-  const [unifiedLoading, setUnifiedLoading] = useState(false);
+  // Start loading: the first fetch leaves in an effect, after the first paint, and
+  // "false" there flashed the empty-state copy for a frame on every visit.
+  const [unifiedLoading, setUnifiedLoading] = useState(true);
   const [liveItems, setLiveItems] = useState<LiveFeedItem[]>([]);
-  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveLoading, setLiveLoading] = useState(true);
   const [mediaPosts, setMediaPosts] = useState<FeedMediaPostRow[]>([]);
-  const [mediaLoading, setMediaLoading] = useState(false);
+  const [mediaLoading, setMediaLoading] = useState(true);
   const [localNews, setLocalNews] = useState<LocalNewsItem[]>([]);
   const [localNewsAvailable, setLocalNewsAvailable] = useState(0);
-  const [localNewsLoading, setLocalNewsLoading] = useState(false);
+  const [localNewsLoading, setLocalNewsLoading] = useState(true);
   const [localNewsLoadingMore, setLocalNewsLoadingMore] = useState(false);
   const [localNewsError, setLocalNewsError] = useState<Error | null>(null);
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
@@ -436,7 +438,7 @@ export default function Feed() {
 
   const liveNotes = useMemo(() => liveItems.filter((it) => it.kind === "note"), [liveItems]);
 
-  const globalStreamLoading = (coords ? unifiedLoading : false) || mediaLoading;
+  const globalStreamLoading = (coords ? unifiedLoading : locating) || mediaLoading;
 
   useEffect(() => {
     const qs = new URLSearchParams(location.search);
@@ -741,7 +743,7 @@ export default function Feed() {
 
             <LocalNewsSection
               items={localNews}
-              loading={localNewsLoading}
+              loading={localNewsLoading || locating}
               loadingMore={localNewsLoadingMore}
               error={localNewsError}
               locationLabel={placeLabel}
@@ -853,11 +855,11 @@ export default function Feed() {
                   </p>
                 </div>
               </div>
-              {!coords ? (
+              {unavailable ? (
                 <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90">
                   Turn on location to load nearby map notes.
                 </div>
-              ) : liveLoading ? (
+              ) : !coords || liveLoading ? (
                 <LiveSectionSkeleton />
               ) : liveNotes.length === 0 ? (
                 <p className="text-xs text-slate-500 px-1">No map notes in range yet.</p>
@@ -881,11 +883,11 @@ export default function Feed() {
 
         {tab === "similar" && (
           <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {!coords ? (
+            {unavailable ? (
               <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90 text-center">
                 Turn on location to find athletes like you nearby.
               </div>
-            ) : myProfileLoading ? (
+            ) : !coords || myProfileLoading ? (
               <div className="flex justify-center py-20" aria-hidden>
                 <Loader2 className="size-6 animate-spin text-primary" />
               </div>
@@ -919,8 +921,12 @@ export default function Feed() {
                 <div className="size-20 bg-white/[0.03] border border-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
                   <Users className="size-8 text-muted-foreground" />
                 </div>
-                <h2 className="text-xl font-black italic uppercase text-white mb-2">Finding Rivals</h2>
-                <p className="text-sm text-muted-foreground max-w-xs mx-auto">We're scanning the city for athletes that match your vibe and skill level.</p>
+                <h2 className="text-xl font-black italic uppercase text-white mb-2">No matches yet</h2>
+                {/* This is the empty result, not a loading state: "we're scanning the
+                    city" read as a spinner that never finished. */}
+                <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+                  Nobody within 25 km shares your sports and availability yet. Check back as more players join.
+                </p>
               </div>
             ) : (
               <ul className="grid gap-4">
