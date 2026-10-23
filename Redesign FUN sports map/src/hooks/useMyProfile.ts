@@ -1,10 +1,32 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../app/contexts/AuthContext";
 import { getMyProfile, updateMyAvatarId, updateMyProfile } from "../lib/api";
 import type { AthleteProfilePayload } from "../lib/athleteProfile";
-import { emptyAthleteProfile, parseAthleteProfile } from "../lib/athleteProfile";
+import { emptyAthleteProfile } from "../lib/athleteProfile";
 import type { Gender } from "../lib/gamePreferenceOptions";
+import { cachedAsync, cacheInvalidate } from "../lib/requestCache";
+import { useCachedQuery } from "./useCachedQuery";
+
+type MyProfile = Awaited<ReturnType<typeof getMyProfile>>;
+
+/**
+ * Your own profile is read by the map, the feed, Recommended Games, Onboarding and
+ * Profile, and each mount used to start from `loading: true` and an empty profile.
+ * That was the Profile tab's skeleton on every visit, and the half-second the feed's
+ * Similar tab spent on a spinner before it knew whether you had opted in. One cached
+ * copy per user now; a mount paints it at once and refreshes behind it.
+ */
+const MY_PROFILE_TTL_MS = 30_000;
+
+const EMPTY_PROFILE: AthleteProfilePayload = emptyAthleteProfile();
+
+async function fetchMyProfile(): Promise<MyProfile> {
+  const res = await getMyProfile();
+  // Thrown so a failure is never cached as "this person has an empty profile".
+  if (res.error) throw res.error;
+  return res;
+}
 
 export function useMyProfile() {
   /**
@@ -14,46 +36,32 @@ export function useMyProfile() {
    */
   const { user } = useAuth();
   const userId = user?.id ?? null;
-  const [avatarId, setAvatarId] = useState<string | null>(null);
-  const [displayName, setDisplayName] = useState<string | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [athleteProfile, setAthleteProfile] = useState<AthleteProfilePayload>(() => emptyAthleteProfile());
-  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(true);
-  const [gender, setGender] = useState<Gender | null>(null);
-  const [discoverableForMatching, setDiscoverableForMatching] = useState<boolean>(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const key = supabase && userId ? `me:profile:${userId}` : null;
+  const query = useCachedQuery<MyProfile>(key, fetchMyProfile, MY_PROFILE_TTL_MS);
+  const { mutate } = query;
+  const me = query.data;
 
+  /** Resolves once the fresh copy is on screen, so callers can `await` it before reading. */
   const refetch = useCallback(async () => {
-    if (!supabase) return;
-    setLoading(true);
-    setError(null);
-    const res = await getMyProfile();
-    setAvatarId(res.avatarId);
-    setDisplayName(res.displayName);
-    setAvatarUrl(res.avatarUrl ?? null);
-    setAthleteProfile(res.error ? emptyAthleteProfile() : res.athleteProfile ?? parseAthleteProfile(null));
-    setOnboardingCompleted(res.onboardingCompleted);
-    setGender(res.error ? null : res.gender);
-    setDiscoverableForMatching(res.error ? false : res.discoverableForMatching);
-    setError(res.error?.message ?? null);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
+    if (!key) return;
+    cacheInvalidate(key);
+    try {
+      const fresh = await cachedAsync(key, MY_PROFILE_TTL_MS, fetchMyProfile);
+      mutate(() => fresh);
+    } catch {
+      // Keep the copy on screen; the next mount tries again.
     }
-    refetch();
-  }, [refetch, userId]);
+  }, [key, mutate]);
 
-  const setAvatar = useCallback(async (newAvatarId: string | null) => {
-    if (!supabase) return;
-    const err = await updateMyAvatarId(newAvatarId);
-    if (!err) setAvatarId(newAvatarId);
-    return err;
-  }, []);
+  const setAvatar = useCallback(
+    async (newAvatarId: string | null) => {
+      if (!supabase) return;
+      const err = await updateMyAvatarId(newAvatarId);
+      if (!err) await refetch();
+      return err;
+    },
+    [refetch]
+  );
 
   const updateProfile = useCallback(
     async (updates: {
@@ -73,15 +81,15 @@ export function useMyProfile() {
   );
 
   return {
-    avatarId,
-    displayName,
-    avatarUrl,
-    athleteProfile,
-    onboardingCompleted,
-    gender,
-    discoverableForMatching,
-    loading,
-    error,
+    avatarId: me?.avatarId ?? null,
+    displayName: me?.displayName ?? null,
+    avatarUrl: me?.avatarUrl ?? null,
+    athleteProfile: me?.athleteProfile ?? EMPTY_PROFILE,
+    onboardingCompleted: me?.onboardingCompleted ?? true,
+    gender: me?.gender ?? null,
+    discoverableForMatching: me?.discoverableForMatching ?? false,
+    loading: query.loading,
+    error: query.error?.message ?? null,
     refetch,
     setAvatar,
     updateProfile,

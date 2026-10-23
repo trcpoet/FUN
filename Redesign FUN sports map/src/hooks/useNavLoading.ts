@@ -25,6 +25,11 @@ export function useNavLoading() {
   const alive = useRef(true);
 
   useEffect(() => {
+    // Set on mount, not just at declaration. StrictMode mounts, unmounts and
+    // mounts again; with only the cleanup writing this, the remount kept `false`,
+    // and every press awaited its chunk and then quietly declined to navigate —
+    // the map's Feed and Profile buttons did nothing in development.
+    alive.current = true;
     return () => {
       alive.current = false;
       for (const t of timers.current) window.clearTimeout(t);

@@ -36,7 +36,7 @@ import type {
 import type { VenueSelection } from "../app/components/mapboxMapTypes";
 import { venueSelectionFromDbRow } from "../app/lib/venueSelection";
 import { OSM_VENUE_DETAIL_SELECT } from "./osmVenueColumns";
-import { cachedAsync, cacheClear } from "./requestCache";
+import { cachedAsync, cacheClear, cacheInvalidate } from "./requestCache";
 import { getAuthUserDeduped, getAuthUserIdCached } from "./authDedup";
 
 const DEFAULT_RADIUS_KM = 15;
@@ -46,6 +46,17 @@ const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undef
 
 const MAP_NOTES_MIGRATION =
   "supabase/migrations/20260501130000_map_notes_and_unified_feed.sql";
+
+/**
+ * The feed's lists come from a short-lived cache (`feedQueries.ts`, every key under
+ * `feed:`), so a game you just joined would otherwise still say "Join" for up to
+ * its TTL. Writes that change what the feed shows call this: the cached copies stay
+ * on screen, and the next read asks the server again. Called whether or not the
+ * write succeeded, since a needless refetch costs less than a wrong button.
+ */
+function expireFeed() {
+  cacheInvalidate("feed:");
+}
 
 async function reverseGeocodeLocationLabel(lat: number, lng: number): Promise<string | null> {
   if (!MAPBOX_TOKEN) return null;
@@ -99,6 +110,7 @@ export async function createMapNote(params: {
     p_visibility: params.visibility,
     p_place_name: params.placeName?.trim() ? params.placeName.trim() : null,
   });
+  expireFeed();
   if (error && isMissingMapNotesRpc(error)) {
     return {
       data: null,
@@ -457,12 +469,14 @@ export async function fetchUnifiedFeed(params: {
 export async function deleteMapNote(noteId: string): Promise<{ error: Error | null }> {
   if (!supabase) return { error: new Error("Supabase not configured") };
   const { error } = await supabase.from("map_notes").delete().eq("id", noteId);
+  expireFeed();
   return { error: error ? new Error(error.message) : null };
 }
 
 export async function deleteMyStatus(statusId: string): Promise<{ error: Error | null }> {
   if (!supabase) return { error: new Error("Supabase not configured") };
   const { error } = await supabase.rpc("delete_my_status", { p_status_id: statusId });
+  expireFeed();
   return { error: error ? new Error(error.message) : null };
 }
 
@@ -825,6 +839,11 @@ export async function signIn(email: string, password: string): Promise<{ error: 
 
 export async function signOut(): Promise<void> {
   if (supabase) await supabase.auth.signOut();
+  // Keys carry the user id, so nobody else could read these, but a signed-out tab
+  // has no reason to keep someone's feed and alerts in memory.
+  cacheClear("feed:");
+  cacheClear("notifications:");
+  cacheClear("me:");
 }
 
 export async function resetPassword(email: string): Promise<{ error: Error | null }> {
@@ -940,6 +959,7 @@ export async function createFeedMediaPost(params: {
     body: params.body?.trim() || null,
     visibility: params.visibility ?? "public",
   });
+  expireFeed();
   return { error: error ? new Error(error.message) : null };
 }
 
@@ -1093,6 +1113,7 @@ export async function createGame(params: {
   };
 
   let { data, error } = await supabase.rpc("create_game", rpcArgs);
+  expireFeed();
 
   // If the deployed `create_game` predates the duration/visibility migration,
   // fall back to the legacy signature so creation still works. Surface a
@@ -1154,6 +1175,7 @@ export async function joinGame(gameId: string): Promise<{
   if (!user) return { error: new Error("Not signed in") };
 
   const { data, error } = await supabase.rpc("join_game", { p_game_id: gameId });
+  expireFeed();
 
   if (error) return { error: new Error(error.message) };
 
@@ -1185,6 +1207,7 @@ export async function leaveGame(gameId: string): Promise<Error | null> {
 
   // Atomic RPC: if a substitute is waiting, promotes them automatically
   const { data, error } = await supabase.rpc("leave_game", { p_game_id: gameId });
+  expireFeed();
   if (error) return new Error(error.message);
 
   const result = data as { success?: boolean; error?: string } | null;
@@ -1204,6 +1227,7 @@ export async function deleteHostedGame(gameId: string): Promise<Error | null> {
     .eq("id", gameId)
     .eq("created_by", user.id)
     .select("id");
+  expireFeed();
 
   if (error) return new Error(error.message);
   if (!data?.length) {
@@ -1233,12 +1257,14 @@ function hostGameRpcError(error: { code?: string; message?: string }): Error {
 export async function startGame(gameId: string): Promise<Error | null> {
   if (!supabase) return new Error("Supabase not configured");
   const { error } = await supabase.rpc("start_game", { p_game_id: gameId });
+  expireFeed();
   return error ? hostGameRpcError(error) : null;
 }
 
 export async function endGame(gameId: string): Promise<Error | null> {
   if (!supabase) return new Error("Supabase not configured");
   const { error } = await supabase.rpc("end_game", { p_game_id: gameId });
+  expireFeed();
   return error ? hostGameRpcError(error) : null;
 }
 
@@ -1267,6 +1293,7 @@ export async function completeGame(params: {
     p_winner_team_or_user: params.winnerTeamOrUser ?? null,
     p_score: params.score ?? null,
   });
+  expireFeed();
   return error ? new Error(error.message) : null;
 }
 
@@ -1360,6 +1387,7 @@ export async function followUser(userId: string): Promise<{ status: FollowState 
   if (!supabase) return { status: null, error: new Error("Supabase not configured") };
   if (!userId) return { status: null, error: new Error("Missing userId") };
   const { data, error } = await supabase.rpc("request_follow", { p_target: userId });
+  expireFeed();
   if (error) return { status: null, error: new Error(error.message) };
   return { status: ((data as FollowState) ?? "accepted"), error: null };
 }
@@ -1403,6 +1431,7 @@ export async function respondFollowRequest(
     p_follower: followerId,
     p_accept: accept,
   });
+  expireFeed();
   return { error: error ? new Error(error.message) : null };
 }
 
@@ -1415,6 +1444,7 @@ export async function unfollowUser(userId: string): Promise<{ error: Error | nul
     .delete()
     .eq("follower_id", user.id)
     .eq("followed_id", userId);
+  expireFeed();
   return { error: error ? new Error(error.message) : null };
 }
 

@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { cachedAsync } from "./requestCache";
+import { cachedAsync, cacheInvalidate } from "./requestCache";
 
 export type StatusRow = {
   /** Row id (UUID) for comments/likes/deletes (from `get_recent_statuses`). */
@@ -13,6 +13,9 @@ export type StatusRow = {
 export async function upsertMyStatus(body: string): Promise<Error | null> {
   if (!supabase) return new Error("Supabase not configured");
   const { error } = await supabase.rpc("upsert_my_status", { p_body: body });
+  // The feed lists statuses, and the profile header shows your latest; both cache.
+  cacheInvalidate("feed:");
+  cacheInvalidate("status:");
   return error ? new Error(error.message) : null;
 }
 

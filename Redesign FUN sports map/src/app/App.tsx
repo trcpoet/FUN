@@ -24,6 +24,7 @@ const CreateGameModal = React.lazy(() =>
 import { toast } from "sonner";
 import { FiltersModal, type FiltersState, DEFAULT_FILTERS } from "./components/FiltersModal";
 import { useGeolocation, getLastKnownCoords } from "../hooks/useGeolocation";
+import { prefetchFeed as prefetchFeedData } from "../lib/feedQueries";
 import { useNearbyMapQueries } from "../hooks/useNearbyMapQueries";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { useUnifiedSearch } from "../hooks/useUnifiedSearch";
@@ -315,7 +316,7 @@ export default function App() {
   const { stats } = useUserStats({ enabled: secondaryReady });
   const navigate = useNavigate();
   const location = useLocation();
-  const { notifications, markRead } = useNotifications({ limit: 10, enabled: secondaryReady });
+  const { notifications, markRead } = useNotifications({ enabled: secondaryReady });
   const messagesUnreadCount = useUnread().total;
   const [locationVisibility, setLocationVisibility] = useState<LocationVisibilityMode>(() => readLocationVisibility());
   // DB-backed follows (seeded from any legacy localStorage set for instant first paint).
@@ -616,13 +617,24 @@ export default function App() {
   const prefetchAccountScreen = useCallback(() => {
     return currentUserId ? import("./pages/Profile") : import("./pages/GuestProfile");
   }, [currentUserId]);
-  /** The feed is the other route reachable in one tap from the map. */
-  const prefetchFeed = useCallback(() => import("./pages/Feed"), []);
+  /**
+   * The feed is the other route reachable in one tap from the map: its chunk, and
+   * the first lists it shows. The data lands in the entries Feed reads on its first
+   * render, and from the position it will read (`getLastKnownCoords` is where
+   * `useApproxLocation` starts), so the page opens on rows instead of skeletons.
+   */
+  const prefetchFeed = useCallback(() => {
+    if (currentUserId) prefetchFeedData(currentUserId, getLastKnownCoords());
+    return import("./pages/Feed");
+  }, [currentUserId]);
+  // Again when the first fix lands: it is persisted as the last known position, so
+  // the feed will query from there, and a prefetch from last session's spot would miss.
+  const hasLocationFix = userCoords != null;
   useEffect(() => {
     if (!secondaryReady) return;
     void prefetchAccountScreen();
     if (currentUserId) void prefetchFeed(); // guests get the sign-up sheet, not the route
-  }, [secondaryReady, prefetchAccountScreen, prefetchFeed, currentUserId]);
+  }, [secondaryReady, prefetchAccountScreen, prefetchFeed, currentUserId, hasLocationFix]);
 
   // Guests get a friendly "sign in to continue" sheet instead of a hard redirect.
   const [signInGate, setSignInGate] = useState<SignInGateAction | null>(null);
