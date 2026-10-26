@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { browsePeople } from "../../../lib/searchPeople";
 import type { ProfileSearchRow } from "../../../lib/supabase";
 import { cn } from "../ui/utils";
+import { prefetchPublicProfile } from "../../../lib/profileQueries";
 
 /**
  * Everyone you could play with.
@@ -189,6 +190,8 @@ export function PeopleSearchSheet({
                   <li key={p.profile_id}>
                     <button
                       type="button"
+                      onPointerDown={() => prefetchPublicProfile(p.profile_id)}
+                      onPointerEnter={() => prefetchPublicProfile(p.profile_id)}
                       onClick={() => openProfile(p.profile_id)}
                       className={cn(
                         "flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors",

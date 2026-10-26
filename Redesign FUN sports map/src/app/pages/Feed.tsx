@@ -41,6 +41,7 @@ import {
 } from "../../lib/feedQueries";
 import { useIdleReady } from "../../hooks/useIdleReady";
 import { prefetchChunk } from "../../lib/staleChunk";
+import { prefetchPublicProfile } from "../../lib/profileQueries";
 import { useQuery } from "../../hooks/useCachedQuery";
 import type { GameRow } from "../../lib/supabase";
 import { AVAILABILITY_OPTIONS } from "../../lib/athleteProfile";
@@ -894,6 +895,8 @@ export default function Feed() {
                   <li key={a.profile_id}>
                     <button
                       type="button"
+                      onPointerDown={() => prefetchPublicProfile(a.profile_id)}
+                      onPointerEnter={() => prefetchPublicProfile(a.profile_id)}
                       onClick={() => navigate(`/athlete/${encodeURIComponent(a.profile_id)}`)}
                       className="w-full flex items-center gap-4 rounded-3xl border border-white/[0.08] bg-white/[0.02] p-4 text-left transition-all hover:border-primary/40"
                     >

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useAuth } from "../contexts/AuthContext";
-import { getPublicProfileById, followUser, unfollowUser, getMyFollowState, getFollowCounts, type FollowState } from "../../lib/api";
+import { followUser, unfollowUser, getFollowCounts, type FollowState } from "../../lib/api";
+import { PUBLIC_PROFILE_TTL_MS, publicProfileQuery, type PublicProfileData } from "../../lib/profileQueries";
+import { useQuery } from "../../hooks/useCachedQuery";
 import { AVAILABILITY_OPTIONS, type AthleteProfilePayload } from "../../lib/athleteProfile";
 import { useIsMobile } from "../components/ui/use-mobile";
 import {
@@ -39,12 +41,24 @@ export default function PublicProfile() {
   /** Back to wherever their name was tapped — the feed, a chat, the map — not always the map. */
   const goBack = useGoBack("/");
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const [displayName, setDisplayName] = useState<string | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [athleteProfile, setAthleteProfile] = useState<AthleteProfilePayload | null>(null);
-  const [followState, setFollowState] = useState<FollowState>("none");
+  const viewingSelf = !!userId && user?.id === userId;
+  /**
+   * Cached per player, and prefetched when their row is pressed: opening a profile
+   * from the feed, search or a follower list paints it on the first frame, and so
+   * does going back to one you just saw.
+   */
+  const profile = useQuery(userId && !viewingSelf ? publicProfileQuery(userId) : null, PUBLIC_PROFILE_TTL_MS);
+  const loading = !!userId && !viewingSelf && profile.data === undefined && profile.error == null;
+  const err = !userId ? "Missing profile" : !profile.data && profile.error ? profile.error.message : null;
+  const displayName = profile.data?.displayName ?? null;
+  const avatarUrl = profile.data?.avatarUrl ?? null;
+  const athleteProfile: AthleteProfilePayload | null = profile.data?.athleteProfile ?? null;
+  const followState: FollowState = profile.data?.followState ?? "none";
+  const { mutate: mutateProfile } = profile;
+  /** Optimistic, and kept in the cached copy so coming back shows the same answer. */
+  const setFollowState = (next: FollowState) => {
+    mutateProfile((prev) => ({ ...(prev as PublicProfileData), followState: next }));
+  };
   const [repAvg, setRepAvg] = useState<number | null>(null);
   const [repCount, setRepCount] = useState<number>(0);
   const [statusText, setStatusText] = useState<string | null>(null);
@@ -75,54 +89,28 @@ export default function PublicProfile() {
   const [endorseSaving, setEndorseSaving] = useState(false);
 
   useEffect(() => {
-    if (!userId) {
-      setErr("Missing profile");
-      setLoading(false);
-      return;
-    }
-    if (user?.id === userId) {
-      navigate("/profile", { replace: true });
-      return;
-    }
+    if (viewingSelf) navigate("/profile", { replace: true });
+  }, [viewingSelf, navigate]);
+
+  // Secondary facts, alongside the profile rather than after it.
+  useEffect(() => {
+    if (!userId || viewingSelf) return;
     let cancelled = false;
-    setLoading(true);
-    void getPublicProfileById(userId).then((res) => {
-      if (cancelled) return;
-      if (res.error) {
-        setErr(res.error.message);
-        setAthleteProfile(null);
-        setRepAvg(null);
-        setRepCount(0);
-        setStatusText(null);
-      } else {
-        setErr(null);
-        setDisplayName(res.displayName);
-        setAvatarUrl(res.avatarUrl);
-        setAthleteProfile(res.athleteProfile);
-        void getMyFollowState(userId).then((s) => {
-          if (!cancelled) setFollowState(s);
-        });
-        void getAthleteReputation(userId).then((r) => {
-          if (cancelled) return;
-          if (r.error || !r.data) {
-            setRepAvg(null);
-            setRepCount(0);
-          } else {
-            setRepAvg(typeof r.data.sportsmanship_avg === "number" ? r.data.sportsmanship_avg : null);
-            setRepCount(r.data.sportsmanship_count ?? 0);
-          }
-        });
-        void getLatestStatus(userId).then((r) => {
-          if (cancelled) return;
-          setStatusText(r.data?.body ?? null);
-        });
-      }
-      setLoading(false);
+    setRepAvg(null);
+    setRepCount(0);
+    setStatusText(null);
+    void getAthleteReputation(userId).then((r) => {
+      if (cancelled || r.error || !r.data) return;
+      setRepAvg(typeof r.data.sportsmanship_avg === "number" ? r.data.sportsmanship_avg : null);
+      setRepCount(r.data.sportsmanship_count ?? 0);
+    });
+    void getLatestStatus(userId).then((r) => {
+      if (!cancelled) setStatusText(r.data?.body ?? null);
     });
     return () => {
       cancelled = true;
     };
-  }, [userId, user?.id, navigate]);
+  }, [userId, viewingSelf]);
 
   const ap = athleteProfile;
   const fallbackInitial = (displayName?.trim() || "?")[0]?.toUpperCase() ?? "?";
