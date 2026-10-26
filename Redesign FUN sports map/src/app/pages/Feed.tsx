@@ -40,6 +40,7 @@ import {
   prefetchQuery,
 } from "../../lib/feedQueries";
 import { useIdleReady } from "../../hooks/useIdleReady";
+import { prefetchChunk } from "../../lib/staleChunk";
 import { useQuery } from "../../hooks/useCachedQuery";
 import type { GameRow } from "../../lib/supabase";
 import { AVAILABILITY_OPTIONS } from "../../lib/athleteProfile";
@@ -435,9 +436,9 @@ export default function Feed() {
   const idle = useIdleReady();
   useEffect(() => {
     if (!idle) return;
-    void import("./RecommendedGames");
-    void import("./PopularVenues");
-    void import("./PublicProfile");
+    prefetchChunk(() => import("./RecommendedGames"));
+    prefetchChunk(() => import("./PopularVenues"));
+    prefetchChunk(() => import("./PublicProfile"));
   }, [idle]);
 
   const handleEnableDiscovery = useCallback(async () => {
