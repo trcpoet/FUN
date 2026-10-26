@@ -77,35 +77,50 @@ describe("recoverFromStaleChunk", () => {
   });
 });
 
-describe("failedAssetUrls (engines that do not name the file)", () => {
+describe("failedAssetUrls", () => {
   const at = (path: string) => `https://fun-trcpoet.vercel.app${path}`;
-  it("trusts responseStatus where the engine reports it", () => {
+  it("lists every hashed file that failed, by responseStatus", () => {
     expect(
       failedAssetUrls([
-        { name: at("/assets/Feed-CKneZhq8.js"), decodedBodySize: 79, responseStatus: 404 },
-        { name: at("/assets/App-No41bbLz.js"), decodedBodySize: 130_000, responseStatus: 200 },
-        { name: at("/assets/tiny-12345678.js"), decodedBodySize: 111, responseStatus: 200 },
+        { name: at("/assets/ForgotPassword-B_IAuBst.js"), responseStatus: 404 },
+        { name: at("/assets/AuthShell-DHvEKEI3.js"), responseStatus: 404 },
+        { name: at("/assets/App-No41bbLz.js"), responseStatus: 200 },
       ])
-    ).toEqual([at("/assets/Feed-CKneZhq8.js")]);
+    ).toEqual([at("/assets/ForgotPassword-B_IAuBst.js"), at("/assets/AuthShell-DHvEKEI3.js")]);
   });
 
-  it("falls back to body size where it does not", () => {
-    expect(
-      failedAssetUrls([
-        { name: at("/assets/Feed-CKneZhq8.js"), decodedBodySize: 79 },
-        { name: at("/assets/App-No41bbLz.js"), decodedBodySize: 130_000 },
-      ])
-    ).toEqual([at("/assets/Feed-CKneZhq8.js")]);
+  it("guesses nothing where the engine reports no status", () => {
+    expect(failedAssetUrls([{ name: at("/assets/cjs-helpers-CqkleIqs.js") }])).toEqual([]);
   });
 
   it("ignores everything that is not one of the app's hashed files", () => {
     expect(
       failedAssetUrls([
-        { name: "https://api.mapbox.com/styles/x.json", decodedBodySize: 10, responseStatus: 404 },
-        { name: at("/favicon.svg"), decodedBodySize: 10, responseStatus: 404 },
-        { name: "not a url", decodedBodySize: 10 },
+        { name: "https://api.mapbox.com/styles/x.json", responseStatus: 404 },
+        { name: at("/favicon.svg"), responseStatus: 404 },
+        { name: "not a url", responseStatus: 404 },
       ])
     ).toEqual([]);
+  });
+});
+
+describe("recoverFromStaleChunk heals the failed file's dependencies too", () => {
+  it("re-requests the named file and every other failed file, once each", async () => {
+    const refetch = vi.fn((_url: string) => Promise.resolve());
+    const d = deps({
+      refetch,
+      failedAssets: () => [
+        "https://fun-trcpoet.vercel.app/assets/Feed-CKneZhq8.js",
+        "https://fun-trcpoet.vercel.app/assets/AuthShell-DHvEKEI3.js",
+      ],
+    });
+    expect(recoverFromStaleChunk(CHROME, d)).toBe(true);
+    await flush();
+    expect(refetch.mock.calls.map((c) => c[0])).toEqual([
+      "https://fun-trcpoet.vercel.app/assets/Feed-CKneZhq8.js",
+      "https://fun-trcpoet.vercel.app/assets/AuthShell-DHvEKEI3.js",
+    ]);
+    expect(d.reload).toHaveBeenCalledTimes(1);
   });
 });
 
