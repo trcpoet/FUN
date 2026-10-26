@@ -14,9 +14,9 @@ export function PinnedProfileRibbon({ post }: { post?: ActivityPost | null }) {
       <div className="relative aspect-[16/9] max-h-48 bg-slate-900">
         {src ? (
           post.mediaKind === "video" ? (
-            <video src={src} className="absolute inset-0 size-full object-cover" muted playsInline controls />
+            <video src={src} className="absolute inset-0 size-full object-cover" muted playsInline controls preload="metadata" />
           ) : (
-            <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
+            <img src={src} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" />
           )
         ) : (
           <div className="absolute inset-0 flex items-center justify-center p-4">
@@ -93,9 +93,12 @@ export function PostGrid({ posts, onAdd, className }: Props) {
                   muted
                   playsInline
                   loop
+                  // A grid of these on someone's profile: fetch the first frame,
+                  // not the whole clip, until one is played.
+                  preload="metadata"
                 />
               ) : (
-                <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
+                <img src={src} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" />
               )
             ) : (
               <div className="absolute inset-0 flex items-center justify-center p-1 bg-gradient-to-br from-slate-800 to-slate-950">

@@ -66,10 +66,12 @@ function PostChrome({ p, pinned, userMeta }: { p: ActivityPost; pinned?: boolean
           )}
         >
           {p.mediaUrl?.trim() ? (
-            <img 
-              src={p.mediaUrl.trim()} 
-              alt="" 
-              className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-105" 
+            <img
+              src={p.mediaUrl.trim()}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-105"
             />
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-40">

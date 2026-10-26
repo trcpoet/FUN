@@ -34,9 +34,9 @@ function ReelCell({ cell }: { cell: HighlightEntry }) {
   return (
     <div className="group aspect-[9/16] relative bg-slate-900 rounded-3xl overflow-hidden border border-white/[0.05] transition-all hover:border-primary/30">
       {isVideo ? (
-        <video src={thumb} className="absolute inset-0 size-full object-cover" muted playsInline loop />
+        <video src={thumb} className="absolute inset-0 size-full object-cover" muted playsInline loop preload="metadata" />
       ) : thumb ? (
-        <img src={thumb} alt="" className="absolute inset-0 size-full object-cover" />
+        <img src={thumb} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" />
       ) : (
         <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-950" />
       )}
