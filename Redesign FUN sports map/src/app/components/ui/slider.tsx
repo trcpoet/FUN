@@ -12,9 +12,19 @@ function Slider({
   min = 0,
   max = 100,
   variant = "default",
+  thumbLabel,
+  thumbValueText,
   ...props
 }: React.ComponentProps<typeof SliderPrimitive.Root> & {
   variant?: "default" | "game";
+  /**
+   * The name a screen reader gives each handle. Radix puts `role="slider"` on the
+   * thumb, not the root, so a label on the root names nothing; without this the
+   * filters read as "slider, 12" three times over.
+   */
+  thumbLabel?: string | string[];
+  /** Spoken value, e.g. "12 km", in place of the bare number. */
+  thumbValueText?: (value: number, index: number) => string;
 }) {
   const _values = React.useMemo(
     () =>
@@ -66,6 +76,8 @@ function Slider({
         <SliderPrimitive.Thumb
           data-slot="slider-thumb"
           key={index}
+          aria-label={Array.isArray(thumbLabel) ? thumbLabel[index] : thumbLabel}
+          aria-valuetext={thumbValueText ? thumbValueText(_values[index] ?? 0, index) : undefined}
           className={cn(
             "block shrink-0 rounded-full border shadow-sm focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none",
             isGame

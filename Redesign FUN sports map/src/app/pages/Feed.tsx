@@ -1069,7 +1069,9 @@ export default function Feed() {
 
       {/* Post an update. This button was a no-op with a "Wire to post composer"
           comment behind it, under a rose-coloured shadow it never matched. */}
-      <div className="fixed bottom-8 left-1/2 z-[70] w-full max-w-sm -translate-x-1/2 px-4">
+      {/* A landmark of its own: it sits outside <main>, where landmark navigation
+          could not reach it. */}
+      <aside aria-label="Post an update" className="fixed bottom-8 left-1/2 z-[70] w-full max-w-sm -translate-x-1/2 px-4">
         {composerOpen ? (
           <div className="rounded-[28px] bg-surface-2/95 p-3 shadow-[var(--glow-lg)] backdrop-blur-xl">
             <textarea
@@ -1087,7 +1089,7 @@ export default function Feed() {
               aria-label="Your update"
             />
             <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="pl-1 text-[11px] tabular-nums text-slate-500">
+              <span className="pl-1 text-[11px] tabular-nums text-slate-400">
                 {composerDraft.trim().length}/280
               </span>
               <div className="flex items-center gap-2">
@@ -1121,7 +1123,7 @@ export default function Feed() {
             Post update
           </button>
         )}
-      </div>
+      </aside>
 
       <PeopleSearchSheet
         open={peopleOpen}

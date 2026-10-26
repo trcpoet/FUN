@@ -73,6 +73,8 @@ function RadiusSliderRow(props: {
         step={1}
         value={[value]}
         onValueChange={([val]) => onChange(val)}
+        thumbLabel={label}
+        thumbValueText={(km) => `${km} km`}
         className="[&_[role=slider]]:h-4 [&_[role=slider]]:w-4 cursor-pointer"
       />
     </section>
