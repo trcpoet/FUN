@@ -844,6 +844,7 @@ export async function signOut(): Promise<void> {
   cacheClear("feed:");
   cacheClear("notifications:");
   cacheClear("me:");
+  cacheClear("profile:public:"); // carries your follow state
 }
 
 export async function resetPassword(email: string): Promise<{ error: Error | null }> {
@@ -1388,6 +1389,7 @@ export async function followUser(userId: string): Promise<{ status: FollowState 
   if (!userId) return { status: null, error: new Error("Missing userId") };
   const { data, error } = await supabase.rpc("request_follow", { p_target: userId });
   expireFeed();
+  cacheInvalidate(`profile:public:${userId}`); // its cached follow state
   if (error) return { status: null, error: new Error(error.message) };
   return { status: ((data as FollowState) ?? "accepted"), error: null };
 }
@@ -1445,6 +1447,7 @@ export async function unfollowUser(userId: string): Promise<{ error: Error | nul
     .eq("follower_id", user.id)
     .eq("followed_id", userId);
   expireFeed();
+  cacheInvalidate(`profile:public:${userId}`); // its cached follow state
   return { error: error ? new Error(error.message) : null };
 }
 

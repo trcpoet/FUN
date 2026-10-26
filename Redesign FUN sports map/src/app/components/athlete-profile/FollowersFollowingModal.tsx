@@ -12,6 +12,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { getFollowers, getFollowing, type FollowListEntry } from "../../../lib/api";
 import { cn } from "../ui/utils";
+import { prefetchPublicProfile } from "../../../lib/profileQueries";
 
 export type FollowTab = "followers" | "following";
 
@@ -91,6 +92,8 @@ export function FollowersFollowingModal({ open, onOpenChange, userId, initialTab
                   <li key={e.userId}>
                     <button
                       type="button"
+                      onPointerDown={() => prefetchPublicProfile(e.userId)}
+                      onPointerEnter={() => prefetchPublicProfile(e.userId)}
                       onClick={() => {
                         onOpenChange(false);
                         navigate(`/athlete/${encodeURIComponent(e.userId)}`);
