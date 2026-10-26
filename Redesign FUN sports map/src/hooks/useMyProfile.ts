@@ -5,7 +5,7 @@ import { getMyProfile, updateMyAvatarId, updateMyProfile } from "../lib/api";
 import type { AthleteProfilePayload } from "../lib/athleteProfile";
 import { emptyAthleteProfile } from "../lib/athleteProfile";
 import type { Gender } from "../lib/gamePreferenceOptions";
-import { cachedAsync, cacheInvalidate } from "../lib/requestCache";
+import { cachedAsync, cacheInvalidate, persistUnder } from "../lib/requestCache";
 import { useCachedQuery } from "./useCachedQuery";
 
 type MyProfile = Awaited<ReturnType<typeof getMyProfile>>;
@@ -20,6 +20,9 @@ type MyProfile = Awaited<ReturnType<typeof getMyProfile>>;
 const MY_PROFILE_TTL_MS = 30_000;
 
 const EMPTY_PROFILE: AthleteProfilePayload = emptyAthleteProfile();
+
+// Your name, avatar and sports, on the first frame of a cold start.
+persistUnder("me:profile:");
 
 async function fetchMyProfile(): Promise<MyProfile> {
   const res = await getMyProfile();

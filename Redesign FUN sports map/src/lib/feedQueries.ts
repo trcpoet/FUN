@@ -12,7 +12,7 @@ import {
   type SuggestedGameRow,
   type UnifiedFeedItem,
 } from "./api";
-import { cachedAsync } from "./requestCache";
+import { cachedAsync, persistUnder } from "./requestCache";
 import type { FeedMediaPostRow, GameRow, SimilarAthleteRow } from "./supabase";
 
 /**
@@ -26,6 +26,16 @@ import type { FeedMediaPostRow, GameRow, SimilarAthleteRow } from "./supabase";
 
 /** Younger than this, a cached copy is shown without asking again. */
 export const FEED_TTL_MS = 20_000;
+
+/** The radius Explore's "For you" shelf asks for, so its prefetch lands in the same entry. */
+export const SUGGESTED_RADIUS_KM = 25;
+
+// What a cold start may paint before the network answers (see `persistUnder`).
+// Not `feed:following:` (a Set, which JSON cannot carry) or `feed:venues:` (large,
+// and re-ranked on every visit anyway).
+for (const prefix of ["feed:media:", "feed:unified:", "feed:live:", "feed:suggested:", "feed:games:", "feed:news:"]) {
+  persistUnder(prefix);
+}
 
 /** Recommended Games searches wider than the feed: a game is worth a longer trip than a note. */
 export const RECOMMENDED_GAMES_RADIUS_KM = 50;
@@ -114,7 +124,13 @@ export function venuesKey(userId: string | null, c: Coords, radiusKm: number): s
  */
 export function prefetchFeed(userId: string | null, coords: Coords | null): void {
   const queries: FeedQuery<unknown>[] = [feedQueries.media(userId)];
-  if (coords) queries.push(feedQueries.unified(userId, coords), feedQueries.live(userId, coords));
+  if (coords) {
+    queries.push(
+      feedQueries.unified(userId, coords),
+      feedQueries.live(userId, coords),
+      feedQueries.suggested(userId, coords, SUGGESTED_RADIUS_KM),
+    );
+  }
   for (const q of queries) void cachedAsync(q.key, FEED_TTL_MS, q.fetch).catch(() => {});
 }
 
