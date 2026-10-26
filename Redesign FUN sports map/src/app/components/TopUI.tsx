@@ -15,6 +15,7 @@ import { VenueSportMenu } from "./VenueSportMenu";
 import type { VenueSportIntent } from "../lib/venueSportIntent";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavLoading } from "../../hooks/useNavLoading";
+import { prefetchChunk } from "../../lib/staleChunk";
 
 /** Glass morphism for map toolbar round controls (search, filter). */
 /** Keyboard focus ring shared by the glass map buttons (invisible on hover/click). */
@@ -497,7 +498,9 @@ export const TopNavigation = (props: TopNavigationProps) => {
             <div className="inline-flex items-center p-1">
               <button
                 type="button"
-                onPointerEnter={() => void onFeedPrefetch?.()}
+                onPointerEnter={() => {
+                  if (onFeedPrefetch) prefetchChunk(onFeedPrefetch);
+                }}
                 onClick={() => {
                   if (guest) {
                     onGuestGate?.("feed");

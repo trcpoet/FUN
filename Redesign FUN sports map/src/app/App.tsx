@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { FiltersModal, type FiltersState, DEFAULT_FILTERS } from "./components/FiltersModal";
 import { useGeolocation, getLastKnownCoords } from "../hooks/useGeolocation";
 import { prefetchFeed as prefetchFeedData } from "../lib/feedQueries";
+import { prefetchChunk } from "../lib/staleChunk";
 import { useNearbyMapQueries } from "../hooks/useNearbyMapQueries";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { useUnifiedSearch } from "../hooks/useUnifiedSearch";
@@ -632,8 +633,8 @@ export default function App() {
   const hasLocationFix = userCoords != null;
   useEffect(() => {
     if (!secondaryReady) return;
-    void prefetchAccountScreen();
-    if (currentUserId) void prefetchFeed(); // guests get the sign-up sheet, not the route
+    prefetchChunk(prefetchAccountScreen);
+    if (currentUserId) prefetchChunk(prefetchFeed); // guests get the sign-up sheet, not the route
   }, [secondaryReady, prefetchAccountScreen, prefetchFeed, currentUserId, hasLocationFix]);
 
   // Guests get a friendly "sign in to continue" sheet instead of a hard redirect.

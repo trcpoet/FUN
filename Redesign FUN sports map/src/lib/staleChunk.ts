@@ -29,6 +29,34 @@ export function chunkUrlFrom(error: unknown): string | null {
   return text.match(/https?:\/\/[^\s"')]+\.(?:js|css)\b/)?.[0] ?? null;
 }
 
+/** Vercel's 404 body is 79 bytes; the smallest real file in the build is 111. */
+const SUSPECT_BODY_BYTES = 1024;
+
+type ResourceEntry = { name: string; decodedBodySize: number; responseStatus?: number };
+
+/**
+ * Hashed files that came back as errors, for engines whose message names none
+ * (Safari). Resource Timing's `responseStatus` says so where it exists. Where it
+ * does not, a 404 is a short line of text and a real file is not; anything under
+ * a kilobyte is treated as suspect, since re-requesting a genuinely tiny file
+ * costs nothing.
+ */
+export function failedAssetUrls(entries: ResourceEntry[]): string[] {
+  return entries
+    .filter((e) => {
+      let path: string;
+      try {
+        path = new URL(e.name).pathname;
+      } catch {
+        return false;
+      }
+      if (!/^\/assets\/.+\.(?:js|css)$/.test(path)) return false;
+      if (typeof e.responseStatus === "number" && e.responseStatus > 0) return e.responseStatus >= 400;
+      return e.decodedBodySize > 0 && e.decodedBodySize < SUSPECT_BODY_BYTES;
+    })
+    .map((e) => e.name);
+}
+
 const RELOADED_AT_KEY = "fun:stale-chunk-reload-at";
 
 /**
@@ -44,6 +72,8 @@ type Deps = {
   storage: Pick<Storage, "getItem" | "setItem"> | null;
   reload: () => void;
   refetch: (url: string) => Promise<unknown>;
+  /** Candidates to re-request when the error message names no file. */
+  failedAssets: () => string[];
 };
 
 const browserDeps = (): Deps => ({
@@ -62,6 +92,13 @@ const browserDeps = (): Deps => ({
   // after a deploy, then a rollback to that deploy), it would otherwise keep
   // replaying it. A failed request here is fine: the reload still happens.
   refetch: (url) => fetch(url, { cache: "reload" }),
+  failedAssets: () => {
+    try {
+      return failedAssetUrls(performance.getEntriesByType("resource") as unknown as ResourceEntry[]);
+    } catch {
+      return [];
+    }
+  },
 });
 
 /**
@@ -84,7 +121,19 @@ export function recoverFromStaleChunk(error: unknown, deps: Deps = browserDeps()
     return false;
   }
   const url = chunkUrlFrom(error);
-  const heal = url ? deps.refetch(url).catch(() => undefined) : Promise.resolve();
+  const urls = url ? [url] : deps.failedAssets();
+  const heal = Promise.all(urls.map((u) => deps.refetch(u).catch(() => undefined)));
   void heal.finally(() => deps.reload());
   return true;
+}
+
+/**
+ * Warm a lazy screen's file without letting a failure escape.
+ *
+ * After a deploy, a prefetch from a tab opened before it fails (the file is gone).
+ * That is harmless — the real tap fails the same way and recovers — but an
+ * uncaught rejection would reach Sentry as an error every time FUN deploys.
+ */
+export function prefetchChunk(load: () => Promise<unknown>): void {
+  load().catch(() => undefined);
 }
