@@ -35,7 +35,9 @@ export default function Onboarding() {
   const [sports, setSports] = useState<string[]>([]);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  /** What the submit is doing, so the button can say so; null when idle. */
+  const [stage, setStage] = useState<"uploading" | "saving" | null>(null);
+  const loading = stage !== null;
   const navigate = useNavigate();
   const location = useLocation() as { state?: { from?: string } };
   /**
@@ -68,18 +70,20 @@ export default function Onboarding() {
       return;
     }
     setError(null);
-    setLoading(true);
 
     let newAvatarUrl: string | null = null;
     if (avatarFile) {
+      setStage("uploading");
       const { url, error: uploadErr } = await uploadAvatarImage(avatarFile);
       if (uploadErr) {
-        setLoading(false);
+        setStage(null);
         setError(uploadErr.message);
         return;
       }
       newAvatarUrl = url;
     }
+
+    setStage("saving");
 
     const err = await updateProfile({
       display_name: trimmedName,
@@ -98,11 +102,13 @@ export default function Onboarding() {
           }
         : {}),
     });
-    setLoading(false);
     if (err) {
+      setStage(null);
       setError(err.message);
       return;
     }
+    // Busy until the page changes: the button used to come back to "Continue"
+    // for the length of these two refetches, inviting a second submit.
     await refetch();
     await refetchProfile();
     navigate(returnTo ?? "/", { replace: true });
@@ -188,7 +194,7 @@ export default function Onboarding() {
             disabled={loading}
             className="w-full rounded-full bg-primary text-primary-foreground shadow-[var(--glow-md)] hover:bg-primary-container"
           >
-            {loading ? "Saving..." : "Continue"}
+            {stage === "uploading" ? "Uploading photo…" : stage === "saving" ? "Saving…" : "Continue"}
           </Button>
         </form>
       </div>
