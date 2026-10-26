@@ -1128,8 +1128,6 @@ export function MapboxMap(props: MapboxMapProps) {
     const game = games.find((g) => g.id === gamePopupRequest.gameId);
     if (!game) return; // not on the map yet — try again when the list changes
 
-    lastHandledGamePopupNonceRef.current = gamePopupRequest.nonce;
-
     // Close venue popup (if open) and ensure game selection is synced.
     onSelectVenue(null);
     setVenuePopupPoint(null);
@@ -1145,6 +1143,12 @@ export function MapboxMap(props: MapboxMapProps) {
 
     // Wait for the camera to recenter, then pulse the icon and open the game card.
     const t = window.setTimeout(() => {
+      // Handled once it is open, not before. Marked up front, a games refetch landing
+      // inside these 650 ms — which recentering on the game itself causes — re-ran
+      // this effect, the cleanup cancelled this timer, and the early return above
+      // skipped the request for good: on a fast connection the linked game's card
+      // never opened. Now a refetch just restarts the wait.
+      lastHandledGamePopupNonceRef.current = gamePopupRequest.nonce;
       bumpGameIcon(game.id);
       setEventPopup({ game, point: mapPoint });
     }, 650);
