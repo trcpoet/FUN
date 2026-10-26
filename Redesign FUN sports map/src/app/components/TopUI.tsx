@@ -15,6 +15,7 @@ import { VenueSportMenu } from "./VenueSportMenu";
 import type { VenueSportIntent } from "../lib/venueSportIntent";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavLoading } from "../../hooks/useNavLoading";
+import { toast } from "sonner";
 import { prefetchChunk } from "../../lib/staleChunk";
 
 /** Glass morphism for map toolbar round controls (search, filter). */
@@ -142,6 +143,17 @@ function placeSubtitle(placeName: string): string | undefined {
   if (i === -1) return undefined;
   return placeName.slice(i + 1).trim() || undefined;
 }
+
+/** What each presence mode means, as `get_profiles_nearby` enforces it. */
+const VISIBILITY_COPY: Record<LocationVisibilityMode, { short: string; title: string; description: string }> = {
+  public: { short: "Public", title: "Visible to everyone", description: "Anyone on FUN can see you on the map." },
+  close_friends: {
+    short: "Squad",
+    title: "Visible to your squad",
+    description: "Only people you follow, or who follow you, can see you on the map.",
+  },
+  ghost: { short: "Ghost", title: "You're a ghost", description: "Nobody can see you on the map." },
+};
 
 const SECTION_LABEL: Record<SearchSectionId, string> = {
   places: 'Places',
@@ -529,6 +541,7 @@ export const TopNavigation = (props: TopNavigationProps) => {
                 <button
                   type="button"
                   onClick={onLiveNowToggle}
+                  aria-pressed={liveNowOpen}
                   className={cn(
                     "inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold border transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-hover)] ease-[var(--ease-out)]",
                     "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-orange-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
@@ -536,7 +549,8 @@ export const TopNavigation = (props: TopNavigationProps) => {
                       ? "border-orange-400/55 bg-orange-500/15 text-orange-200 shadow-[inset_0_0_0_1px_rgba(251,146,60,0.25)] hover:bg-orange-500/20"
                       : "border-orange-500/35 bg-transparent text-orange-300/95 hover:border-orange-400/50 hover:bg-orange-500/10",
                   )}
-                  aria-label="Live Now — highlight games happening on the map"
+                  // The count is on screen as a badge; say it too.
+                  aria-label={`Live Now — highlight games happening on the map${liveGamesCount > 0 ? `, ${liveGamesCount} live` : ""}`}
                   title="Live Now"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse shrink-0" />
@@ -556,8 +570,11 @@ export const TopNavigation = (props: TopNavigationProps) => {
               onClick={() => {
                 const modes: LocationVisibilityMode[] = ["public", "close_friends", "ghost"];
                 const currentIndex = modes.indexOf(locationVisibility);
-                const nextIndex = (currentIndex + 1) % modes.length;
-                onLocationVisibilityChange?.(modes[nextIndex]);
+                const next = modes[(currentIndex + 1) % modes.length];
+                onLocationVisibilityChange?.(next);
+                // One tap changes who can see you, silently, unless you read the chip.
+                // Say what it now means; the toast is announced to screen readers too.
+                toast(VISIBILITY_COPY[next].title, { description: VISIBILITY_COPY[next].description, id: "visibility" });
               }}
               className={cn(
                 "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95",
@@ -567,8 +584,10 @@ export const TopNavigation = (props: TopNavigationProps) => {
                     ? "border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
                     : "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20",
               )}
-              aria-label="Visibility — cycle who can see you on the map"
-              title="Click to cycle visibility"
+              // The visible "Public / Squad / Ghost" is the point of this control; the old
+              // fixed label hid it from screen readers.
+              aria-label={`Who can see you on the map: ${VISIBILITY_COPY[locationVisibility].short}. Tap to change.`}
+              title="Tap to change who can see you"
             >
               {locationVisibility === "ghost" ? (
                 <EyeOff className="size-3.5" aria-hidden />
