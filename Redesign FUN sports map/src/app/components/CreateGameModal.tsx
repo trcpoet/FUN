@@ -351,8 +351,26 @@ export function CreateGameModal({
     whenSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [errorField]);
 
+  /**
+   * One submission at a time. The button only disables once `loading` renders,
+   * and that is set after the session check: two quick taps both got through,
+   * both passed the "similar game nearby" check before either insert landed, and
+   * the host ended up with the same game twice. A ref, because state from the
+   * first tap is not visible to the second tap's closure.
+   */
+  const submittingRef = useRef(false);
+
   const handleSubmit = async () => {
-    if (createKind !== "game") return;
+    if (createKind !== "game" || submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      await submitGame();
+    } finally {
+      submittingRef.current = false;
+    }
+  };
+
+  const submitGame = async () => {
     if (!supabase || !userCoords) {
       setError("Location required. Press and hold a spot on the map.");
       setErrorField(null);
@@ -454,7 +472,16 @@ export function CreateGameModal({
   };
 
   const handleSubmitNote = async () => {
-    if (createKind !== "note") return;
+    if (createKind !== "note" || submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      await submitNote();
+    } finally {
+      submittingRef.current = false;
+    }
+  };
+
+  const submitNote = async () => {
     if (!userCoords) {
       setError("Location required. Press and hold a spot on the map.");
       setErrorField(null);

@@ -296,8 +296,9 @@ export function GameFeedCard(props: {
   onOpenOnMap?: () => void;
   onInvalidate?: () => void;
   /** Join / leave, owned by the page so the rest of the app learns about it. */
-  onJoin?: (game: GameRow) => void | Promise<void>;
-  onLeave?: (game: GameRow) => void | Promise<void>;
+  /** Resolves true once joined; see GameActionBar. */
+  onJoin?: (game: GameRow) => Promise<boolean | void> | boolean | void;
+  onLeave?: (game: GameRow) => Promise<unknown> | unknown;
   onOpenChat?: (game: GameRow) => void;
   /** Games the viewer holds a participant row for, when the page knows. */
   joinedGameIds?: Set<string>;

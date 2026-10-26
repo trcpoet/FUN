@@ -977,16 +977,19 @@ export function GameMessengerSheet({
   );
 
   const handleSend = async () => {
-    if (!focusThread || !draft.trim()) return;
+    const body = draft.trim();
+    if (!focusThread || !body) return;
     setSendError(null);
+    // Clear the composer first. Holding the text hostage until the server
+    // answers is what makes a slow connection feel broken — and clearing it
+    // before the session check, not after, means a second Enter during that
+    // check finds nothing to send, instead of sending the message twice.
+    setDraft("");
     if (ensureSession && !(await ensureSession())) {
+      setDraft(body);
       setSendError("Sign in to send messages.");
       return;
     }
-    const body = draft.trim();
-    // Clear the composer first. Holding the text hostage until the server
-    // answers is what makes a slow connection feel broken.
-    setDraft("");
     setSending(true);
     try {
       await deliver(body, newClientId());
