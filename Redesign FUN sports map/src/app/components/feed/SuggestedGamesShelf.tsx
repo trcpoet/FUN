@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Plus, Sparkles } from "lucide-react";
-import { FEED_TTL_MS, feedQueries } from "../../../lib/feedQueries";
+import { FEED_TTL_MS, SUGGESTED_RADIUS_KM, feedQueries } from "../../../lib/feedQueries";
 import { friendlyRpcError } from "../../../lib/rpcErrors";
 import { useQuery } from "../../../hooks/useCachedQuery";
 import { GameHeadline } from "../game/GameHeadline";
@@ -61,7 +61,7 @@ export function SuggestedGamesShelf(props: {
   const { lat, lng, onOpenGame } = props;
   const nowMs = useSharedNow(30_000);
   const query = useQuery(
-    lat != null && lng != null ? feedQueries.suggested(props.userId, { lat, lng }, props.radiusKm ?? 25) : null,
+    lat != null && lng != null ? feedQueries.suggested(props.userId, { lat, lng }, props.radiusKm ?? SUGGESTED_RADIUS_KM) : null,
     FEED_TTL_MS,
   );
   const rows = query.data ?? null;

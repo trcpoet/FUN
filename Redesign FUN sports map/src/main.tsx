@@ -16,9 +16,14 @@ import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import { reportError, startErrorReporting } from "./lib/errorReporting";
 import { isChunkLoadError, recoverFromStaleChunk } from "./lib/staleChunk";
+import { pruneStoredCache } from "./lib/requestCache";
 
 const sentryDsn = (import.meta.env.VITE_SENTRY_DSN || "").trim();
 if (sentryDsn) void startErrorReporting(sentryDsn);
+
+// Stored lists from an earlier build, or too old to show, are dead weight in
+// localStorage; clear them once the first screen is up.
+window.setTimeout(pruneStoredCache, 5000);
 
 const App = lazy(() => import("./app/App.tsx"));
 const ForgotPassword = lazy(() => import("./app/pages/ForgotPassword.tsx"));

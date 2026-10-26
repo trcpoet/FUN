@@ -4,6 +4,7 @@ import { getMyNotifications, markNotificationRead, subscribeToNotifications } fr
 import type { NotificationRow } from "../lib/supabase";
 import { useAuth } from "../app/contexts/AuthContext";
 import { useCachedQuery } from "./useCachedQuery";
+import { persistUnder } from "../lib/requestCache";
 
 /**
  * Notifications reach three screens — the map's bell, the feed's Alerts tab and the
@@ -17,6 +18,9 @@ const NOTIFICATIONS_TTL_MS = 30_000;
 export const NOTIFICATIONS_LIMIT = 12;
 
 const NONE: NotificationRow[] = [];
+
+// The unread badge, on the first frame of a cold start.
+persistUnder("notifications:");
 
 export function useNotifications(options?: { limit?: number; enabled?: boolean }) {
   const enabled = options?.enabled ?? true;

@@ -179,6 +179,10 @@ FUN treats performance as a feature. Key patterns:
   through `useCachedQuery` (`src/hooks/useCachedQuery.ts`): a revisit paints the cached copy on its
   first frame and refreshes behind it, so a skeleton means "nothing cached yet", never "loading
   again". A write that changes what the feed shows must call `expireFeed()` in `api.ts`
+- **Cold Starts Paint Too**: prefixes registered with `persistUnder` (feed lists, notifications,
+  your profile) are also kept in localStorage — only for the same build, at most 12 h, cleared on
+  sign-out — so reopening the app paints the last copy before the network answers. Values must
+  survive JSON, and keys must carry the user id
 - **Pause Venue Fetches When Chatting**: If the messenger is open, pause venue fetch kickoffs to prioritize chat bandwidth
 
 `venueCluster.worker.ts` is unreferenced: venue clustering is Mapbox's own, and moving the park
