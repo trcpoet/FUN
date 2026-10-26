@@ -122,7 +122,7 @@ export function PeopleSearchSheet({
         <SheetHeader className="shrink-0 space-y-3 border-b border-white/[0.08] px-4 py-3">
           <div>
             <SheetTitle className="text-left text-base text-white">Players</SheetTitle>
-            <SheetDescription className="text-left text-xs text-slate-500">
+            <SheetDescription className="text-left text-xs text-slate-400">
               Everyone you can play with. Tap anyone to see their profile.
             </SheetDescription>
           </div>
@@ -158,7 +158,7 @@ export function PeopleSearchSheet({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
           <p
-            className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500"
+            className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400"
             aria-live="polite"
           >
             {loading && rows == null ? "Loading…" : heading}
