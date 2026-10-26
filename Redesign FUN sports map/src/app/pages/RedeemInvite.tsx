@@ -52,7 +52,9 @@ export default function RedeemInvite() {
         setErrorMessage(joinResult.error.message);
         return;
       }
-      navigate(`/?game=${encodeURIComponent(gameId)}&chat=1`, { replace: true });
+      // `focusGameId` is what the map reads. This said `?game=`, which nothing read:
+      // having just joined, the person landed on a plain map with no game and no chat.
+      navigate(`/?focusGameId=${encodeURIComponent(gameId)}&chat=1`, { replace: true });
     })();
 
     return () => {

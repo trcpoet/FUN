@@ -405,13 +405,53 @@ export default function App() {
     void refetchNotes();
   }, [refetchNotes, secondaryReady]);
 
+  /**
+   * The game a `focusGameId` link names, while the map looks for it.
+   *
+   * The map only holds games near its centre, but the feed lists them up to 120 km
+   * away and an invite can be anywhere — so for a game outside the loaded area the
+   * link did nothing at all, and stayed in the URL. Now it finds where the game is
+   * and moves the map there; when that area's games arrive, the effect below runs
+   * again and opens it.
+   */
+  const focusLookupRef = useRef<string | null>(null);
+
   // Deep link from Feed → map game focus.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const gid = params.get("focusGameId");
     if (!gid) return;
     const game = games.find((g) => g.id === gid);
-    if (!game) return;
+    if (!game) {
+      if (focusLookupRef.current === gid) return;
+      focusLookupRef.current = gid;
+      const giveUp = () => {
+        const qs = new URLSearchParams(window.location.search);
+        // Found meanwhile, or the person has moved on: nothing to say.
+        if (focusLookupRef.current !== gid || window.location.pathname !== "/" || qs.get("focusGameId") !== gid) {
+          return;
+        }
+        focusLookupRef.current = null;
+        toast("That game isn't on the map anymore", { description: "It may have ended or been removed." });
+        qs.delete("focusGameId");
+        qs.delete("chat");
+        navigate({ pathname: "/", search: qs.toString() ? `?${qs.toString()}` : "" }, { replace: true });
+      };
+      void getGameLatLng(gid).then((coords) => {
+        if (focusLookupRef.current !== gid) return;
+        if (!coords) {
+          giveUp();
+          return;
+        }
+        setMapSearchLocation(coords);
+        handleCenterOnCoords(coords);
+        // Located but never loaded (ended, cancelled, not visible to you): say so
+        // rather than leave the map silently somewhere else.
+        window.setTimeout(giveUp, 12_000);
+      });
+      return;
+    }
+    focusLookupRef.current = null;
     // Ensure venues + notes fetch around the deep-linked point (otherwise the map can look empty).
     setMapSearchLocation({ lat: game.lat, lng: game.lng });
     setMapSearchLocationName(game.location_label?.trim() || null);
