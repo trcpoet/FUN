@@ -488,6 +488,14 @@ export default function App() {
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
   }, [games, location.pathname, location.search, navigate]);
 
+  /**
+   * The note a `focusNoteId` link is fetching. Without it, a note that could not be
+   * fetched (deleted, say, after its "new replies" alert went out) was fetched
+   * again on every notes refresh, and the link stayed in the URL with nothing on
+   * screen to say why.
+   */
+  const noteLookupRef = useRef<string | null>(null);
+
   // Deep link from Feed / messenger → map note focus (centers + opens dialog).
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -495,10 +503,18 @@ export default function App() {
     if (!nid) return;
     const note = mapNotes.find((n) => n.id === nid);
     if (!note) {
+      if (noteLookupRef.current === nid) return;
+      noteLookupRef.current = nid;
       // Note may be outside the current radius cache (e.g. Feed-only far note).
       // Fetch it directly so the map can fly to the creation location.
       void fetchNoteById(nid, realUserCoordsRef.current).then((r) => {
-        if (r.error || !r.data) return;
+        noteLookupRef.current = null;
+        if (r.error || !r.data) {
+          toast("That note isn't on the map anymore", { description: "Its author may have removed it." });
+          params.delete("focusNoteId");
+          navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
+          return;
+        }
         setMapNotes((prev) => (prev.some((n) => n.id === r.data!.id) ? prev : [...prev, r.data!]));
         // Ensure venues + notes fetch around the deep-linked point.
         setMapSearchLocation({ lat: r.data.lat, lng: r.data.lng });
@@ -533,6 +549,8 @@ export default function App() {
     };
     void fetchVenueById(vid).then((r) => {
       if (r.error || !r.data) {
+        // It used to strip the link and leave the map as it was, without a word.
+        toast("Couldn't open that venue", { description: "Try it again from the map." });
         strip();
         return;
       }
