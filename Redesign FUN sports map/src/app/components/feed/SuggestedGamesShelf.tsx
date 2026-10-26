@@ -144,7 +144,7 @@ export function SuggestedGamesShelf(props: {
                     {g.title?.trim() || "Pickup game"}
                   </p>
 
-                  <p className="mt-auto pt-1 text-[11px] tabular-nums text-slate-500">
+                  <p className="mt-auto pt-1 text-[11px] tabular-nums text-slate-400">
                     {spotsLabel(g)}
                     {g.distance_km != null
                       ? ` · ${g.distance_km < 1 ? `${Math.round(g.distance_km * 1000)} m` : `${g.distance_km.toFixed(1)} km`}`

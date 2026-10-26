@@ -151,7 +151,7 @@ export function ActivityFeed({ posts, pinnedFallback, onAddPost, className, user
           <button 
             type="button" 
             onClick={onAddPost} 
-            className="rounded-full bg-primary/10 px-4 py-1.5 text-[11px] font-bold text-primary hover:bg-primary hover:text-white transition-all active:scale-95"
+            className="rounded-full bg-primary/10 px-4 py-1.5 text-[11px] font-bold text-primary hover:bg-primary hover:text-primary-foreground transition-all active:scale-95"
           >
             NEW POST
           </button>

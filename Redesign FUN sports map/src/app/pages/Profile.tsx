@@ -69,7 +69,7 @@ class ProfileSettingsErrorBoundary extends React.Component<
               this.setState({ hasError: false, message: "" });
               this.props.onReset();
             }}
-            className="mt-8 inline-flex h-12 w-full items-center justify-center rounded-2xl bg-primary text-sm font-black uppercase tracking-widest text-white hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-primary/20"
+            className="mt-8 inline-flex h-12 w-full items-center justify-center rounded-2xl bg-primary text-sm font-black uppercase tracking-widest text-primary-foreground hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-primary/20"
           >
             Reset Session
           </button>

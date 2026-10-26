@@ -211,7 +211,7 @@ function TabButton(props: {
       className={cn(
         "relative flex items-center gap-2 rounded-2xl px-4 py-2 text-xs font-bold uppercase tracking-widest transition-all duration-300",
         active
-          ? "bg-primary text-white shadow-[0_8px_16px_-4px_rgba(225,29,72,0.4)] scale-105 z-10"
+          ? "bg-primary text-primary-foreground shadow-[var(--glow-md)] scale-105 z-10"
           : "bg-white/[0.03] text-muted-foreground border border-white/5 hover:bg-white/[0.08] hover:text-white"
       )}
     >
@@ -531,7 +531,7 @@ export default function Feed() {
               <button
                 type="button"
                 onClick={() => navigate("/")}
-                className="flex size-10 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-primary transition-all hover:bg-primary hover:text-white hover:scale-110 active:scale-95"
+                className="flex size-10 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-primary transition-all hover:bg-primary hover:text-primary-foreground hover:scale-110 active:scale-95"
                 aria-label="Back to map"
               >
                 <Globe className="size-5" />
@@ -572,7 +572,7 @@ export default function Feed() {
                 className={cn(
                   "relative flex size-10 items-center justify-center rounded-2xl transition-all",
                   tab === "notifications" 
-                    ? "bg-primary text-white" 
+                    ? "bg-primary text-primary-foreground" 
                     : "bg-white/[0.03] border border-white/5 text-muted-foreground hover:text-white hover:bg-white/[0.08]"
                 )}
               >
@@ -692,7 +692,7 @@ export default function Feed() {
                   </div>
                   <div className="relative flex h-full flex-col justify-between">
                     <div>
-                      <Badge className="mb-3 border-none bg-blue-500/20 text-[9px] font-black uppercase tracking-[0.2em] text-blue-500">Near you</Badge>
+                      <Badge className="mb-3 border-none bg-blue-500/20 text-[9px] font-black uppercase tracking-[0.2em] text-blue-300">Near you</Badge>
                       <h3 className="text-xl font-black italic uppercase leading-none tracking-tighter text-white">Popular<br/>Venues</h3>
                     </div>
                     <div className="flex items-center justify-between gap-2 text-xs font-bold text-muted-foreground transition-colors group-hover:text-white">
@@ -868,7 +868,7 @@ export default function Feed() {
                   type="button"
                   onClick={handleEnableDiscovery}
                   disabled={enablingDiscovery}
-                  className="rounded-2xl bg-primary px-6 py-2.5 text-xs font-bold uppercase tracking-widest text-white shadow-[0_8px_16px_-4px_rgba(225,29,72,0.4)] transition-opacity disabled:opacity-60"
+                  className="rounded-2xl bg-primary px-6 py-2.5 text-xs font-bold uppercase tracking-widest text-primary-foreground shadow-[var(--glow-md)] transition-opacity disabled:opacity-60"
                 >
                   {enablingDiscovery ? "Enabling…" : "Enable discovery"}
                 </button>

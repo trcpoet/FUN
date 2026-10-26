@@ -263,7 +263,7 @@ export default function PublicProfile() {
             <p className="text-lg font-black italic uppercase tracking-tighter">{err ?? "Profile unavailable."}</p>
             <button
               type="button"
-              className="mt-6 inline-flex h-10 items-center justify-center rounded-xl bg-primary px-6 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-primary/20"
+              className="mt-6 inline-flex h-10 items-center justify-center rounded-xl bg-primary px-6 text-xs font-black uppercase tracking-widest text-primary-foreground shadow-lg shadow-primary/20"
               onClick={() => navigate("/")}
             >
               Back to map
@@ -305,7 +305,7 @@ export default function PublicProfile() {
                   className={cn(
                     "h-12 px-8 rounded-2xl font-black uppercase tracking-widest text-[10px]",
                     followState === "none"
-                      ? "bg-primary text-white shadow-lg shadow-primary/20"
+                      ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
                       : "border-white/10 text-white"
                   )}
                   onClick={() => {
@@ -525,7 +525,7 @@ export default function PublicProfile() {
             </Button>
             <Button
               type="button"
-              className="bg-primary text-white hover:bg-primary/90 h-12 px-8 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-primary/20"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 h-12 px-8 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-primary/20"
               disabled={endorseSaving || !userId || !endorseGameId || sharedGamesLoading || sharedGames.length === 0}
               onClick={() => {
                 if (!userId || !endorseGameId) return;

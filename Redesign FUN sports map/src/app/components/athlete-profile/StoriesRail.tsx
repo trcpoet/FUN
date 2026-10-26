@@ -20,7 +20,7 @@ export function StoriesRail({ stories, className, allowCreate, onCreateStory }: 
   return (
     <div className={cn("space-y-2", className)}>
       <div className="flex items-center justify-between px-0.5">
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Stories</span>
+        <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Stories</span>
       </div>
 
       {allowCreate && onCreateStory && (

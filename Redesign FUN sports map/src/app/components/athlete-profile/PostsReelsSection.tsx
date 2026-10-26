@@ -130,7 +130,7 @@ export function PostsReelsSection({
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 py-3 rounded-[18px] transition-all duration-300",
                 hubTab === t.id 
-                  ? "bg-primary text-white shadow-lg shadow-primary/20 scale-[1.02]" 
+                  ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20 scale-[1.02]" 
                   : "text-slate-500 hover:text-white hover:bg-white/[0.05]"
               )}
             >

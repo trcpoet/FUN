@@ -51,7 +51,7 @@ export function ProfileHubHeader({
             <button
               type="button"
               onClick={onBack}
-              className="flex size-9 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-primary transition-all hover:bg-primary hover:text-white hover:scale-110 active:scale-95"
+              className="flex size-9 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-primary transition-all hover:bg-primary hover:text-primary-foreground hover:scale-110 active:scale-95"
               aria-label={backTo === "map" ? "Back to map" : "Back"}
             >
               {backTo === "map" ? <Globe className="size-5" /> : <ChevronLeft className="size-5" />}

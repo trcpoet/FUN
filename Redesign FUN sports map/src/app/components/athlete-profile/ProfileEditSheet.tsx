@@ -283,7 +283,7 @@ export function ProfileEditSheet({
                 <button
                   type="button"
                   onClick={() => setEditTab("home")}
-                  className="flex size-10 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-primary transition-all hover:bg-primary hover:text-white hover:scale-110 active:scale-95"
+                  className="flex size-10 items-center justify-center rounded-2xl bg-white/[0.03] border border-white/5 text-primary transition-all hover:bg-primary hover:text-primary-foreground hover:scale-110 active:scale-95"
                   aria-label="Back to menu"
                 >
                   <ArrowLeft className="size-5" />
@@ -353,7 +353,7 @@ export function ProfileEditSheet({
                       )}
                     </div>
                     
-                    <label htmlFor="profile-settings-avatar-file" className="absolute -bottom-1 -right-1 flex size-10 sm:size-12 cursor-pointer items-center justify-center rounded-full border-2 sm:border-4 border-[#050505] bg-primary text-white shadow-xl hover:scale-110 active:scale-95 transition-all group-hover/avatar:rotate-12">
+                    <label htmlFor="profile-settings-avatar-file" className="absolute -bottom-1 -right-1 flex size-10 sm:size-12 cursor-pointer items-center justify-center rounded-full border-2 sm:border-4 border-[#050505] bg-primary text-primary-foreground shadow-xl hover:scale-110 active:scale-95 transition-all group-hover/avatar:rotate-12">
                       <Camera className="size-4 sm:size-5" />
                     </label>
                     <input id="profile-settings-avatar-file" type="file" accept="image/*" className="sr-only" onChange={(e) => {
@@ -862,7 +862,7 @@ export function ProfileEditSheet({
                 <div className="mx-auto max-w-lg flex flex-col gap-3 pointer-events-auto">
                   <Button
                     type="button"
-                    className="h-14 w-full bg-primary text-white shadow-[0_20px_40px_-10px_rgba(225,29,72,0.4)] rounded-[32px] font-black uppercase tracking-[0.2em] italic hover:scale-[1.02] active:scale-[0.98] transition-all"
+                    className="h-14 w-full bg-primary text-primary-foreground shadow-[var(--glow-md)] rounded-[32px] font-black uppercase tracking-[0.2em] italic hover:scale-[1.02] active:scale-[0.98] transition-all"
                     disabled={saving}
                     onClick={() => void handleSave()}
                   >
