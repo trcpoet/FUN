@@ -90,7 +90,10 @@ export function useNearbyMapQueries(params: {
 
   const [games, setGames] = useState<GameRow[]>([]);
   const [profiles, setProfiles] = useState<ProfileNearbyRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  // True until the first answer: before it, an empty `games` means "not loaded
+  // yet", not "no games here" — and a deep link that read it the second way gave
+  // up on a game that was about to arrive. Every branch below settles it.
+  const [loading, setLoading] = useState(true);
   const [gamesError, setGamesError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -100,6 +103,7 @@ export function useNearbyMapQueries(params: {
     if (!supabase) {
       setGames([]);
       setProfiles([]);
+      setLoading(false);
       return;
     }
 
