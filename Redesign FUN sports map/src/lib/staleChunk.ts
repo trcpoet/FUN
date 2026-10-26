@@ -29,17 +29,21 @@ export function chunkUrlFrom(error: unknown): string | null {
   return text.match(/https?:\/\/[^\s"')]+\.(?:js|css)\b/)?.[0] ?? null;
 }
 
-/** Vercel's 404 body is 79 bytes; the smallest real file in the build is 111. */
-const SUSPECT_BODY_BYTES = 1024;
-
-type ResourceEntry = { name: string; decodedBodySize: number; responseStatus?: number };
+type ResourceEntry = { name: string; responseStatus?: number };
 
 /**
- * Hashed files that came back as errors, for engines whose message names none
- * (Safari). Resource Timing's `responseStatus` says so where it exists. Where it
- * does not, a 404 is a short line of text and a real file is not; anything under
- * a kilobyte is treated as suspect, since re-requesting a genuinely tiny file
- * costs nothing.
+ * Every hashed file this page saw fail, by Resource Timing's `responseStatus`.
+ *
+ * Not just the one the error names. An import fails if any file under it does,
+ * and the message names only the top: after a deploy, a lazy screen's shared
+ * chunks were renamed and removed along with it, and Chrome cached their 404s
+ * too. Measured: healing only the named file left a rollback stuck on "FUN was
+ * just updated" while Chrome's cache held 200 for that file and 404 for its
+ * dependencies.
+ *
+ * Engines without `responseStatus` contribute nothing, which is fine where it
+ * was checked: WebKit neither reports a failed module load here nor serves a
+ * cached 404 for it after a rollback.
  */
 export function failedAssetUrls(entries: ResourceEntry[]): string[] {
   return entries
@@ -51,8 +55,7 @@ export function failedAssetUrls(entries: ResourceEntry[]): string[] {
         return false;
       }
       if (!/^\/assets\/.+\.(?:js|css)$/.test(path)) return false;
-      if (typeof e.responseStatus === "number" && e.responseStatus > 0) return e.responseStatus >= 400;
-      return e.decodedBodySize > 0 && e.decodedBodySize < SUSPECT_BODY_BYTES;
+      return typeof e.responseStatus === "number" && e.responseStatus >= 400;
     })
     .map((e) => e.name);
 }
@@ -72,7 +75,7 @@ type Deps = {
   storage: Pick<Storage, "getItem" | "setItem"> | null;
   reload: () => void;
   refetch: (url: string) => Promise<unknown>;
-  /** Candidates to re-request when the error message names no file. */
+  /** Files this page saw fail, besides the one the error names. */
   failedAssets: () => string[];
 };
 
@@ -120,8 +123,8 @@ export function recoverFromStaleChunk(error: unknown, deps: Deps = browserDeps()
   } catch {
     return false;
   }
-  const url = chunkUrlFrom(error);
-  const urls = url ? [url] : deps.failedAssets();
+  const named = chunkUrlFrom(error);
+  const urls = [...new Set([...(named ? [named] : []), ...deps.failedAssets()])];
   const heal = Promise.all(urls.map((u) => deps.refetch(u).catch(() => undefined)));
   void heal.finally(() => deps.reload());
   return true;
