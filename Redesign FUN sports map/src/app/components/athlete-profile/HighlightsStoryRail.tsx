@@ -26,7 +26,7 @@ export function HighlightsStoryRail({ highlights, onSelect, className }: Props) 
   return (
     <div className={cn("space-y-2", className)}>
       <div className="flex items-center justify-between px-1">
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Stories</span>
+        <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Stories</span>
       </div>
       <div
         className="flex gap-4 overflow-x-auto scrollbar-hide pb-1 -mx-1 px-1 snap-x"

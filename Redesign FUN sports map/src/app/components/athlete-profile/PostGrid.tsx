@@ -42,26 +42,35 @@ export function PostGrid({ posts, onAdd, className }: Props) {
     // Someone else's empty profile: say so, rather than six "Add post" tiles
     // that cannot add anything.
     return (
-      <p className={cn("py-16 text-center text-[10px] font-black uppercase tracking-widest text-slate-500", className)}>
+      <p className={cn("py-16 text-center text-[10px] font-black uppercase tracking-widest text-slate-400", className)}>
         No posts yet
       </p>
     );
   }
 
   if (gridPosts.length === 0) {
+    // One button over the whole empty grid, not six: five of the six tiles had no
+    // text, so a screen reader met five nameless buttons in a row.
     return (
-      <div className={cn("grid gap-[2px] rounded-lg overflow-hidden bg-white/[0.06] grid-cols-2 md:grid-cols-3", className)}>
+      <button
+        type="button"
+        onClick={onAdd}
+        aria-label="Add post"
+        className={cn(
+          "group grid w-full gap-[2px] rounded-lg overflow-hidden bg-white/[0.06] grid-cols-2 md:grid-cols-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+          className,
+        )}
+      >
         {Array.from({ length: 6 }, (_, i) => i).map((i) => (
-          <button
+          <span
             key={i}
-            type="button"
-            onClick={onAdd}
-            className="aspect-square bg-white/[0.03] flex items-center justify-center text-[10px] text-slate-500 hover:bg-white/[0.06]"
+            aria-hidden
+            className="aspect-square bg-white/[0.03] flex items-center justify-center text-[10px] text-slate-400 transition-colors group-hover:bg-white/[0.06]"
           >
             {i === 0 ? "Add post" : ""}
-          </button>
+          </span>
         ))}
-      </div>
+      </button>
     );
   }
 

@@ -83,7 +83,7 @@ function GameRowButton({
           {spotsLabel(g)}
         </span>
         {g.location_label?.trim() && (
-          <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-500">
+          <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-400">
             <MapPin className="size-3 shrink-0" /> {g.location_label.trim()}
           </span>
         )}
@@ -188,7 +188,7 @@ export default function RecommendedGames() {
           <button
             type="button"
             onClick={goBack}
-            className="flex size-10 items-center justify-center rounded-2xl border border-white/5 bg-white/[0.03] text-primary transition-all hover:scale-110 hover:bg-primary hover:text-white active:scale-95"
+            className="flex size-10 items-center justify-center rounded-2xl border border-white/5 bg-white/[0.03] text-primary transition-all hover:scale-110 hover:bg-primary hover:text-primary-foreground active:scale-95"
             aria-label="Back to Explore"
           >
             <ArrowLeft className="size-5" />
@@ -258,7 +258,7 @@ export default function RecommendedGames() {
           <div className="grid gap-4">
             <Accordion title="Live" count={live.length} open={openLive} onToggle={() => setOpenLive((o) => !o)}>
               {live.length === 0 ? (
-                <p className="px-2 py-3 text-xs text-slate-500">No live games nearby right now.</p>
+                <p className="px-2 py-3 text-xs text-slate-400">No live games nearby right now.</p>
               ) : (
                 <ul className="grid gap-2">
                   {live.map((g) => (
@@ -279,7 +279,7 @@ export default function RecommendedGames() {
               onToggle={() => setOpenUpcoming((o) => !o)}
             >
               {upcoming.length === 0 ? (
-                <p className="px-2 py-3 text-xs text-slate-500">Nothing scheduled nearby yet.</p>
+                <p className="px-2 py-3 text-xs text-slate-400">Nothing scheduled nearby yet.</p>
               ) : (
                 <ul className="grid gap-2">
                   {upcoming.map((g) => (
@@ -293,7 +293,7 @@ export default function RecommendedGames() {
 
             <Accordion title="Ended" count={ended.length} open={openEnded} onToggle={() => setOpenEnded((o) => !o)}>
               {ended.length === 0 ? (
-                <p className="px-2 py-3 text-xs text-slate-500">No recently ended games.</p>
+                <p className="px-2 py-3 text-xs text-slate-400">No recently ended games.</p>
               ) : (
                 <ul className="grid gap-2">
                   {ended.map((g) => (

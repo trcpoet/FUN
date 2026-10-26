@@ -103,7 +103,7 @@ export function ProfileHubHero({
               </Avatar>
 
               {verified && (
-                <div className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 flex size-6 sm:size-8 md:size-10 items-center justify-center rounded-full bg-primary text-white shadow-[0_4px_12px_rgba(225,29,72,0.4)] ring-2 sm:ring-4 ring-[#0D1117]">
+                <div className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 flex size-6 sm:size-8 md:size-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_12px_rgba(225,29,72,0.4)] ring-2 sm:ring-4 ring-[#0D1117]">
                   <BadgeCheck className="size-3.5 sm:size-5 md:size-6" />
                 </div>
               )}
@@ -127,7 +127,7 @@ export function ProfileHubHero({
                     <div className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
                       <span className="text-[10px] sm:text-xs font-black text-amber-400">{ratingValue?.toFixed(1) || "0.0"}</span>
                       <StarRating value={ratingValue ?? 0} size={10} className="text-amber-400" />
-                      <span className="text-[9px] sm:text-[10px] font-bold text-amber-500/60 tabular-nums">({ratingN})</span>
+                      <span className="text-[9px] sm:text-[10px] font-bold text-amber-300/90 tabular-nums">({ratingN})</span>
                     </div>
 
                     {homeBase && (
@@ -169,7 +169,7 @@ export function ProfileHubHero({
                     <Button
                       variant="ghost"
                       onClick={onFollow}
-                      className="rounded-xl sm:rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all font-black uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6 group"
+                      className="rounded-xl sm:rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all font-black uppercase tracking-widest text-[9px] sm:text-[10px] h-8 sm:h-10 px-3 sm:px-6 group"
                     >
                       {followLabel} <ChevronRight className="ml-1 size-3 sm:size-3.5 group-hover:translate-x-1 transition-transform" />
                     </Button>
@@ -206,7 +206,7 @@ export function ProfileHubHero({
               </div>
               <div className="flex items-baseline gap-1">
                 <span className="text-lg sm:text-3xl font-black italic tracking-tighter text-white uppercase">{games}</span>
-                <span className="text-[8px] sm:text-[10px] font-bold text-blue-500/60 uppercase">Played</span>
+                <span className="text-[8px] sm:text-[10px] font-bold text-blue-300 uppercase">Played</span>
               </div>
             </div>
 

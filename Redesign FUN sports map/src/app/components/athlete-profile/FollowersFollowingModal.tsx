@@ -67,7 +67,7 @@ export function FollowersFollowingModal({ open, onOpenChange, userId, initialTab
               aria-pressed={tab === t}
               className={cn(
                 "flex-1 rounded-xl px-3 py-2 text-xs font-bold uppercase tracking-widest transition-colors",
-                tab === t ? "bg-primary text-white" : "bg-white/[0.03] text-slate-400 hover:text-white"
+                tab === t ? "bg-primary text-primary-foreground" : "bg-white/[0.03] text-slate-400 hover:text-white"
               )}
             >
               {t}
