@@ -29,7 +29,7 @@ export default function RedeemInvite() {
       return;
     }
     if (auth.loading) return;
-    if (!auth.user) {
+    if (!auth.user?.id) {
       const next = `/g/${encodeURIComponent(token)}`;
       navigate(`/login?redirect=${encodeURIComponent(next)}`, { replace: true });
       return;
@@ -47,7 +47,10 @@ export default function RedeemInvite() {
       setPhase("joining");
       const joinResult = await joinGame(gameId);
       if (cancelled) return;
-      if (joinResult.error) {
+      // Already on the roster — opening the link twice, or a link to a game you
+      // were in already — is where this flow was going anyway. It used to end on
+      // "Invite link couldn't be opened: Already joined this game".
+      if (joinResult.error && !/already joined/i.test(joinResult.error.message)) {
         setPhase("error");
         setErrorMessage(joinResult.error.message);
         return;
@@ -60,7 +63,10 @@ export default function RedeemInvite() {
     return () => {
       cancelled = true;
     };
-  }, [auth.loading, auth.user, navigate, token]);
+    // The user's id, not the user object: auth hands out a new object on every
+    // session event (a token refresh, a second tab), and each one restarted this
+    // flow mid-way — a second redeem and a second join.
+  }, [auth.loading, auth.user?.id, navigate, token]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 text-slate-100">
