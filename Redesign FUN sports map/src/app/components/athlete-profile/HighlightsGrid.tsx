@@ -73,7 +73,7 @@ export function HighlightsGrid({ highlights, onAdd, className, gridClassName }: 
               }
             >
               {isVideo ? (
-                <video src={thumb} className="absolute inset-0 size-full object-cover" muted playsInline loop />
+                <video src={thumb} className="absolute inset-0 size-full object-cover" muted playsInline loop preload="metadata" />
               ) : null}
               <div className="absolute inset-0 bg-black/40 group-hover:bg-black/25 transition-colors" />
               {cell.title?.trim() ? (
