@@ -423,6 +423,10 @@ export default function App() {
     if (!gid) return;
     const game = games.find((g) => g.id === gid);
     if (!game) {
+      // Not loaded *yet* is not the same as off the map: on a cold start the list
+      // is empty until the first fetch lands, and a game nearby is about to be in
+      // it. Decide only once this area's games are in.
+      if (nearbyLoading) return;
       if (focusLookupRef.current === gid) return;
       focusLookupRef.current = gid;
       const giveUp = () => {
@@ -486,7 +490,7 @@ export default function App() {
     }
     params.delete("focusGameId");
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
-  }, [games, location.pathname, location.search, navigate]);
+  }, [games, nearbyLoading, location.pathname, location.search, navigate]);
 
   /**
    * The note a `focusNoteId` link is fetching. Without it, a note that could not be
