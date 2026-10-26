@@ -70,12 +70,13 @@ export default function AccountSetup() {
       country: sections.birthdate ? draft.country : null,
       accepted: sections.consent ? acceptedDocumentsPayload() : {},
     });
-    setSubmitting(false);
     if (rpcError) {
+      setSubmitting(false);
       setError(accountSetupErrorMessage(rpcError.message));
       setBlocked(/FUN_UNDER_MIN_AGE|FUN_TEEN_SIGNUPS_CLOSED/.test(rpcError.message));
       return;
     }
+    // Still "Saving…" through the refetch; it used to flip back to "Continue" first.
     await refetchProfile();
     navigate(returnTo, { replace: true });
   }
