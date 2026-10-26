@@ -152,8 +152,8 @@ function renderGlobalNetworkItem(
     userId: string | null | undefined;
     navigate: (to: string) => void;
     refreshFeeds: () => void;
-    onJoinGame: (game: GameRow) => Promise<void>;
-    onLeaveGame: (game: GameRow) => Promise<void>;
+    onJoinGame: (game: GameRow) => Promise<boolean>;
+    onLeaveGame: (game: GameRow) => Promise<boolean>;
   },
 ): React.ReactNode {
   const { userId, navigate, refreshFeeds, onJoinGame, onLeaveGame } = ctx;
@@ -327,13 +327,14 @@ export default function Feed() {
       const { error: err, role } = await joinGame(game.id);
       if (err) {
         toast.error("Couldn't join", { description: err.message });
-        return;
+        return false;
       }
       toast.success(
         role === "substitute" ? "You're on the waitlist" : "You're in",
         { description: role === "substitute" ? "We'll tell you if a spot opens." : "The squad chat is on the map." },
       );
       refreshFeedsRef.current?.();
+      return true;
     },
     [],
   );
@@ -343,10 +344,11 @@ export default function Feed() {
       const err = await leaveGame(game.id);
       if (err) {
         toast.error("Couldn't leave", { description: err.message });
-        return;
+        return false;
       }
       toast.success("You're out");
       refreshFeedsRef.current?.();
+      return true;
     },
     [],
   );

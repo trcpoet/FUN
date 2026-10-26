@@ -15,8 +15,14 @@ export type GameActionBarProps = {
   game: GameRow;
   role: GameViewerRole;
   density: "full" | "compact";
-  onJoin?: (game: GameRow) => void;
-  onLeave?: (game: GameRow) => void;
+  /**
+   * Resolve `true` once joined (`false` when it failed) and the bar can stop
+   * offering Join before the caller's refetch lands. Anything else just ends the
+   * busy state.
+   */
+  onJoin?: (game: GameRow) => Promise<boolean | void> | boolean | void;
+  /** Resolve `true` or `null` once left, `false` or an `Error` when it failed. */
+  onLeave?: (game: GameRow) => Promise<unknown> | unknown;
   onChat?: (game: GameRow) => void;
   /**
    * Open the game's full card. `compact` only — a list row can show a name and a countdown,
@@ -57,15 +63,55 @@ export function GameActionBar({
   onStarted,
   className,
 }: GameActionBarProps) {
-  const [busy, setBusy] = useState<"start" | "end" | "delete" | "archive" | null>(null);
+  const [busy, setBusy] = useState<"join" | "leave" | "start" | "end" | "delete" | "archive" | null>(null);
+  /**
+   * Join and Leave had no busy state: the button stayed live through the request,
+   * and live again after it until the caller's refetch changed the role — so a
+   * second tap sent a second join, which came back as an error toast. These hold
+   * the result until the role catches up, the way `optimisticLive` does for Start.
+   */
+  const [optimisticJoined, setOptimisticJoined] = useState(false);
+  const [optimisticLeft, setOptimisticLeft] = useState(false);
   // Pressing Start flips the buttons before the refetch lands, so the host isn't left staring
   // at a "Start game" button for a game they just started.
   const [optimisticLive, setOptimisticLive] = useState(false);
 
   useEffect(() => {
     setOptimisticLive(false);
+    setOptimisticJoined(false);
+    setOptimisticLeft(false);
     setBusy(null);
   }, [game.id]);
+
+  // The role caught up; the optimistic flag has done its job.
+  useEffect(() => {
+    if (role.isJoined) setOptimisticJoined(false);
+    else setOptimisticLeft(false);
+  }, [role.isJoined]);
+
+  const runJoin = () => {
+    if (!onJoin || busy) return;
+    setBusy("join");
+    setOptimisticLeft(false);
+    void Promise.resolve(onJoin(game))
+      .then((joined) => {
+        if (joined === true) setOptimisticJoined(true);
+      })
+      .finally(() => setBusy(null));
+  };
+
+  const runLeave = () => {
+    if (!onLeave || busy) return;
+    setBusy("leave");
+    void Promise.resolve(onLeave(game))
+      .then((result) => {
+        if (result === true || result === null) {
+          setOptimisticLeft(true);
+          setOptimisticJoined(false);
+        }
+      })
+      .finally(() => setBusy(null));
+  };
 
   const live = role.isLive || optimisticLive;
   const canStart = role.canStart && !optimisticLive && Boolean(onStart);
@@ -73,6 +119,10 @@ export function GameActionBar({
   const canDelete = role.canDelete && Boolean(onDelete);
   const canArchive = role.canArchive && Boolean(onArchive);
   const isFull = game.spots_remaining != null && game.spots_remaining <= 0;
+  const canJoin = role.canJoin && !optimisticJoined;
+  const canLeave = role.canLeave && !optimisticLeft;
+  /** Joined, but the role does not know yet. */
+  const pendingJoined = role.canJoin && optimisticJoined;
 
   const runStart = () => {
     if (!onStart) return;
@@ -120,12 +170,14 @@ export function GameActionBar({
     return (
       <div className={className}>
         <div className="grid grid-cols-2 gap-2">
-          {role.canJoin && onJoin ? (
+          {canJoin && onJoin ? (
             <button
               type="button"
-              onClick={() => onJoin(game)}
+              onClick={runJoin}
+              disabled={busy !== null}
+              aria-busy={busy === "join"}
               className={cn(
-                "col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-lg text-white text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2",
+                "col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-lg text-white text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-60 disabled:pointer-events-none",
                 isFull
                   ? "bg-amber-600/80 hover:bg-amber-500 focus-visible:ring-amber-500/40"
                   : "bg-emerald-600 hover:bg-emerald-500 focus-visible:ring-emerald-500/40",
@@ -133,9 +185,15 @@ export function GameActionBar({
             >
               <span className="inline-flex items-center gap-2">
                 <Play className="w-4 h-4 opacity-90" aria-hidden />
-                {isFull ? "Join Waitlist" : "I'm In"}
+                {busy === "join" ? "Joining…" : isFull ? "Join Waitlist" : "I'm In"}
               </span>
             </button>
+          ) : null}
+
+          {pendingJoined ? (
+            <span className="col-span-2 inline-flex h-10 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm font-semibold">
+              {isFull ? "On Waitlist" : "You're In"}
+            </span>
           ) : null}
 
           {role.isJoined && role.isHost ? (
@@ -178,14 +236,16 @@ export function GameActionBar({
             </button>
           ) : null}
 
-          {role.canLeave ? (
+          {canLeave ? (
             onLeave ? (
               <button
                 type="button"
-                onClick={() => onLeave(game)}
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-rose-500/40 bg-rose-950/35 text-rose-100 text-sm font-semibold transition-colors hover:bg-rose-950/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/30"
+                onClick={runLeave}
+                disabled={busy !== null}
+                aria-busy={busy === "leave"}
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-rose-500/40 bg-rose-950/35 text-rose-100 text-sm font-semibold transition-colors hover:bg-rose-950/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/30 disabled:opacity-60 disabled:pointer-events-none"
               >
-                {role.isSubstitute ? "Leave Waitlist" : "I'm Out"}
+                {busy === "leave" ? "Leaving…" : role.isSubstitute ? "Leave Waitlist" : "I'm Out"}
               </button>
             ) : (
               <span className="inline-flex h-10 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm font-semibold">
@@ -229,9 +289,9 @@ export function GameActionBar({
     // row is just a mark on the screen.
     const hasViewerActions =
       Boolean(onOpenDetails) ||
-      (role.canJoin && Boolean(onJoin)) ||
+      (canJoin && Boolean(onJoin)) ||
       (role.canChat && Boolean(onChat)) ||
-      (role.canLeave && Boolean(onLeave)) ||
+      (canLeave && Boolean(onLeave)) ||
       canArchive;
     return (
       <div className={cn("flex shrink-0 items-center gap-1.5", className)}>
@@ -242,14 +302,22 @@ export function GameActionBar({
           </IconAction>
         ) : null}
 
-        {role.canJoin && onJoin ? (
+        {canJoin && onJoin ? (
           <button
             type="button"
-            onClick={() => onJoin(game)}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-amber-600/90 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-500"
+            onClick={runJoin}
+            disabled={busy !== null}
+            aria-busy={busy === "join"}
+            className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-amber-600/90 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-500 disabled:opacity-60 disabled:pointer-events-none"
           >
-            {isFull ? "Waitlist" : "Join"}
+            {busy === "join" ? "Joining…" : isFull ? "Waitlist" : "Join"}
           </button>
+        ) : null}
+
+        {pendingJoined ? (
+          <span className="inline-flex shrink-0 items-center rounded-lg bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-200">
+            {isFull ? "On waitlist" : "You're in"}
+          </span>
         ) : null}
 
         {role.canChat && onChat ? (
@@ -263,10 +331,11 @@ export function GameActionBar({
           </button>
         ) : null}
 
-        {role.canLeave && onLeave ? (
+        {canLeave && onLeave ? (
           <IconAction
             label={role.isSubstitute ? "Leave waitlist" : "Leave game"}
-            onClick={() => onLeave(game)}
+            onClick={runLeave}
+            disabled={busy !== null}
             tone="rose"
           >
             {/* Not `Square` — that is the End-game glyph, and the two sat side by side. */}

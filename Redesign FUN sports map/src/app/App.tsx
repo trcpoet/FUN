@@ -763,16 +763,18 @@ export default function App() {
     }
   };
 
-  const handleJoinGame = async (gameId: string) => {
+  /** Resolves true once joined, so the button can say so before the refetch lands. */
+  const handleJoinGame = async (gameId: string): Promise<boolean> => {
     const ok = await ensureSession("join", returnToForGame(gameId));
-    if (!ok) return;
+    if (!ok) return false;
     const result = await joinGame(gameId);
     if (result.error) {
       toast.error("Couldn't join game", { description: result.error.message });
-      return;
+      return false;
     }
     await reloadJoinedGameIds();
     refetchGames();
+    return true;
   };
 
   const handleLeaveGame = async (gameId: string): Promise<Error | null> => {
